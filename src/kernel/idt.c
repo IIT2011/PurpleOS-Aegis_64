@@ -75,10 +75,6 @@ void interrupt_dispatch(interrupt_frame_t *frame) {
         }
     }
 
-    if (isr_handlers[frame->int_no]) {
-        isr_handlers[frame->int_no](frame);
-    }
-
     /* Send EOI to legacy 8259 PIC if vector is in PIC range */
     if (frame->int_no >= 32 && frame->int_no < 48) {
         pic_send_eoi((uint8_t)(frame->int_no - 32));
@@ -87,6 +83,10 @@ void interrupt_dispatch(interrupt_frame_t *frame) {
     /* Send EOI to Local APIC if enabled */
     if (apic_is_enabled()) {
         apic_eoi();
+    }
+
+    if (isr_handlers[frame->int_no]) {
+        isr_handlers[frame->int_no](frame);
     }
 }
 
