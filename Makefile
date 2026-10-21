@@ -29,6 +29,8 @@ C_SRCS = src/kernel/main.c \
          src/drivers/font8x16.c \
          src/drivers/pit.c \
          src/drivers/keyboard.c \
+         src/drivers/mouse.c \
+         src/drivers/desktop.c \
          src/drivers/apic.c \
          src/drivers/pci.c \
          src/drivers/purple_detect.c \
