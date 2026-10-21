@@ -52,19 +52,39 @@
 static e1000_device_t e1000_dev;
 static int e1000_present = 0;
 
+#ifdef __KERNEL_HOST_TEST__
+static uint8_t mock_e1000_mmio[128 * 1024];
+#endif
+
 static inline void e1000_write32(uint32_t reg, uint32_t val) {
+#ifdef __KERNEL_HOST_TEST__
+    if (reg + 4 <= sizeof(mock_e1000_mmio)) {
+        *(uint32_t *)&mock_e1000_mmio[reg] = val;
+    }
+#else
     if (e1000_dev.mmio_base) {
         volatile uint32_t *p = (volatile uint32_t *)(uintptr_t)(e1000_dev.mmio_base + reg);
         *p = val;
     }
+#endif
 }
 
 static inline uint32_t e1000_read32(uint32_t reg) {
+#ifdef __KERNEL_HOST_TEST__
+    if (reg == REG_EERD) {
+        return (1 << 4); /* EEPROM Done bit set */
+    }
+    if (reg + 4 <= sizeof(mock_e1000_mmio)) {
+        return *(uint32_t *)&mock_e1000_mmio[reg];
+    }
+    return 0;
+#else
     if (e1000_dev.mmio_base) {
         volatile uint32_t *p = (volatile uint32_t *)(uintptr_t)(e1000_dev.mmio_base + reg);
         return *p;
     }
     return 0;
+#endif
 }
 
 static uint16_t e1000_read_eeprom(uint8_t addr) {
