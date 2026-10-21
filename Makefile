@@ -67,7 +67,7 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
@@ -76,6 +76,7 @@ test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(
 	./$(BUILD_DIR)/test_storage_gpt
 	./$(BUILD_DIR)/test_acpi
 	./$(BUILD_DIR)/test_aegis_detect
+	./$(BUILD_DIR)/test_purple_detect
 
 test-asan:
 	@mkdir -p $(BUILD_DIR)
@@ -87,6 +88,12 @@ test-asan:
 	./$(BUILD_DIR)/test_acpi_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_aegis_detect.c src/crypto/sha256.c src/security/aegis_detect.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_aegis_detect_asan
 	./$(BUILD_DIR)/test_aegis_detect_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_purple_detect.c src/drivers/purple_detect.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_purple_detect_asan
+	./$(BUILD_DIR)/test_purple_detect_asan
+
+$(BUILD_DIR)/test_purple_detect: tests/test_purple_detect.c src/drivers/purple_detect.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
 $(BUILD_DIR)/test_aegis_detect: tests/test_aegis_detect.c src/crypto/sha256.c src/security/aegis_detect.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
