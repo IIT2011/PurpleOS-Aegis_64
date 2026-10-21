@@ -21,6 +21,7 @@ int video_is_available(void);
 uint32_t video_color(uint8_t r, uint8_t g, uint8_t b);
 void video_clear(uint32_t color);
 void video_draw_pixel(uint32_t x, uint32_t y, uint32_t color);
+uint32_t video_get_pixel(uint32_t x, uint32_t y);
 void video_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 void video_putc(char c);
 void video_puts(const char *s);

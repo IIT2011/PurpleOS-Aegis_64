@@ -193,6 +193,12 @@ void video_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
     *dest = color;
 }
 
+uint32_t video_get_pixel(uint32_t x, uint32_t y) {
+    if (!fb_available || x >= fb_width || y >= fb_height) return 0;
+    const uint32_t *src = (const uint32_t *)((const uint8_t *)fb_ptr + y * fb_pitch) + x;
+    return *src;
+}
+
 void video_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
     if (!fb_available) return;
     if (x >= fb_width || y >= fb_height) return;
