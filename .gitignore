@@ -3,3 +3,8 @@ build/
 *.elf
 *.img
 *.fd
+scratch/
+tmp/
+*~
+*.swp
+checkpoints/**/source-snapshot.tar.gz
