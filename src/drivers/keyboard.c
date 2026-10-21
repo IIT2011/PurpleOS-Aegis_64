@@ -65,6 +65,7 @@ void keyboard_process_scancode(uint8_t scancode) {
     }
 }
 
+#ifndef __KERNEL_HOST_TEST__
 static void keyboard_handler(interrupt_frame_t *frame) {
     (void)frame;
     uint8_t status = inb(0x64);
@@ -80,6 +81,7 @@ static void keyboard_handler(interrupt_frame_t *frame) {
         status = inb(0x64);
     }
 }
+#endif
 
 int keyboard_has_char(void) {
     return kbd_head != kbd_tail;
@@ -100,6 +102,8 @@ void keyboard_init(void) {
     shift_pressed = 0;
     caps_lock = 0;
 
+#ifndef __KERNEL_HOST_TEST__
     register_interrupt_handler(33, keyboard_handler);
     kinfo("Keyboard: PS/2 Set-1 handler registered on IRQ 1");
+#endif
 }

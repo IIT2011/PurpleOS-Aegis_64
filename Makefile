@@ -107,11 +107,11 @@ test-asan:
 	./$(BUILD_DIR)/test_aegis_detect_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_purple_detect.c src/drivers/purple_detect.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_purple_detect_asan
 	./$(BUILD_DIR)/test_purple_detect_asan
-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_asan
 	./$(BUILD_DIR)/test_desktop_asan
-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
 	./$(BUILD_DIR)/test_apdrv_asan
-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apapp_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apapp_asan
 	./$(BUILD_DIR)/test_apapp_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_video.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_video_asan
 	./$(BUILD_DIR)/test_video_asan
@@ -138,15 +138,15 @@ $(BUILD_DIR)/test_video: tests/test_video.c src/drivers/video.c src/drivers/font
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/test_apapp: tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+$(BUILD_DIR)/test_apapp: tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/test_apdrv: tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+$(BUILD_DIR)/test_apdrv: tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/test_desktop: tests/test_desktop.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+$(BUILD_DIR)/test_desktop: tests/test_desktop.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
