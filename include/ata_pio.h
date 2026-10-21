@@ -44,8 +44,9 @@
 #define ATA_ERR_UNSUPPORTED        -5
 #define ATA_ERR_ROFS               -6
 
-/* Forward declaration */
+/* Forward declarations */
 struct ata_device;
+struct block_device;
 
 /* Port I/O Operations Table (enables mocking in host unit tests) */
 typedef struct ata_io_ops {
@@ -81,5 +82,6 @@ int ata_read_blocks_4k(ata_device_t *dev, uint32_t block_num, uint32_t block_cou
 int ata_write_sectors(ata_device_t *dev, uint64_t lba, uint32_t count, const void *buf);
 int ata_write_blocks_4k(ata_device_t *dev, uint32_t block_num, uint32_t block_count, const void *buf);
 int ata_flush_cache(ata_device_t *dev);
+int ata_bind_block_dev(ata_device_t *ata, struct block_device *out_bdev, const char *name);
 
 #endif /* ATA_PIO_H */
