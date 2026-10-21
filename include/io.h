@@ -27,6 +27,26 @@ static inline uint64_t read_cr4(void) { return 0; }
 static inline void write_cr4(uint64_t val) { (void)val; }
 static inline void invlpg(uint64_t vaddr) { (void)vaddr; }
 
+static inline void cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx) {
+    if (eax) *eax = 0;
+    if (ebx) *ebx = 0;
+    if (ecx) *ecx = 0;
+    if (edx) *edx = 0;
+}
+static inline void cpuid_subleaf(uint32_t leaf, uint32_t subleaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx) {
+    (void)subleaf;
+    if (eax) *eax = 0;
+    if (ebx) *ebx = 0;
+    if (ecx) *ecx = 0;
+    if (edx) *edx = 0;
+}
+static inline uint64_t rdmsr(uint32_t msr) { (void)msr; return 0; }
+static inline void wrmsr(uint32_t msr, uint64_t val) { (void)msr; (void)val; }
+static inline void pause(void) {}
+static inline void mfence(void) {}
+static inline uint64_t read_rflags(void) { return 0; }
+static inline void write_rflags(uint64_t rflags) { (void)rflags; }
+
 #else
 
 static inline void outb(uint16_t port, uint8_t val) {
