@@ -579,6 +579,95 @@ static int test_rejection_of_invalid_partition_no_format(void) {
     return 1;
 }
 
+static int test_ata_sector_writes_and_flush(void) {
+    mock_reset();
+    ata_device_t dev;
+    ata_device_init(&dev, ATA_CHANNEL_PRIMARY, ATA_DRIVE_MASTER, &g_mock_ops);
+    if (ata_identify(&dev) != ATA_OK) return 0;
+
+    // Test writing 2 sectors to LBA 100
+    uint8_t write_buf[1024];
+    for (int i = 0; i < 1024; i++) write_buf[i] = (uint8_t)(i ^ 0x5A);
+
+    int rc = ata_write_sectors(&dev, 100, 2, write_buf);
+    if (rc != ATA_OK) return 0;
+
+    // Check mock disk directly
+    if (memcmp(g_mock_disk[100], write_buf, 512) != 0) return 0;
+    if (memcmp(g_mock_disk[101], write_buf + 512, 512) != 0) return 0;
+
+    // Read back via ata_read_sectors
+    uint8_t read_back[1024];
+    memset(read_back, 0, sizeof(read_back));
+    if (ata_read_sectors(&dev, 100, 2, read_back) != ATA_OK) return 0;
+    if (memcmp(read_back, write_buf, 1024) != 0) return 0;
+
+    // Test 4K block write to block 15 (LBA 120..127)
+    uint8_t block4k[4096];
+    for (int i = 0; i < 4096; i++) block4k[i] = (uint8_t)((i * 7) & 0xFF);
+    if (ata_write_blocks_4k(&dev, 15, 1, block4k) != ATA_OK) return 0;
+
+    uint8_t block4k_read[4096];
+    if (ata_read_blocks_4k(&dev, 15, 1, block4k_read) != ATA_OK) return 0;
+    if (memcmp(block4k_read, block4k, 4096) != 0) return 0;
+
+    // Out of bounds write rejection
+    if (ata_write_sectors(&dev, MOCK_DISK_SECTORS, 1, write_buf) != ATA_ERR_RANGE) return 0;
+    if (ata_write_sectors(&dev, MOCK_DISK_SECTORS - 1, 2, write_buf) != ATA_ERR_RANGE) return 0;
+
+    // Cache flush check
+    if (ata_flush_cache(&dev) != ATA_OK) return 0;
+
+    return 1;
+}
+
+static int test_partition_dev_writable_operations(void) {
+    mock_reset();
+    setup_valid_gpt_disk(2048, 2048 + 1024 * 8 - 1, &GPT_GUID_PURPLEFS_V2);
+
+    ata_device_t dev;
+    ata_device_init(&dev, ATA_CHANNEL_PRIMARY, ATA_DRIVE_MASTER, &g_mock_ops);
+    ata_identify(&dev);
+
+    gpt_info_t gpt;
+    gpt_parse(&dev, &gpt);
+
+    partition_dev_t pdev;
+    partition_dev_init(&pdev, &dev, &gpt.partitions[0]);
+
+    // Initially read-only
+    if (partition_dev_is_writable(&pdev) != 0) return 0;
+
+    uint8_t blk[4096];
+    memset(blk, 0xAA, sizeof(blk));
+    if (pdev.base.write_block(&pdev.base, 0, blk) != PART_DEV_ERR_ROFS) return 0;
+
+    // Set writable
+    partition_dev_set_writable(&pdev, 1);
+    if (partition_dev_is_writable(&pdev) != 1) return 0;
+
+    // Now write block 5
+    memset(blk, 0x77, sizeof(blk));
+    if (pdev.base.write_block(&pdev.base, 5, blk) != PART_DEV_OK) return 0;
+
+    // Read back block 5
+    uint8_t read_blk[4096];
+    if (pdev.base.read_block(&pdev.base, 5, read_blk) != PART_DEV_OK) return 0;
+    if (memcmp(read_blk, blk, 4096) != 0) return 0;
+
+    // Out of bounds block write rejection
+    if (pdev.base.write_block(&pdev.base, pdev.base.block_count, blk) != PART_DEV_ERR_BOUNDS) return 0;
+
+    // Flush
+    if (pdev.base.flush(&pdev.base) != PART_DEV_OK) return 0;
+
+    // Disable writable again
+    partition_dev_set_writable(&pdev, 0);
+    if (pdev.base.write_block(&pdev.base, 5, blk) != PART_DEV_ERR_ROFS) return 0;
+
+    return 1;
+}
+
 int main(void) {
     printf("=====================================================\n");
     printf(" Running Storage, ATA & GPT Unit Test Suite          \n");
@@ -588,10 +677,12 @@ int main(void) {
     RUN_TEST(test_ata_absent_and_atapi);
     RUN_TEST(test_ata_timeout_and_error);
     RUN_TEST(test_ata_sector_reads_and_bounds);
+    RUN_TEST(test_ata_sector_writes_and_flush);
     RUN_TEST(test_gpt_parsing_valid);
     RUN_TEST(test_gpt_invalid_signature_and_crc);
     RUN_TEST(test_gpt_invalid_bounds_and_overlap);
     RUN_TEST(test_partition_dev_boundary_and_overflow);
+    RUN_TEST(test_partition_dev_writable_operations);
     RUN_TEST(test_purplefs_mount_through_partition_adapter);
     RUN_TEST(test_rejection_of_invalid_partition_no_format);
 
