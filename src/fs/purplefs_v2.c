@@ -1,6 +1,5 @@
 #include "purplefs_v2.h"
 #include "string.h"
-#include "serial.h"
 
 /* 16-byte PurpleFS v2 signature: "PURPLEFS\0PFS2\0\0\0" */
 const uint8_t PFS2_SIGNATURE[16] = {
@@ -309,16 +308,12 @@ int pfs2_format(pfs2_block_dev_t *dev, uint32_t total_blocks, const char *label)
 }
 
 int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
-    extern uint64_t boot_pd_3[];
-    if (boot_pd_3[503] == 0) kerror("PFS2_MOUNT: wiped at entry!");
     if (!fs || !dev) return PFS2_ERR_INVALID;
     memset(fs, 0, sizeof(*fs));
-    if (boot_pd_3[503] == 0) kerror("PFS2_MOUNT: wiped after memset(fs)!");
     fs->dev = dev;
 
     uint8_t sb_block[PFS2_BLOCK_SIZE];
     if (dev->read_block(dev, 0, sb_block) != 0) return PFS2_ERR_IO;
-    if (boot_pd_3[503] == 0) kerror("PFS2_MOUNT: wiped after read_block(sb)!");
 
     memcpy(&fs->sb, sb_block, sizeof(pfs2_superblock_t));
 
@@ -350,18 +345,15 @@ int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
     if (dev->read_block(dev, fs->sb.bitmap_start_block, fs->bitmap) != 0) {
         return PFS2_ERR_IO;
     }
-    if (boot_pd_3[503] == 0) kerror("PFS2_MOUNT: wiped after read_block(bitmap)!");
 
     // Replay journal if interrupted commit exists
     int replay_res = pfs2_journal_replay_if_needed(fs);
-    if (boot_pd_3[503] == 0) kerror("PFS2_MOUNT: wiped after replay_if_needed!");
     if (replay_res != PFS2_OK) {
         return replay_res;
     }
 
     // Read updated bitmap after potential journal replay
     dev->read_block(dev, fs->sb.bitmap_start_block, fs->bitmap);
-    if (boot_pd_3[503] == 0) kerror("PFS2_MOUNT: wiped after 2nd read_block(bitmap)!");
 
     // Update superblock mount metadata if device is writable
     if (dev->write_block) {
@@ -370,7 +362,6 @@ int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
         fs->sb.checksum = pfs2_crc32(&fs->sb, 0x80);
         memcpy(sb_block, &fs->sb, sizeof(fs->sb));
         int wrc = dev->write_block(dev, 0, sb_block);
-        if (boot_pd_3[503] == 0) kerror("PFS2_MOUNT: wiped after write_block(sb)!");
         if (wrc == 0) {
             dev->flush(dev);
         } else {
