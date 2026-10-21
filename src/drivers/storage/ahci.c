@@ -7,6 +7,13 @@ static ahci_controller_t g_ahci_ctrl;
 static uint32_t g_active_port_count = 0;
 static ahci_port_t *g_active_ports[AHCI_MAX_PORTS];
 
+#ifdef __KERNEL_HOST_TEST__
+static void (*s_ahci_cmd_hook)(ahci_port_t *port) = NULL;
+void ahci_set_command_hook(void (*hook)(ahci_port_t *port)) {
+    s_ahci_cmd_hook = hook;
+}
+#endif
+
 static int ahci_bdev_read(block_device_t *bdev, uint64_t lba, uint32_t count, void *buf) {
     ahci_port_t *port = (ahci_port_t *)bdev->priv;
     return ahci_read_sectors(port, lba, count, buf) == 0 ? BLOCK_DEV_OK : BLOCK_DEV_ERR_IO;
@@ -113,6 +120,12 @@ static int ahci_issue_command_slot0(ahci_port_t *port) {
     // Issue slot 0
     port->regs->ci = (1U << 0);
 
+#ifdef __KERNEL_HOST_TEST__
+    if (s_ahci_cmd_hook) {
+        s_ahci_cmd_hook(port);
+    }
+#endif
+
     // Bounded spin poll for completion
     for (uint32_t spin = 0; spin < 1000000; spin++) {
         if ((port->regs->ci & (1U << 0)) == 0) {
@@ -204,7 +217,18 @@ int ahci_identify(ahci_port_t *port) {
 
     // Register with block device layer
     memset(&port->bdev, 0, sizeof(port->bdev));
-    snprintf(port->bdev.name, sizeof(port->bdev.name), "sata%u", port->port_num);
+    port->bdev.name[0] = 's';
+    port->bdev.name[1] = 'a';
+    port->bdev.name[2] = 't';
+    port->bdev.name[3] = 'a';
+    if (port->port_num < 10) {
+        port->bdev.name[4] = '0' + port->port_num;
+        port->bdev.name[5] = '\0';
+    } else {
+        port->bdev.name[4] = '0' + (port->port_num / 10);
+        port->bdev.name[5] = '0' + (port->port_num % 10);
+        port->bdev.name[6] = '\0';
+    }
     strncpy(port->bdev.model, port->model, sizeof(port->bdev.model) - 1);
     strncpy(port->bdev.serial, port->serial, sizeof(port->bdev.serial) - 1);
     port->bdev.type = BLOCK_DEV_TYPE_AHCI;

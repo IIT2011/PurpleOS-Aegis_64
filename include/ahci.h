@@ -178,4 +178,8 @@ int  ahci_flush(ahci_port_t *port);
 uint32_t ahci_get_active_port_count(void);
 ahci_port_t *ahci_get_port(uint32_t index);
 
+#ifdef __KERNEL_HOST_TEST__
+void ahci_set_command_hook(void (*hook)(ahci_port_t *port));
+#endif
+
 #endif /* AHCI_H */
