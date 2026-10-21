@@ -80,11 +80,13 @@ typedef struct apapp_instance {
     uint32_t         memory_size;
 } apapp_instance_t;
 
+typedef void (*app_entry_fn)(void *arg);
+
 int apapp_subsystem_init(void);
 int apapp_parse_manifest(const void *data, uint32_t size, apapp_manifest_t *out_manifest);
 int apapp_verify_security(const apapp_manifest_t *manifest, const void *payload, uint32_t payload_len);
-int apapp_launch(const apapp_manifest_t *manifest, const void *payload, uint32_t payload_len, task_entry_t entry, apapp_instance_t **out_instance);
-int apapp_launch_from_storage(const char *bundle_path, task_entry_t fallback_entry);
+int apapp_launch(const apapp_manifest_t *manifest, const void *payload, uint32_t payload_len, app_entry_fn entry, apapp_instance_t **out_instance);
+int apapp_launch_from_storage(const char *bundle_path, app_entry_fn fallback_entry);
 int apapp_terminate(const char *app_id);
 uint32_t apapp_get_count(void);
 const apapp_instance_t *apapp_get_instance(uint32_t index);

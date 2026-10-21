@@ -118,7 +118,7 @@ int apapp_verify_security(const apapp_manifest_t *manifest, const void *payload,
 int apapp_launch(const apapp_manifest_t *manifest,
                  const void *payload,
                  uint32_t payload_len,
-                 task_entry_t entry,
+                 app_entry_fn entry,
                  apapp_instance_t **out_instance) {
     if (!manifest) return APAPP_ERR_INVALID;
 
@@ -154,7 +154,7 @@ int apapp_launch(const apapp_manifest_t *manifest,
 #ifndef __KERNEL_HOST_TEST__
     if (entry) {
         uint32_t prio = manifest->default_priority ? manifest->default_priority : 2;
-        task_t *t = task_create(manifest->app_id, entry, prio, 0xFFFFFFFF);
+        task_t *t = task_create(manifest->app_id, entry, NULL, (task_priority_t)prio);
         if (t) {
             tid = t->id;
         }
@@ -215,7 +215,7 @@ int apapp_terminate(const char *app_id) {
 }
 
 #ifndef __KERNEL_HOST_TEST__
-int apapp_launch_from_storage(const char *bundle_path, task_entry_t fallback_entry) {
+int apapp_launch_from_storage(const char *bundle_path, app_entry_fn fallback_entry) {
     if (!bundle_path) return APAPP_ERR_INVALID;
     if (!storage_is_fs_mounted()) {
         kerror("APAPP: Cannot load '%s' - No PurpleFS volume mounted", bundle_path);
@@ -271,7 +271,7 @@ int apapp_launch_from_storage(const char *bundle_path, task_entry_t fallback_ent
     return lrc;
 }
 #else
-int apapp_launch_from_storage(const char *bundle_path, task_entry_t fallback_entry) {
+int apapp_launch_from_storage(const char *bundle_path, app_entry_fn fallback_entry) {
     (void)bundle_path;
     (void)fallback_entry;
     return APAPP_OK;
