@@ -123,7 +123,6 @@ int partition_dev_init_bdev(partition_dev_t *pdev, block_device_t *bdev, const g
     pdev->read_only = 1;
 
     pdev->base.block_count = (uint32_t)total_blocks;
-    pdev->base.block_size = PFS2_BLOCK_SIZE;
     pdev->base.read_block = part_read_block;
     pdev->base.write_block = part_write_block;
     pdev->base.flush = part_flush;
