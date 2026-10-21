@@ -342,9 +342,8 @@ static void execute_command(int argc, char **argv) {
             name[0] = 's'; name[1] = 'm'; name[2] = 'p'; name[3] = '_';
             name[4] = 'c'; name[5] = 'p'; name[6] = 'u'; name[7] = '0' + (char)i;
             name[8] = '\0';
-            task_t *t = task_create(name, smp_worker_func, (void *)(uintptr_t)i, PRIORITY_NORMAL);
+            task_t *t = task_create_affined(name, smp_worker_func, (void *)(uintptr_t)i, PRIORITY_NORMAL, 1ULL << i);
             if (t) {
-                task_set_affinity(t, 1ULL << i);
                 kprintf("  Spawned '%s' (Task ID %u) bound to CPU #%u\n", name, t->id, i);
             }
         }

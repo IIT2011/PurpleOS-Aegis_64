@@ -106,6 +106,37 @@ static int test_scheduler_kill(void) {
     return 1;
 }
 
+static int test_scheduler_affinity(void) {
+    task_t *t = task_create("AffTest", dummy_task_entry, NULL, PRIORITY_NORMAL);
+    if (!t) return 0;
+
+    /* Default affinity must be ~0ULL (any CPU) */
+    if (task_get_affinity(t) != ~0ULL) return 0;
+
+    /* Set affinity to CPU 2 */
+    task_set_affinity(t, 1ULL << 2);
+    if (task_get_affinity(t) != (1ULL << 2)) return 0;
+
+    /* Reject zero mask */
+    task_set_affinity(t, 0);
+    if (task_get_affinity(t) != (1ULL << 2)) return 0;
+
+    task_kill(t->id);
+    return 1;
+}
+
+static int test_scheduler_create_affined(void) {
+    task_t *t = task_create_affined("Core1Task", dummy_task_entry, NULL, PRIORITY_HIGH, 1ULL << 1);
+    if (!t) return 0;
+
+    if (t->cpu_affinity != (1ULL << 1)) return 0;
+    if (task_get_affinity(t) != (1ULL << 1)) return 0;
+    if (t->priority != PRIORITY_HIGH) return 0;
+
+    task_kill(t->id);
+    return 1;
+}
+
 int main(void) {
     printf("========================================\n");
     printf(" Running AegisSched_64 Unit Tests\n");
@@ -117,6 +148,8 @@ int main(void) {
     RUN_TEST(test_scheduler_task_create);
     RUN_TEST(test_scheduler_priority_slices);
     RUN_TEST(test_scheduler_kill);
+    RUN_TEST(test_scheduler_affinity);
+    RUN_TEST(test_scheduler_create_affined);
 
     printf("========================================\n");
     printf(" Scheduler Tests: %d/%d passed\n", tests_passed, tests_run);
