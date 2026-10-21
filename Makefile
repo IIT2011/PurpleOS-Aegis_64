@@ -33,7 +33,7 @@ OBJS = $(patsubst src/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS)) \
 KERNEL64_ELF = $(BUILD_DIR)/kernel64.elf
 KERNEL32_ELF = $(BUILD_DIR)/kernel.elf
 
-.PHONY: all clean test check check-scheduler-qemu run-qemu run-uefi
+.PHONY: all clean test test-asan check check-scheduler-qemu run-qemu run-uefi
 
 all: $(KERNEL32_ELF) $(KERNEL64_ELF)
 
@@ -53,11 +53,21 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
 	./$(BUILD_DIR)/test_scheduler
+	./$(BUILD_DIR)/test_purplefs_v2
+
+test-asan:
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_purplefs_v2.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c -o $(BUILD_DIR)/test_purplefs_v2_asan
+	./$(BUILD_DIR)/test_purplefs_v2_asan
+
+$(BUILD_DIR)/test_purplefs_v2: tests/test_purplefs_v2.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -Wall -Wextra -Iinclude $^ -o $@
 
 $(BUILD_DIR)/test_pmm: tests/test_pmm.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
