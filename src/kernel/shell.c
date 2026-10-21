@@ -8,6 +8,7 @@
 #include "task.h"
 #include "pit.h"
 #include "io.h"
+#include "kernel_storage.h"
 
 #define SHELL_INPUT_BUFFER_LEN 256
 #define MAX_ARGS 16
@@ -53,24 +54,176 @@ static void test_task_worker(void *arg) {
     kinfo("TaskWorker [%s]: finished execution", name);
 }
 
+static void cmd_list_files(void) {
+    if (!storage_is_fs_mounted()) {
+        shell_print("Error: No PurpleFS volume mounted. Check 'disk status'.\n");
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    pfs2_inode_t root_ino;
+    if (pfs2_read_inode(fs, PFS2_ROOT_INODE, &root_ino) != PFS2_OK) {
+        shell_print("Error: Failed to read root directory inode.\n");
+        return;
+    }
+
+    shell_print("\nDirectory Listing of / (PurpleFS v2 Root):\n");
+    shell_print("  INODE   TYPE    SIZE (BYTES)  NAME\n");
+    shell_print("  -----------------------------------------\n");
+
+    uint32_t dir_block = root_ino.direct_blocks[0];
+    uint8_t dir_buf[PFS2_BLOCK_SIZE];
+    if (fs->dev->read_block(fs->dev, dir_block, dir_buf) != 0) {
+        shell_print("Error: Failed to read directory data block.\n");
+        return;
+    }
+
+    uint32_t count = 0;
+    pfs2_dir_entry_t *de = (pfs2_dir_entry_t *)dir_buf;
+    uint32_t max_entries = PFS2_BLOCK_SIZE / sizeof(pfs2_dir_entry_t);
+
+    for (uint32_t i = 0; i < max_entries; i++) {
+        if (de[i].inode != 0) {
+            count++;
+            pfs2_inode_t file_ino;
+            uint64_t size = 0;
+            if (pfs2_read_inode(fs, de[i].inode, &file_ino) == PFS2_OK) {
+                size = file_ino.size_bytes;
+            }
+            kprintf("  %5u   %s   %10u   %s\n",
+                    de[i].inode,
+                    (de[i].file_type == 2 ? "<DIR> " : "<FILE>"),
+                    (uint32_t)size,
+                    de[i].name);
+        }
+    }
+    shell_print("  -----------------------------------------\n");
+    kprintf("  Total: %u file(s)\n\n", count);
+}
+
+static void cmd_peek_file(const char *name) {
+    if (!name || name[0] == '\0') {
+        shell_print("Usage: peek <filename>\n");
+        return;
+    }
+    if (!storage_is_fs_mounted()) {
+        shell_print("Error: No PurpleFS volume mounted.\n");
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    uint32_t ino = 0;
+    if (pfs2_lookup(fs, name, &ino) != PFS2_OK) {
+        kprintf("Error: File '%s' not found.\n", name);
+        return;
+    }
+
+    pfs2_inode_t file_ino;
+    if (pfs2_read_inode(fs, ino, &file_ino) != PFS2_OK) {
+        kprintf("Error: Failed to read inode for '%s'.\n", name);
+        return;
+    }
+
+    size_t to_read = (file_ino.size_bytes > 512) ? 512 : (size_t)file_ino.size_bytes;
+    char buf[513];
+    memset(buf, 0, sizeof(buf));
+    size_t bytes_read = 0;
+    if (to_read > 0) {
+        int rc = pfs2_read_file(fs, ino, buf, to_read, 0, &bytes_read);
+        if (rc != PFS2_OK) {
+            kprintf("Error: Read failed on file '%s' (code %d).\n", name, rc);
+            return;
+        }
+    }
+    buf[bytes_read] = '\0';
+
+    kprintf("\n=== File: %s (%u bytes", name, (uint32_t)file_ino.size_bytes);
+    if (file_ino.size_bytes > 512) {
+        shell_print(", preview limited to 512 bytes");
+    }
+    shell_print(") ===\n");
+    shell_print(buf);
+    shell_print("\n=== End of File Preview ===\n\n");
+}
+
+static void cmd_disk_status(void) {
+    shell_print("\n=== ATA Storage Devices & GPT Partition Status ===\n");
+    const char *names[4] = { "Primary Master", "Primary Slave", "Secondary Master", "Secondary Slave" };
+
+    int found_any = 0;
+    for (int i = 0; i < 4; i++) {
+        ata_device_t *dev = &g_kernel_storage.devices[i];
+        if (dev->is_present) {
+            found_any++;
+            uint32_t size_mib = (uint32_t)(dev->total_sectors * 512 / (1024 * 1024));
+            kprintf("[%d] Channel: %-16s Model: %-24s Sectors: %u (%u MiB)\n",
+                    i, names[i], dev->model, (uint32_t)dev->total_sectors, size_mib);
+
+            gpt_info_t *gpt = &g_kernel_storage.gpt[i];
+            if (gpt->valid_header && gpt->partition_count > 0) {
+                kprintf("    GPT: Valid (Protective MBR: %s, Partitions: %u)\n",
+                        gpt->valid_protective_mbr ? "Yes" : "No", gpt->partition_count);
+                for (uint32_t p = 0; p < gpt->partition_count; p++) {
+                    const gpt_partition_t *part = &gpt->partitions[p];
+                    uint32_t part_mib = (uint32_t)(part->sector_count * 512 / (1024 * 1024));
+                    kprintf("    -> Part %u: %-16s LBA: %u..%u (%u sectors, %u MiB) %s\n",
+                            p, part->name, (uint32_t)part->start_lba, (uint32_t)part->end_lba,
+                            (uint32_t)part->sector_count, part_mib,
+                            part->is_purplefs ? "[PurpleFS v2]" : "");
+                }
+            } else {
+                shell_print("    GPT: None / Unpartitioned\n");
+            }
+        }
+    }
+    if (!found_any) {
+        shell_print("No ATA storage devices detected.\n");
+    }
+    shell_print("\n");
+}
+
+static void cmd_filesystem_status(void) {
+    shell_print("\n=== PurpleFS v2 Filesystem Status ===\n");
+    if (!storage_is_fs_mounted()) {
+        shell_print("  Mount State:   UNMOUNTED (No valid PurpleFS volume)\n\n");
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    uint32_t total_kib = fs->sb.total_blocks * (fs->sb.block_size / 1024);
+    uint32_t free_kib  = fs->sb.free_blocks * (fs->sb.block_size / 1024);
+    uint32_t used_kib  = total_kib - free_kib;
+
+    kprintf("  Mount State:   MOUNTED (Read-Only Kernel Mode)\n");
+    kprintf("  Volume Label:  %s\n", fs->sb.volume_label);
+    kprintf("  Block Size:    %u bytes\n", fs->sb.block_size);
+    kprintf("  Total Blocks:  %u (%u KiB / %u MiB)\n", fs->sb.total_blocks, total_kib, total_kib / 1024);
+    kprintf("  Used Blocks:   %u (%u KiB / %u MiB)\n", fs->sb.total_blocks - fs->sb.free_blocks, used_kib, used_kib / 1024);
+    kprintf("  Free Blocks:   %u (%u KiB / %u MiB)\n", fs->sb.free_blocks, free_kib, free_kib / 1024);
+    kprintf("  Total Inodes:  %u\n", fs->sb.total_inodes);
+    kprintf("  Free Inodes:   %u\n", fs->sb.free_inodes);
+    kprintf("  Journal Start: Block %u (8 blocks reserved)\n\n", fs->sb.journal_start_block);
+}
+
 static void execute_command(int argc, char **argv) {
     if (argc == 0) return;
 
     if (strcmp(argv[0], "help") == 0) {
         shell_print("\n=== AegisShell / Purple Shell Commands ===\n");
-        shell_print("  help           - Show available shell commands\n");
-        shell_print("  sysinfo        - Display OS version and architectural parameters\n");
-        shell_print("  cpuinfo        - Display CPU long-mode features\n");
-        shell_print("  mem            - Display physical and virtual memory statistics\n");
-        shell_print("  uptime         - Display system uptime and PIT timer ticks\n");
-        shell_print("  tasks / ps     - Display task table and AegisSched_64 states\n");
-        shell_print("  task spawn <n> - Spawn a test background task with given name\n");
-        shell_print("  task kill <id> - Terminate a running task by ID\n");
-        shell_print("  task test      - Run automated multi-task preemption test\n");
-        shell_print("  clear          - Clear terminal screen\n");
-        shell_print("  echo <text>    - Display text arguments\n");
-        shell_print("  reboot/restart - Perform ACPI/controller system reboot\n");
-        shell_print("  panic          - Trigger intentional kernel panic for diagnostics\n\n");
+        shell_print("  help              - Show available shell commands\n");
+        shell_print("  sysinfo           - Display OS version and architectural parameters\n");
+        shell_print("  cpuinfo           - Display CPU long-mode features\n");
+        shell_print("  mem               - Display physical and virtual memory statistics\n");
+        shell_print("  uptime            - Display system uptime and PIT timer ticks\n");
+        shell_print("  tasks / ps        - Display task table and AegisSched_64 states\n");
+        shell_print("  task spawn <n>    - Spawn a test background task with given name\n");
+        shell_print("  task kill <id>    - Terminate a running task by ID\n");
+        shell_print("  task test         - Run automated multi-task preemption test\n");
+        shell_print("  list files / ls   - List files in root directory of mounted PurpleFS\n");
+        shell_print("  peek <name> / cat - Display bounded file content preview\n");
+        shell_print("  disk status       - Report detected ATA storage and GPT partitions\n");
+        shell_print("  filesystem status - Report PurpleFS mount state and space metrics\n");
+        shell_print("  clear             - Clear terminal screen\n");
+        shell_print("  echo <text>       - Display text arguments\n");
+        shell_print("  reboot/restart    - Perform ACPI/controller system reboot\n");
+        shell_print("  panic             - Trigger intentional kernel panic for diagnostics\n\n");
     } else if (strcmp(argv[0], "sysinfo") == 0) {
         shell_print("\nPurple OS (Aegis64 Kernel)\n");
         shell_print("  Architecture: x86-64 (AMD64 Long Mode)\n");
@@ -122,6 +275,21 @@ static void execute_command(int argc, char **argv) {
         } else {
             shell_print("Usage: task spawn <name> | task kill <id> | task test\n");
         }
+    } else if ((strcmp(argv[0], "list") == 0 && argc >= 2 && strcmp(argv[1], "files") == 0) ||
+               strcmp(argv[0], "ls") == 0) {
+        cmd_list_files();
+    } else if (strcmp(argv[0], "peek") == 0 || strcmp(argv[0], "cat") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: peek <filename>\n");
+        } else {
+            cmd_peek_file(argv[1]);
+        }
+    } else if ((strcmp(argv[0], "disk") == 0 && argc >= 2 && strcmp(argv[1], "status") == 0) ||
+               strcmp(argv[0], "disks") == 0) {
+        cmd_disk_status();
+    } else if ((strcmp(argv[0], "filesystem") == 0 && argc >= 2 && strcmp(argv[1], "status") == 0) ||
+               strcmp(argv[0], "df") == 0) {
+        cmd_filesystem_status();
     } else if (strcmp(argv[0], "clear") == 0) {
         if (video_is_available()) {
             video_clear(COLOR_PURPLE_BG);

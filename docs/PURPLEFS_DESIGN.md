@@ -152,6 +152,24 @@ The Redo Journal occupies the final **8 blocks** of the partition: `[total_block
    - Set `journal_state = PFS2_JOURNAL_STATE_APPLIED`, write header, and flush.
 4. If `journal_state == PFS2_JOURNAL_STATE_EMPTY` or `PFS2_JOURNAL_STATE_APPLIED`: No action needed.
 
+### 5.5 Journal Correctness & Failure Scenario Matrix
+
+The table below documents recovery behavior across all potential crash and storage failure points:
+
+| Scenario / Point of Failure | On-Disk State at Crash | Recovery Mechanism | Safety & Durability Guarantee |
+|---|---|---|---|
+| **Crash during journal staging / after-image write** | Journal data blocks partially written; header block remains in previous state (`EMPTY` or `APPLIED`). | Header inspection during mount observes `state != COMMITTED`. | **No-op.** Uncommitted after-images are ignored. Filesystem on disk remains in its prior consistent state. |
+| **Crash during journal header write (Torn Write)** | Block `journal_start` partially written or torn across 512-byte physical sectors. | `header_crc` verification fails, or `magic != PFS2_JOURNAL_MAGIC`. | **Fail-Safe Abort.** Mount detects header corruption and returns `PFS2_ERR_CORRUPT`/`PFS2_ERR_JOURNAL` without issuing any writes. Requires filesystem check. |
+| **Corrupted header CRC** | Journal header modified on disk or bit rot occurred in transaction header. | `j_hdr->header_crc != expected_crc`. | **Fail-Safe Abort.** Mount returns `PFS2_ERR_CORRUPT`. No in-place writes are replayed. |
+| **Corrupted after-images** | Header is valid `COMMITTED`, but after-image payload block has bit rot or was torn. | `pfs2_crc32(ai_buf[i]) != after_image_crcs[i]`. | **Fail-Safe Abort.** Mount detects checksum mismatch across after-images and aborts with `PFS2_ERR_CORRUPT` before overwriting any target blocks. |
+| **Crash after commit flush, before in-place writes** | Header is `COMMITTED`, after-images verified, in-place blocks not yet updated. | Replay validates CRCs and writes all after-images in-place, then transitions state to `APPLIED`. | **Full Recovery.** Transaction is guaranteed durable and applied idempotently. |
+| **Crash during in-place writes** | Header is `COMMITTED`; some target blocks written, some not written. | Next mount sees `COMMITTED` state, re-verifies all after-images, and re-writes all target blocks. | **Full Recovery.** Replay is idempotent; repeated application restores exact target blocks. |
+| **Crash during apply transition / cleanup write** | Target blocks fully written in-place; write to mark header `APPLIED` interrupted. | If header intact: replay reapplies blocks idempotently and marks `APPLIED`. If header torn: header CRC fails (`PFS2_ERR_CORRUPT`). | **Documented Limitation.** If torn during `APPLIED` rewrite, on-disk target blocks already have valid data, but header CRC fails. Volume must be remounted with clean state or manual journal clear. |
+| **Device Flush / Sync Failures** | Underlying controller rejects `flush()` (e.g. disk write cache full or I/O failure). | Commit immediately returns `PFS2_ERR_IO` before advancing transaction. | **Immediate Error.** Transaction fails at caller; no un-synced commit is recorded. |
+
+> [!IMPORTANT]
+> **Atomicity Assumption Boundary:** A 4096-byte block write is not natively atomic on 512-byte sector storage. PurpleFS v2 guarantees atomic transactions by enforcing that a transaction is only recognized if the journal header passes complete CRC32 verification over all header fields and every after-image matches its recorded CRC32. A torn 4096-byte header write will fail CRC32 verification and safely block replay rather than applying corrupt metadata.
+
 ---
 
 ## 6. Host-Side Block Device Abstraction

@@ -355,13 +355,22 @@ int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
     // Read updated bitmap after potential journal replay
     dev->read_block(dev, fs->sb.bitmap_start_block, fs->bitmap);
 
-    // Update superblock mount metadata
-    fs->sb.mount_count++;
-    fs->sb.clean_unmount = 0;
-    fs->sb.checksum = pfs2_crc32(&fs->sb, 0x80);
-    memcpy(sb_block, &fs->sb, sizeof(fs->sb));
-    dev->write_block(dev, 0, sb_block);
-    dev->flush(dev);
+    // Update superblock mount metadata if device is writable
+    if (dev->write_block) {
+        fs->sb.mount_count++;
+        fs->sb.clean_unmount = 0;
+        fs->sb.checksum = pfs2_crc32(&fs->sb, 0x80);
+        memcpy(sb_block, &fs->sb, sizeof(fs->sb));
+        int wrc = dev->write_block(dev, 0, sb_block);
+        if (wrc == 0) {
+            dev->flush(dev);
+        } else {
+            // Write failed or device is read-only
+            fs->read_only = 1;
+        }
+    } else {
+        fs->read_only = 1;
+    }
 
     fs->is_mounted = 1;
     return PFS2_OK;
@@ -370,16 +379,19 @@ int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
 int pfs2_unmount(pfs2_fs_t *fs) {
     if (!fs || !fs->is_mounted) return PFS2_ERR_INVALID;
 
-    // Mark cleanly unmounted
-    fs->sb.clean_unmount = 1;
-    fs->sb.checksum = pfs2_crc32(&fs->sb, 0x80);
+    // Only update superblock if mounted read-write
+    if (!fs->read_only && fs->dev->write_block) {
+        // Mark cleanly unmounted
+        fs->sb.clean_unmount = 1;
+        fs->sb.checksum = pfs2_crc32(&fs->sb, 0x80);
 
-    uint8_t sb_block[PFS2_BLOCK_SIZE];
-    memset(sb_block, 0, PFS2_BLOCK_SIZE);
-    memcpy(sb_block, &fs->sb, sizeof(fs->sb));
+        uint8_t sb_block[PFS2_BLOCK_SIZE];
+        memset(sb_block, 0, PFS2_BLOCK_SIZE);
+        memcpy(sb_block, &fs->sb, sizeof(fs->sb));
 
-    if (fs->dev->write_block(fs->dev, 0, sb_block) != 0) return PFS2_ERR_IO;
-    if (fs->dev->flush(fs->dev) != 0) return PFS2_ERR_IO;
+        if (fs->dev->write_block(fs->dev, 0, sb_block) != 0) return PFS2_ERR_IO;
+        if (fs->dev->flush(fs->dev) != 0) return PFS2_ERR_IO;
+    }
 
     fs->is_mounted = 0;
     return PFS2_OK;
@@ -442,6 +454,7 @@ int pfs2_lookup(pfs2_fs_t *fs, const char *name, uint32_t *out_inode) {
 
 int pfs2_create_file(pfs2_fs_t *fs, const char *name, uint16_t mode, uint32_t *out_inode) {
     if (!fs || !fs->is_mounted || !name) return PFS2_ERR_INVALID;
+    if (fs->read_only) return PFS2_ERR_ROFS;
     size_t name_len = strlen(name);
     if (name_len == 0 || name_len >= 24) return PFS2_ERR_INVALID;
 
@@ -587,6 +600,7 @@ int pfs2_read_file(pfs2_fs_t *fs, uint32_t inode_num, void *buf, size_t count, u
 
 int pfs2_write_file(pfs2_fs_t *fs, uint32_t inode_num, const void *buf, size_t count, uint64_t offset, size_t *out_bytes_written) {
     if (!fs || !fs->is_mounted || !buf) return PFS2_ERR_INVALID;
+    if (fs->read_only) return PFS2_ERR_ROFS;
     if (count == 0) {
         if (out_bytes_written) *out_bytes_written = 0;
         return PFS2_OK;
@@ -711,6 +725,7 @@ int pfs2_write_file(pfs2_fs_t *fs, uint32_t inode_num, const void *buf, size_t c
 
 int pfs2_truncate_file(pfs2_fs_t *fs, uint32_t inode_num, uint64_t new_size) {
     if (!fs || !fs->is_mounted) return PFS2_ERR_INVALID;
+    if (fs->read_only) return PFS2_ERR_ROFS;
 
     pfs2_inode_t ino;
     int err = pfs2_read_inode(fs, inode_num, &ino);

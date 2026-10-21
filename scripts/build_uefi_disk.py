@@ -210,13 +210,13 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     name1 = "EFI System Partition".encode("utf-16le")
     entries[56:56 + len(name1)] = name1
 
-    # Entry 2: PurpleFS Partition GUID: 70757270-6C65-6673-3200-000000000000
+    # Entry 2: PurpleFS Partition GUID: 4F535046-5332-0001-8000-00A0C911D504
     pfs_guid = bytes([
-        0x70, 0x72, 0x75, 0x70,
-        0x65, 0x6C,
-        0x73, 0x66,
-        0x32, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        0x46, 0x50, 0x53, 0x4F,
+        0x32, 0x53,
+        0x01, 0x00,
+        0x80, 0x00,
+        0x00, 0xA0, 0xC9, 0x11, 0xD5, 0x04
     ])
     unique_guid2 = os.urandom(16)
     entries[128:144] = pfs_guid

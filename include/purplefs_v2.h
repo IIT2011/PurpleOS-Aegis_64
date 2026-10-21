@@ -40,6 +40,7 @@
 #define PFS2_ERR_INVALID            -8
 #define PFS2_ERR_JOURNAL            -9
 #define PFS2_ERR_TOO_BIG            -10
+#define PFS2_ERR_ROFS               -11
 
 /* 16-byte magic signature */
 extern const uint8_t PFS2_SIGNATURE[16];
@@ -126,6 +127,7 @@ typedef struct pfs2_fs {
     uint8_t           bitmap[PFS2_BLOCK_SIZE];
     uint64_t          next_journal_seq;
     int               is_mounted;
+    int               read_only;
 } pfs2_fs_t;
 
 /* Public API */

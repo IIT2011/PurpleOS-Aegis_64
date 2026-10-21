@@ -61,6 +61,12 @@ void pfs2_mem_dev_destroy(pfs2_block_dev_t *dev) {
     free(dev);
 }
 
+uint8_t *pfs2_mem_dev_get_data(pfs2_block_dev_t *dev) {
+    if (!dev) return NULL;
+    mem_dev_priv_t *priv = (mem_dev_priv_t *)dev->priv;
+    return priv ? priv->data : NULL;
+}
+
 /* File Block Device Backend */
 typedef struct {
     int fd;

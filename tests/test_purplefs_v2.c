@@ -520,6 +520,175 @@ static int test_fault_injection_failures(void) {
     return 1;
 }
 
+static int test_journal_corrupt_header_crc(void) {
+    pfs2_block_dev_t *dev = pfs2_mem_dev_create(1024);
+    pfs2_format(dev, 1024, "hdr_crc_test");
+
+    pfs2_fs_t fs;
+    pfs2_mount(&fs, dev);
+    uint32_t j_start = fs.sb.journal_start_block;
+
+    // Write a valid after image
+    uint8_t dummy[PFS2_BLOCK_SIZE];
+    memset(dummy, 0xAA, PFS2_BLOCK_SIZE);
+    dev->write_block(dev, j_start + 1, dummy);
+
+    // Prepare header with valid magic and state, but deliberate bit-flip in header_crc
+    pfs2_journal_header_t j_hdr;
+    memset(&j_hdr, 0, sizeof(j_hdr));
+    j_hdr.magic = PFS2_JOURNAL_MAGIC;
+    j_hdr.journal_state = PFS2_JOURNAL_STATE_COMMITTED;
+    j_hdr.sequence_number = 7;
+    j_hdr.num_after_images = 1;
+    j_hdr.target_blocks[0] = PFS2_DATA_START_BLOCK;
+    j_hdr.after_image_crcs[0] = pfs2_crc32(dummy, PFS2_BLOCK_SIZE);
+    j_hdr.header_crc = pfs2_crc32(&j_hdr, 4 + 4 + 8 + 4 + 24 + 24) ^ 0xFFFFFFFF; // Corrupt!
+
+    uint8_t hdr_block[PFS2_BLOCK_SIZE];
+    memset(hdr_block, 0, PFS2_BLOCK_SIZE);
+    memcpy(hdr_block, &j_hdr, sizeof(j_hdr));
+    dev->write_block(dev, j_start, hdr_block);
+    dev->flush(dev);
+
+    fs.is_mounted = 0;
+
+    // Mounting MUST detect corrupt header CRC and refuse replay
+    pfs2_fs_t fs2;
+    int rc = pfs2_mount(&fs2, dev);
+    if (rc != PFS2_ERR_CORRUPT) {
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    pfs2_mem_dev_destroy(dev);
+    return 1;
+}
+
+static int test_journal_torn_header_write(void) {
+    pfs2_block_dev_t *dev = pfs2_mem_dev_create(1024);
+    pfs2_format(dev, 1024, "torn_hdr_test");
+
+    pfs2_fs_t fs;
+    pfs2_mount(&fs, dev);
+    uint32_t j_start = fs.sb.journal_start_block;
+
+    // Simulate torn write: invalid magic bytes in header block
+    uint8_t torn_block[PFS2_BLOCK_SIZE];
+    memset(torn_block, 0xCD, PFS2_BLOCK_SIZE); // Random unwritten/torn data
+    dev->write_block(dev, j_start, torn_block);
+    dev->flush(dev);
+
+    fs.is_mounted = 0;
+
+    // Mounting MUST reject bad journal magic and return error
+    pfs2_fs_t fs2;
+    int rc = pfs2_mount(&fs2, dev);
+    if (rc != PFS2_ERR_JOURNAL) {
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    pfs2_mem_dev_destroy(dev);
+    return 1;
+}
+
+static int test_journal_crash_during_prep(void) {
+    pfs2_block_dev_t *dev = pfs2_mem_dev_create(1024);
+    pfs2_format(dev, 1024, "crash_prep_test");
+
+    pfs2_fs_t fs;
+    pfs2_mount(&fs, dev);
+    uint32_t j_start = fs.sb.journal_start_block;
+
+    // Create an initial file
+    uint32_t ino = 0;
+    pfs2_create_file(&fs, "original.txt", 0644, &ino);
+    const char *orig_msg = "Original Content";
+    size_t written = 0;
+    pfs2_write_file(&fs, ino, orig_msg, strlen(orig_msg), 0, &written);
+
+    // Simulate crash during journal prep:
+    // Write staged after-image containing new directory data to j_start + 1
+    uint8_t staged_dir[PFS2_BLOCK_SIZE];
+    memset(staged_dir, 0, PFS2_BLOCK_SIZE);
+    pfs2_dir_entry_t *de = (pfs2_dir_entry_t *)staged_dir;
+    de->inode = 99;
+    de->name_len = 11;
+    strcpy(de->name, "phantom.txt");
+    dev->write_block(dev, j_start + 1, staged_dir);
+
+    // But journal header remains in state EMPTY! (Crash before commit header written)
+    pfs2_journal_header_t j_hdr;
+    memset(&j_hdr, 0, sizeof(j_hdr));
+    j_hdr.magic = PFS2_JOURNAL_MAGIC;
+    j_hdr.journal_state = PFS2_JOURNAL_STATE_EMPTY;
+    j_hdr.header_crc = pfs2_crc32(&j_hdr, 4 + 4 + 8 + 4 + 24 + 24);
+
+    uint8_t hdr_block[PFS2_BLOCK_SIZE];
+    memset(hdr_block, 0, PFS2_BLOCK_SIZE);
+    memcpy(hdr_block, &j_hdr, sizeof(j_hdr));
+    dev->write_block(dev, j_start, hdr_block);
+    dev->flush(dev);
+
+    fs.is_mounted = 0;
+
+    // Remount: Mount MUST succeed because state is EMPTY, and must NOT replay phantom.txt!
+    pfs2_fs_t fs2;
+    if (pfs2_mount(&fs2, dev) != PFS2_OK) {
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    uint32_t phantom_ino = 0;
+    if (pfs2_lookup(&fs2, "phantom.txt", &phantom_ino) == PFS2_OK) {
+        // Phantom file was erroneously applied!
+        pfs2_unmount(&fs2);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    // Original file must remain intact
+    uint32_t orig_ino = 0;
+    if (pfs2_lookup(&fs2, "original.txt", &orig_ino) != PFS2_OK) {
+        pfs2_unmount(&fs2);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    pfs2_unmount(&fs2);
+    pfs2_mem_dev_destroy(dev);
+    return 1;
+}
+
+static int test_journal_flush_failure(void) {
+    pfs2_block_dev_t *base_dev = pfs2_mem_dev_create(1024);
+    pfs2_format(base_dev, 1024, "flush_fail_test");
+
+    pfs2_block_dev_t *fault_dev = pfs2_fault_dev_create(base_dev);
+    pfs2_fault_dev_t *fdev = (pfs2_fault_dev_t *)fault_dev;
+
+    pfs2_fs_t fs;
+    if (pfs2_mount(&fs, fault_dev) != PFS2_OK) {
+        pfs2_fault_dev_destroy(fault_dev);
+        pfs2_mem_dev_destroy(base_dev);
+        return 0;
+    }
+
+    // Fail flushes during transaction commit
+    fdev->fail_flushes = 1;
+    uint32_t ino = 0;
+    int rc = pfs2_create_file(&fs, "will_fail.txt", 0644, &ino);
+    if (rc != PFS2_ERR_IO) {
+        pfs2_fault_dev_destroy(fault_dev);
+        pfs2_mem_dev_destroy(base_dev);
+        return 0;
+    }
+
+    pfs2_fault_dev_destroy(fault_dev);
+    pfs2_mem_dev_destroy(base_dev);
+    return 1;
+}
+
 static int test_repeated_mount_unmount(void) {
     pfs2_block_dev_t *dev = pfs2_mem_dev_create(1024);
     pfs2_format(dev, 1024, "repeat_test");
@@ -561,6 +730,10 @@ int main(void) {
     RUN_TEST(test_corrupt_inode_rejection);
     RUN_TEST(test_journal_crash_recovery);
     RUN_TEST(test_journal_corrupt_after_image_rejection);
+    RUN_TEST(test_journal_corrupt_header_crc);
+    RUN_TEST(test_journal_torn_header_write);
+    RUN_TEST(test_journal_crash_during_prep);
+    RUN_TEST(test_journal_flush_failure);
     RUN_TEST(test_fault_injection_failures);
     RUN_TEST(test_repeated_mount_unmount);
 

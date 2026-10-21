@@ -9,6 +9,7 @@
 #include "keyboard.h"
 #include "task.h"
 #include "shell.h"
+#include "kernel_storage.h"
 #include "io.h"
 
 extern char _kernel_start[];
@@ -67,11 +68,14 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     /* Step 4: AegisSched_64 */
     scheduler_init();
 
+    /* Step 5: Storage Discovery and PurpleFS v2 Mount */
+    storage_init();
+
     /* Enable Interrupts */
     sti();
     kinfo("Interrupts enabled, entering AegisShell...");
 
-    /* Step 5: Command Shell */
+    /* Step 6: Command Shell */
     shell_run();
 
     /* Halt if shell ever exits */

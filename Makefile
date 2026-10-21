@@ -19,11 +19,16 @@ C_SRCS = src/kernel/main.c \
          src/kernel/pic.c \
          src/kernel/task.c \
          src/kernel/shell.c \
+         src/kernel/storage.c \
          src/drivers/serial.c \
          src/drivers/video.c \
          src/drivers/font8x16.c \
          src/drivers/pit.c \
          src/drivers/keyboard.c \
+         src/drivers/storage/ata_pio.c \
+         src/fs/gpt.c \
+         src/fs/partition_dev.c \
+         src/fs/purplefs_v2.c \
          src/mm/pmm.c \
          src/mm/vmm.c
 
@@ -33,7 +38,7 @@ OBJS = $(patsubst src/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS)) \
 KERNEL64_ELF = $(BUILD_DIR)/kernel64.elf
 KERNEL32_ELF = $(BUILD_DIR)/kernel.elf
 
-.PHONY: all clean test test-asan check check-scheduler-qemu run-qemu run-uefi
+.PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu run-qemu run-uefi
 
 all: $(KERNEL32_ELF) $(KERNEL64_ELF)
 
@@ -53,17 +58,28 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
 	./$(BUILD_DIR)/test_scheduler
 	./$(BUILD_DIR)/test_purplefs_v2
+	./$(BUILD_DIR)/test_storage_gpt
 
 test-asan:
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_purplefs_v2.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c -o $(BUILD_DIR)/test_purplefs_v2_asan
 	./$(BUILD_DIR)/test_purplefs_v2_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c -o $(BUILD_DIR)/test_storage_gpt_asan
+	./$(BUILD_DIR)/test_storage_gpt_asan
+
+$(BUILD_DIR)/mkpfs2_disk: host/mkpfs2_disk.c src/drivers/storage/ata_pio.c src/fs/purplefs_v2.c src/fs/gpt.c host/purplefs_v2_host.c src/kernel/string.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -Wall -Wextra -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_storage_gpt: tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -Wall -Wextra -Iinclude $^ -o $@
 
 $(BUILD_DIR)/test_purplefs_v2: tests/test_purplefs_v2.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c
 	@mkdir -p $(BUILD_DIR)
@@ -88,6 +104,9 @@ check: test all
 
 check-scheduler-qemu: all
 	@$(PYTHON) scripts/test_qemu_scheduler.py
+
+check-storage-qemu: all $(BUILD_DIR)/mkpfs2_disk
+	@$(PYTHON) scripts/test_qemu_storage.py
 
 run-qemu: all
 	$(QEMU) -kernel $(KERNEL32_ELF) -serial stdio -m 256M

@@ -1,7 +1,7 @@
 # Purple OS / Aegis64: Implementation Status
 
 **Date:** 2026-10-21  
-**Milestone:** Reconstruction Stages 0, 1, 2, 3, and 4A Completed.
+**Milestone:** Reconstruction Stages 0, 1, 2, 3, 4A, and 4B Completed.
 
 ---
 
@@ -21,11 +21,16 @@
 | **PIT Timer** | Complete | 100 Hz timer verified (10 ms ticks) | Drives preemptive task scheduler |
 | **PS/2 Keyboard** | Complete | Set-1 scancode ring buffer | Handles ASCII, backspace, modifiers |
 | **AegisSched_64 Scheduler** | Complete (UP) | `make check-scheduler-qemu` passed | 4 priority tiers, 16 KiB stacks, preemption, sleep/wake |
-| **AegisShell** | Complete | Interactive commands verified | `sysinfo`, `cpuinfo`, `mem`, `uptime`, `tasks`, `task` |
+| **AegisShell** | Complete | Interactive commands verified | `sysinfo`, `cpuinfo`, `mem`, `uptime`, `tasks`, `task`, `clear`, `echo` |
 | **PurpleFS v2 Specification** | Complete | Documented in `docs/PURPLEFS_DESIGN.md` | Signature `PURPLEFS\0PFS2\0\0\0`, 4096-byte blocks, 32768-block limit |
 | **PurpleFS v2 Block Dev Layer** | Complete | In-memory, file-backed, fault injection | Block boundary, error propagation, `pread`/`pwrite`/`fdatasync` |
-| **PurpleFS v2 Filesystem Core** | Complete (Host) | 14/14 host tests passed (`build/test_purplefs_v2`, `build/test_purplefs_v2_asan`) | Format, mount, file create/lookup/read/write/truncate, multi-block |
-| **PurpleFS v2 Redo Journal** | Complete (Host) | Crash recovery and CRC validation passed | Redo journal in blocks 32760..32767, up to 6 after-images, CRC32 |
+| **PurpleFS v2 Filesystem Core** | Complete | 18/18 host tests passed (`build/test_purplefs_v2`, `build/test_purplefs_v2_asan`) | Format, mount, file create/lookup/read/write/truncate, multi-block |
+| **PurpleFS v2 Redo Journal** | Complete | Crash recovery and CRC validation passed | Redo journal in blocks 32760..32767, up to 6 after-images, CRC32 |
+| **ATA PIO Driver (Read-Only)** | Complete | 10/10 host tests passed (`build/test_storage_gpt`) | Polling LBA28/48, bounded timeout, ATAPI rejection, 512B sectors |
+| **GPT Partition Table Parser** | Complete | 10/10 host tests passed (`build/test_storage_gpt`) | Protective MBR, Header CRC32, Partition Array CRC32, PFS2 GUID |
+| **Partition Block Device Adapter** | Complete | 10/10 host tests passed (`build/test_storage_gpt`) | Sub-device wrapping, bounds checks, overflow protection, read-only |
+| **Kernel Storage & VFS Mount** | Complete (Read-Only) | `make check-storage-qemu` passed (14/14 assertions) | Boot-time drive discovery, GPT parse, PurpleFS mount on `/` |
+| **AegisShell Storage Commands** | Complete | Verified via automated QEMU script | `list files` (`ls`), `peek <name>` (`cat`), `disk status`, `filesystem status` (`df`) |
 
 ---
 
@@ -33,8 +38,6 @@
 
 | Subsystem | Target Milestone | Description |
 |---|---|---|
-| **Storage & IDE/ATA PIO** | Stage 4B | Storage device discovery, ATA PIO controller, GPT parser |
-| **PurpleFS v2 Kernel VFS** | Stage 4B | Integrate PurpleFS v2 core with ATA/GPT devices into kernel VFS |
 | **APDRV v3 Loader** | Stage 5 | Ring 0 native `.apdrv` modules, KSYM imports, dynamic relocation, W^X |
 | **AegisDetect** | Stage 6 | Boot hardware profiling, baseline comparison, prompt on hardware change |
 | **.apapplications** | Stage 7 | Bundle layout, manifest parser, user application lifecycle |

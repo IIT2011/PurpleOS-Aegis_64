@@ -6,6 +6,7 @@
 /* In-memory block device */
 pfs2_block_dev_t *pfs2_mem_dev_create(uint32_t block_count);
 void pfs2_mem_dev_destroy(pfs2_block_dev_t *dev);
+uint8_t *pfs2_mem_dev_get_data(pfs2_block_dev_t *dev);
 
 /* Regular file-backed block device */
 pfs2_block_dev_t *pfs2_file_dev_create(const char *filepath, uint32_t block_count);
