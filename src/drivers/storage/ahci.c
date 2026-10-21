@@ -109,6 +109,26 @@ int ahci_port_init(ahci_port_t *port) {
     return 0;
 }
 
+void ahci_port_free(ahci_port_t *port) {
+    if (!port) return;
+    if (port->cmd_list) {
+        dma_free_coherent(port->cmd_list, 1024);
+        port->cmd_list = NULL;
+    }
+    if (port->received_fis) {
+        dma_free_coherent(port->received_fis, 256);
+        port->received_fis = NULL;
+    }
+    if (port->cmd_table) {
+        dma_free_coherent(port->cmd_table, sizeof(ahci_cmd_table_t));
+        port->cmd_table = NULL;
+    }
+    if (port->dma_buffer) {
+        dma_free_coherent(port->dma_buffer, 65536);
+        port->dma_buffer = NULL;
+    }
+}
+
 static int ahci_issue_command_slot0(ahci_port_t *port) {
     // Wait until port is not busy
     for (uint32_t spin = 0; spin < 500000; spin++) {

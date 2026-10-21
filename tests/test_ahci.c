@@ -80,6 +80,7 @@ static void emulate_ahci_hardware(ahci_port_t *port) {
 static void test_ahci_port_init_and_identify(void) {
     printf("[TEST  1] Running test_ahci_port_init_and_identify         ... ");
     mock_hba_reset();
+    block_dev_reset();
 
     ahci_controller_t ctrl;
     memset(&ctrl, 0, sizeof(ctrl));
@@ -112,12 +113,14 @@ static void test_ahci_port_init_and_identify(void) {
     assert(strstr(port.serial, "SATATEST") != NULL);
     assert(port.bdev.total_blocks == 256);
 
+    ahci_port_free(&port);
     printf("PASSED\n");
 }
 
 static void test_ahci_read_write_flush(void) {
     printf("[TEST  2] Running test_ahci_read_write_flush               ... ");
     mock_hba_reset();
+    block_dev_reset();
     ahci_set_command_hook(emulate_ahci_hardware);
 
     ahci_port_t port;
@@ -147,23 +150,14 @@ static void test_ahci_read_write_flush(void) {
     // Test flush
     assert(ahci_flush(&port) == 0);
 
-    printf("PASSED\n");
-}
-    fis->command = ATA_CMD_READ_DMA_EXT;
-    fis->device = 1 << 6;
-    fis->lba0 = 10;
-    fis->countl = 2;
-    port.regs->ci = 1;
-    emulate_ahci_hardware(&port);
-    assert((port.regs->ci & 1) == 0);
-    assert(memcmp(port.dma_buffer, wbuf, 1024) == 0);
-
+    ahci_port_free(&port);
     printf("PASSED\n");
 }
 
 static void test_ahci_bounds_checking(void) {
     printf("[TEST  3] Running test_ahci_bounds_checking                ... ");
     mock_hba_reset();
+    block_dev_reset();
 
     ahci_port_t port;
     memset(&port, 0, sizeof(port));

@@ -171,6 +171,7 @@ typedef struct ahci_controller {
 int  ahci_init(void);
 int  ahci_init_controller(ahci_controller_t *ctrl, const pci_device_t *pci_dev, ahci_hba_mem_t *hba_mem);
 int  ahci_port_init(ahci_port_t *port);
+void ahci_port_free(ahci_port_t *port);
 int  ahci_identify(ahci_port_t *port);
 int  ahci_read_sectors(ahci_port_t *port, uint64_t lba, uint32_t count, void *buf);
 int  ahci_write_sectors(ahci_port_t *port, uint64_t lba, uint32_t count, const void *buf);
