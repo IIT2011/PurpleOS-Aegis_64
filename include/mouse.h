@@ -15,11 +15,16 @@ typedef struct {
     uint8_t buttons;
 } mouse_state_t;
 
+typedef void (*mouse_event_callback_t)(int32_t x, int32_t y, uint8_t buttons);
+
 int  mouse_init(void);
 int  mouse_is_present(void);
 void mouse_get_state(mouse_state_t *out_state);
 int32_t mouse_get_x(void);
 int32_t mouse_get_y(void);
 uint8_t mouse_get_buttons(void);
+void mouse_set_position(int32_t x, int32_t y);
+void mouse_set_callback(mouse_event_callback_t cb);
+void mouse_process_byte(uint8_t data);
 
 #endif /* MOUSE_H */
