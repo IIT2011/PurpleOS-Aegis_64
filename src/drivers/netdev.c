@@ -32,8 +32,8 @@ int netdev_register(netdev_t *dev) {
           dev->mtu);
 
     /* Notify PurpleDetect */
-    purple_detect_register(DEVICE_CAT_NETWORK, dev->name, "Network Interface Adapter",
-                           "AegisNet", DEVICE_BUS_PCI, 0, 0, DEVICE_STATE_ACTIVE);
+    purple_detect_register(PURPLE_CAT_NETWORK, dev->name, "Network Interface Adapter",
+                           "AegisNet", "PCI", 0, 0, PURPLE_STATE_ACTIVE, 0);
 
     return 0;
 }
@@ -49,7 +49,7 @@ int netdev_unregister(netdev_t *dev) {
     }
     if (found_idx < 0) return -2;
 
-    purple_device_t *pd = purple_detect_find_by_name(dev->name);
+    const purple_device_t *pd = purple_detect_find_by_name(dev->name);
     if (pd) {
         purple_detect_unregister(pd->id);
     }

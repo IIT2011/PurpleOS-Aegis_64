@@ -126,7 +126,7 @@ void ksym_init(void) {
     /* 5. Device Discovery & Lifecycle (PurpleDetect) */
     ksym_register("purple_detect_register", (uint64_t)(uintptr_t)purple_detect_register);
     ksym_register("purple_detect_find_by_name", (uint64_t)(uintptr_t)purple_detect_find_by_name);
-    ksym_register("purple_detect_set_state", (uint64_t)(uintptr_t)purple_detect_set_state);
+    ksym_register("purple_detect_update_state", (uint64_t)(uintptr_t)purple_detect_update_state);
 
     /* 6. Physical & Virtual Memory Allocation */
     ksym_register("pmm_alloc_frame", (uint64_t)(uintptr_t)pmm_alloc_frame);
