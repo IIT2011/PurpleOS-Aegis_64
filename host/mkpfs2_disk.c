@@ -9,6 +9,40 @@
 #include "purplefs_v2.h"
 #include "host_purplefs_v2.h"
 #include "gpt.h"
+#include "apdrv.h"
+#include "apapp.h"
+#include "crypto/sha256.h"
+
+static const uint8_t g_trust_key[] = "PurpleOS-Aegis64-TrustAnchor-2026";
+
+static void sign_bundle_mkdisk(apapp_manifest_t *m, const void *payload, uint32_t payload_len) {
+    sha256_ctx_t ctx;
+    uint8_t k_pad[SHA256_BLOCK_SIZE];
+    uint8_t inner[SHA256_DIGEST_SIZE];
+    size_t key_len = strlen((const char *)g_trust_key);
+
+    memset(k_pad, 0x36, SHA256_BLOCK_SIZE);
+    for (size_t i = 0; i < key_len && i < SHA256_BLOCK_SIZE; i++) {
+        k_pad[i] ^= g_trust_key[i];
+    }
+    sha256_init(&ctx);
+    sha256_update(&ctx, k_pad, SHA256_BLOCK_SIZE);
+    size_t header_len = (size_t)((uintptr_t)m->hmac_signature - (uintptr_t)m);
+    sha256_update(&ctx, m, header_len);
+    if (payload && payload_len > 0) {
+        sha256_update(&ctx, payload, payload_len);
+    }
+    sha256_final(&ctx, inner);
+
+    memset(k_pad, 0x5c, SHA256_BLOCK_SIZE);
+    for (size_t i = 0; i < key_len && i < SHA256_BLOCK_SIZE; i++) {
+        k_pad[i] ^= g_trust_key[i];
+    }
+    sha256_init(&ctx);
+    sha256_update(&ctx, k_pad, SHA256_BLOCK_SIZE);
+    sha256_update(&ctx, inner, SHA256_DIGEST_SIZE);
+    sha256_final(&ctx, m->hmac_signature);
+}
 
 #define TOTAL_SECTORS 65536 // 32 MiB disk
 #define SECTOR_SIZE 512
@@ -130,6 +164,59 @@ int main(int argc, char **argv) {
     const char *msg3 = "Purple OS: Correctness, Memory Safety, and Recoverability.\n";
     size_t w3 = 0;
     pfs2_write_file(&fs, ino3, msg3, strlen(msg3), 0, &w3);
+
+    // 4. Create sample APDRV v3 package: e1000.apdrv
+    uint32_t ino4 = 0;
+    pfs2_create_file(&fs, "e1000.apdrv", 0644, &ino4);
+    uint8_t drv_buf[1024];
+    memset(drv_buf, 0, sizeof(drv_buf));
+    apdrv_header_t *dhdr = (apdrv_header_t *)drv_buf;
+    memcpy(dhdr->magic, APDRV_MAGIC, APDRV_MAGIC_LEN);
+    dhdr->version = APDRV_VERSION;
+    dhdr->header_size = sizeof(apdrv_header_t);
+    memcpy(dhdr->mod_type, APDRV_TYPE_AEGISMOD, 8);
+    strcpy(dhdr->name, "e1000");
+    strcpy(dhdr->description, "Intel 82540EM Gigabit Ethernet");
+    strcpy(dhdr->author, "Purple OS Drivers Team");
+    dhdr->mod_version = 0x010000;
+    dhdr->flags = APDRV_FLAG_ENFORCE_WX;
+    dhdr->target_vendor = 0x8086;
+    dhdr->target_device = 0x100E; // QEMU Intel 82540EM NIC
+    dhdr->text_offset = sizeof(apdrv_header_t);
+    dhdr->text_size = 128;
+    dhdr->rodata_offset = dhdr->text_offset + 128;
+    dhdr->rodata_size = 64;
+    dhdr->data_offset = dhdr->rodata_offset + 64;
+    dhdr->data_size = 64;
+    dhdr->bss_size = 64;
+    size_t w4 = 0;
+    pfs2_write_file(&fs, ino4, drv_buf, sizeof(apdrv_header_t) + 256, 0, &w4);
+
+    // 5. Create sample application bundle: sysmon.apapplications
+    uint32_t ino5 = 0;
+    pfs2_create_file(&fs, "sysmon.apapplications", 0644, &ino5);
+    uint8_t app_buf[1024];
+    memset(app_buf, 0, sizeof(app_buf));
+    apapp_manifest_t *am = (apapp_manifest_t *)app_buf;
+    memcpy(am->magic, APAPP_MAGIC, APAPP_MAGIC_LEN);
+    am->version = APAPP_VERSION;
+    am->manifest_size = sizeof(apapp_manifest_t);
+    strcpy(am->app_id, "sysmon.apapplications");
+    strcpy(am->app_name, "Aegis System Monitor");
+    strcpy(am->version_str, "1.0.0");
+    strcpy(am->author, "Purple OS Desktop Team");
+    strcpy(am->description, "Real-time task and memory visualization");
+    am->permissions = APAPP_PERM_GUI | APAPP_PERM_CONSOLE;
+    am->default_priority = 2;
+    am->window_width = 380;
+    am->window_height = 200;
+    am->exec_offset = sizeof(apapp_manifest_t);
+    const char *app_payload = "AEGIS_SYSMON_NATIVE_EXEC_PAYLOAD_V1";
+    am->exec_size = strlen(app_payload);
+    memcpy(app_buf + am->exec_offset, app_payload, am->exec_size);
+    sign_bundle_mkdisk(am, app_payload, am->exec_size);
+    size_t w5 = 0;
+    pfs2_write_file(&fs, ino5, app_buf, sizeof(apapp_manifest_t) + am->exec_size, 0, &w5);
 
     pfs2_unmount(&fs);
 
