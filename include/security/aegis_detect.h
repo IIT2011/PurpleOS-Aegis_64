@@ -54,7 +54,9 @@ int aegis_detect_init(const uint8_t *auth_key, size_t key_len);
 void aegis_manifest_sign(aegis_manifest_t *m, const uint8_t *key, size_t key_len);
 int aegis_detect_authenticate_manifest(const aegis_manifest_t *m, const uint8_t *key, size_t key_len);
 int aegis_detect_load_manifest(const aegis_manifest_t *m);
+int aegis_detect_load_default_manifest(void);
 int aegis_detect_verify_component(const char *name, const void *data, size_t size);
+int aegis_detect_verify_storage(void);
 int aegis_detect_verify_all(void);
 
 uint32_t aegis_detect_get_total_count(void);
