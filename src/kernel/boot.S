@@ -142,6 +142,7 @@ gdt64:
     .quad 0x0000920000000000    /* 0x10: 64-bit Kernel Data (Read/Write, DPL 0) */
 gdt64_end:
 
+.global gdt64_ptr
 gdt64_ptr:
     .word gdt64_end - gdt64 - 1
     .quad gdt64

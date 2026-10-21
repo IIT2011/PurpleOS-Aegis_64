@@ -7,9 +7,9 @@
  * in 16-bit real mode.
  *
  * Sequence:
- * 1. 16-bit Real Mode: disable interrupts, load 32-bit GDT, enable PE in CR0.
+ * 1. 16-bit Real Mode: disable interrupts, load GDT, enable PE in CR0.
  * 2. 32-bit Protected Mode: enable PAE/SSE in CR4, load CR3, enable LME in EFER, enable PG in CR0.
- * 3. 64-bit Long Mode: load 64-bit stack, signal ready to BSP, wait for ACK, jump to C entry point.
+ * 3. 64-bit Long Mode: load 64-bit stack, reload permanent GDT, signal ready to BSP, wait ACK, jump to C entry.
  */
 
 .section .text
@@ -37,10 +37,10 @@ smp_trampoline_ack:     .quad 0          /* offset 0x28: BSP sets to 1 */
 .align 8
 smp_gdt:
     .quad 0x0000000000000000          /* 0x00: null */
-    .quad 0x00CF9A000000FFFF          /* 0x08: 32-bit flat code (base=0, limit=4G) */
-    .quad 0x00CF92000000FFFF          /* 0x10: 32-bit flat data (base=0, limit=4G) */
-    .quad 0x00209A0000000000          /* 0x18: 64-bit flat code (DPL 0, L=1) */
-    .quad 0x0000920000000000          /* 0x20: 64-bit flat data (DPL 0) */
+    .quad 0x00209A0000000000          /* 0x08: 64-bit Kernel Code (DPL 0, L=1) */
+    .quad 0x0000920000000000          /* 0x10: 64-bit Kernel Data (DPL 0) */
+    .quad 0x00CF9A000000FFFF          /* 0x18: 32-bit flat code (base=0, limit=4G) */
+    .quad 0x00CF92000000FFFF          /* 0x20: 32-bit flat data (base=0, limit=4G) */
 smp_gdt_end:
 
 smp_gdtr:
@@ -56,7 +56,7 @@ real_start:
     movw %ax, %es
     movw %ax, %ss
 
-    /* Load 32-bit GDT */
+    /* Load Trampoline GDT */
     data32 lgdt (0x8000 + (smp_gdtr - smp_trampoline_start))
 
     /* Enable Protected Mode in CR0 */
@@ -64,13 +64,13 @@ real_start:
     orl $1, %eax
     movl %eax, %cr0
 
-    /* Far jump to 32-bit code selector 0x08 */
-    ljmpl $0x08, $(0x8000 + (prot32_start - smp_trampoline_start))
+    /* Far jump to 32-bit protected mode code selector 0x18 */
+    ljmpl $0x18, $(0x8000 + (prot32_start - smp_trampoline_start))
 
 .code32
 prot32_start:
-    /* Reload data segments with 32-bit data selector 0x10 */
-    movw $0x10, %ax
+    /* Reload data segments with 32-bit data selector 0x20 */
+    movw $0x20, %ax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %ss
@@ -97,13 +97,13 @@ prot32_start:
     orl $((1 << 31) | (1 << 0)), %eax
     movl %eax, %cr0
 
-    /* Far jump to 64-bit code selector 0x18 */
-    ljmp $0x18, $(0x8000 + (long64_start - smp_trampoline_start))
+    /* Far jump to 64-bit long mode code selector 0x08 */
+    ljmp $0x08, $(0x8000 + (long64_start - smp_trampoline_start))
 
 .code64
 long64_start:
-    /* Reload data segments with 64-bit data selector 0x20 */
-    movw $0x20, %ax
+    /* Reload data segments with 64-bit data selector 0x10 */
+    movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %ss
@@ -112,6 +112,9 @@ long64_start:
 
     /* Load 64-bit kernel stack for this AP from offset 0x10 */
     movq (0x8000 + 0x10), %rsp
+
+    /* Load permanent 64-bit kernel GDT */
+    lgdt (gdt64_ptr)
 
     /* Signal ready to BSP by setting ready flag at offset 0x20 to 1 */
     movq $1, (0x8000 + 0x20)
