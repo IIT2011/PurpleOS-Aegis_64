@@ -232,7 +232,7 @@ static void cmd_write_file(const char *name, const char *text) {
 }
 
 static void cmd_disk_status(void) {
-    shell_print("\n=== Storage Block Devices (ATA / AHCI SATA / NVMe) & GPT Status ===\n");
+    shell_print("\n=== ATA Storage Devices & GPT Partition Status ===\n");
     uint32_t count = block_dev_count();
 
     if (count == 0) {
