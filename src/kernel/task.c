@@ -51,7 +51,8 @@ uint64_t task_get_affinity(const task_t *task) {
     return task->cpu_affinity;
 }
 
-task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, task_priority_t priority) {
+task_t *task_create_affined(const char *name, void (*entry_point)(void *), void *arg,
+                            task_priority_t priority, uint64_t cpu_affinity) {
     uint64_t rflags;
     spinlock_acquire_irqsave(&sched_lock, &rflags);
 
@@ -85,7 +86,7 @@ task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, ta
     t->ticks_remaining = t->time_slice_ticks;
     t->sleep_until_ticks = 0;
     t->stack_base = stack;
-    t->cpu_affinity = ~0ULL; // Any CPU by default
+    t->cpu_affinity = (cpu_affinity != 0) ? cpu_affinity : ~0ULL;
     t->last_cpu = cpu_get_current_id();
 
     /* Setup initial stack for switch_context and task_trampoline */
@@ -113,12 +114,16 @@ task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, ta
     t->rsp = (uint64_t)sp;
     t->state = TASK_READY;
 
-    kinfo("Scheduler: Created task %u ('%s') at stack %p, priority %u",
-          t->id, t->name, stack, (uint32_t)priority);
+    kinfo("Scheduler: Created task %u ('%s') at stack %p, priority %u, affinity 0x%x",
+          t->id, t->name, stack, (uint32_t)priority, (uint32_t)t->cpu_affinity);
 
     spinlock_release_irqrestore(&sched_lock, rflags);
     smp_broadcast_resched();
     return t;
+}
+
+task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, task_priority_t priority) {
+    return task_create_affined(name, entry_point, arg, priority, ~0ULL);
 }
 
 void task_exit(void) {

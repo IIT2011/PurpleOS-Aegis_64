@@ -50,6 +50,7 @@ typedef struct task {
 void scheduler_init(void);
 void scheduler_init_ap(uint32_t cpu_id);
 task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, task_priority_t priority);
+task_t *task_create_affined(const char *name, void (*entry_point)(void *), void *arg, task_priority_t priority, uint64_t affinity);
 void task_exit(void);
 void task_sleep(uint32_t ticks);
 void task_yield(void);
