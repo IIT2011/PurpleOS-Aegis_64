@@ -60,7 +60,8 @@ int purple_detect_init(void) {
 }
 
 int purple_detect_set_event_handler(purple_detect_event_fn handler) {
-    uint64_t flags = spinlock_acquire_irqsave(&detect_lock);
+    uint64_t flags = 0;
+    spinlock_acquire_irqsave(&detect_lock, &flags);
     event_handler = handler;
     spinlock_release_irqrestore(&detect_lock, flags);
     return 0;
@@ -75,7 +76,8 @@ int purple_detect_register(purple_dev_category_t cat,
                            uint32_t irq,
                            purple_dev_state_t state,
                            uint32_t flags) {
-    uint64_t irq_flags = spinlock_acquire_irqsave(&detect_lock);
+    uint64_t irq_flags = 0;
+    spinlock_acquire_irqsave(&detect_lock, &irq_flags);
 
     if (device_count >= PURPLE_MAX_DEVICES) {
         spinlock_release_irqrestore(&detect_lock, irq_flags);
@@ -135,7 +137,8 @@ int purple_detect_register(purple_dev_category_t cat,
 }
 
 int purple_detect_unregister(uint32_t id) {
-    uint64_t irq_flags = spinlock_acquire_irqsave(&detect_lock);
+    uint64_t irq_flags = 0;
+    spinlock_acquire_irqsave(&detect_lock, &irq_flags);
 
     for (uint32_t i = 0; i < device_count; i++) {
         if (devices[i].id == id) {
@@ -157,7 +160,8 @@ int purple_detect_unregister(uint32_t id) {
 }
 
 int purple_detect_update_state(uint32_t id, purple_dev_state_t new_state) {
-    uint64_t irq_flags = spinlock_acquire_irqsave(&detect_lock);
+    uint64_t irq_flags = 0;
+    spinlock_acquire_irqsave(&detect_lock, &irq_flags);
 
     for (uint32_t i = 0; i < device_count; i++) {
         if (devices[i].id == id) {
@@ -297,8 +301,9 @@ int purple_detect_scan_all(void) {
 
 void purple_detect_daemon(void *arg) {
     (void)arg;
-    kinfo("PurpleDetect: Background device monitoring daemon online (PID %u)", task_get_current_id());
 #ifndef __KERNEL_HOST_TEST__
+    task_t *cur = task_current();
+    kinfo("PurpleDetect: Background device monitoring daemon online (PID %u)", cur ? cur->id : 0);
     while (1) {
         task_sleep(200); // Check every 2 seconds
         // Update presence and heartbeats
