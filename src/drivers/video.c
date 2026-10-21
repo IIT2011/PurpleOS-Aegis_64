@@ -85,6 +85,91 @@ void video_init(struct multiboot_info *mbi) {
     video_clear(current_bg);
 }
 
+#ifndef __KERNEL_HOST_TEST__
+#include "io.h"
+#include "pci.h"
+
+#define VBE_DISPI_IOPORT_INDEX 0x01CE
+#define VBE_DISPI_IOPORT_DATA  0x01CF
+
+#define VBE_DISPI_INDEX_ID     0
+#define VBE_DISPI_INDEX_XRES   1
+#define VBE_DISPI_INDEX_YRES   2
+#define VBE_DISPI_INDEX_BPP    3
+#define VBE_DISPI_INDEX_ENABLE 4
+
+#define VBE_DISPI_DISABLED     0x00
+#define VBE_DISPI_ENABLED      0x01
+#define VBE_DISPI_LFB_ENABLED  0x40
+
+int video_init_bochs_vbe(uint32_t width, uint32_t height) {
+    if (fb_available) return 0;
+
+    outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ID);
+    uint16_t vbe_id = inw(VBE_DISPI_IOPORT_DATA);
+    if (vbe_id < 0xB0C0 || vbe_id > 0xB0C6) {
+        return -1;
+    }
+
+    const pci_device_t *vga = pci_find_device(0x1234, 0x1111);
+    if (!vga || vga->bar[0] == 0) {
+        return -2;
+    }
+
+    uint64_t lfb_phys = vga->bar[0] & 0xFFFFFFF0ULL;
+
+    outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
+    outw(VBE_DISPI_IOPORT_DATA, VBE_DISPI_DISABLED);
+
+    outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_XRES);
+    outw(VBE_DISPI_IOPORT_DATA, (uint16_t)width);
+
+    outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_YRES);
+    outw(VBE_DISPI_IOPORT_DATA, (uint16_t)height);
+
+    outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_BPP);
+    outw(VBE_DISPI_IOPORT_DATA, 32);
+
+    outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
+    outw(VBE_DISPI_IOPORT_DATA, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
+
+    fb_ptr = (uint32_t *)(uintptr_t)lfb_phys;
+    fb_width = width;
+    fb_height = height;
+    fb_pitch = width * 4;
+    fb_bpp = 32;
+    fb_type = MULTIBOOT_FRAMEBUFFER_TYPE_RGB;
+    r_pos = 16; r_size = 8;
+    g_pos = 8;  g_size = 8;
+    b_pos = 0;  b_size = 8;
+    fb_available = 1;
+
+    kinfo("Video: Activated Bochs VBE %ux%u@32bpp linear framebuffer at %p",
+          width, height, (void *)fb_ptr);
+    video_clear(current_bg);
+    return 0;
+}
+
+int video_set_mode(uint32_t width, uint32_t height, uint32_t bpp) {
+    (void)bpp;
+    fb_available = 0;
+    return video_init_bochs_vbe(width, height);
+}
+#else
+int video_init_bochs_vbe(uint32_t width, uint32_t height) {
+    (void)width;
+    (void)height;
+    return 0;
+}
+
+int video_set_mode(uint32_t width, uint32_t height, uint32_t bpp) {
+    (void)width;
+    (void)height;
+    (void)bpp;
+    return 0;
+}
+#endif
+
 void video_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
     if (!fb_available || x >= fb_width || y >= fb_height) return;
     uint32_t *dest = (uint32_t *)((uint8_t *)fb_ptr + y * fb_pitch) + x;

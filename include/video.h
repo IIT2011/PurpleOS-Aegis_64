@@ -15,6 +15,8 @@
 #define COLOR_GOLD         0xFFD166   /* Status WARN */
 
 void video_init(struct multiboot_info *mbi);
+int video_init_bochs_vbe(uint32_t width, uint32_t height);
+int video_set_mode(uint32_t width, uint32_t height, uint32_t bpp);
 int video_is_available(void);
 uint32_t video_color(uint8_t r, uint8_t g, uint8_t b);
 void video_clear(uint32_t color);
