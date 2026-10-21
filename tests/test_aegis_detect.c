@@ -85,9 +85,8 @@ static int test_manifest_authentication_and_load(void) {
     m.entries[1].expected_size = 20;
     sha256_hash("WELCOME_MOCK_BYTES", 18, m.entries[1].sha256);
 
-    /* Compute HMAC */
-    size_t payload_len = sizeof(uint32_t) * 3 + sizeof(aegis_manifest_entry_t) * m.entry_count;
-    hmac_sha256(key, strlen((const char *)key), (const uint8_t *)&m, payload_len, m.auth_tag);
+    /* Sign manifest */
+    aegis_manifest_sign(&m, key, strlen((const char *)key));
 
     /* Loading valid manifest must succeed */
     if (aegis_detect_load_manifest(&m) != 0) return 0;
@@ -109,10 +108,10 @@ static int test_tampered_manifest_rejection(void) {
     m.entries[0].flags = AEGIS_FLAG_CRITICAL;
     sha256_hash("CONFIG", 6, m.entries[0].sha256);
 
-    size_t payload_len = sizeof(uint32_t) * 3 + sizeof(aegis_manifest_entry_t) * m.entry_count;
-    hmac_sha256(key, strlen((const char *)key), (const uint8_t *)&m, payload_len, m.auth_tag);
+    /* Sign manifest */
+    aegis_manifest_sign(&m, key, strlen((const char *)key));
 
-    /* Tamper with entry count */
+    /* Tamper with entry */
     m.entries[0].flags = AEGIS_FLAG_OPTIONAL;
 
     /* Loading tampered manifest MUST fail */
@@ -135,9 +134,8 @@ static int test_component_verification_trusted(void) {
     m.entries[0].expected_size = 12;
     sha256_hash("Aegis64Code!", 12, m.entries[0].sha256);
 
-    size_t payload_len = sizeof(uint32_t) * 3 + sizeof(aegis_manifest_entry_t) * m.entry_count;
-    hmac_sha256(key, strlen((const char *)key), (const uint8_t *)&m, payload_len, m.auth_tag);
-    aegis_detect_load_manifest(&m);
+    aegis_manifest_sign(&m, key, strlen((const char *)key));
+    if (aegis_detect_load_manifest(&m) != 0) return 0;
 
     /* Verify with genuine content */
     int res = aegis_detect_verify_component("kernel.sys", "Aegis64Code!", 12);
@@ -165,9 +163,8 @@ static int test_component_verification_tampered(void) {
     m.entries[0].expected_size = 12;
     sha256_hash("Aegis64Code!", 12, m.entries[0].sha256);
 
-    size_t payload_len = sizeof(uint32_t) * 3 + sizeof(aegis_manifest_entry_t) * m.entry_count;
-    hmac_sha256(key, strlen((const char *)key), (const uint8_t *)&m, payload_len, m.auth_tag);
-    aegis_detect_load_manifest(&m);
+    aegis_manifest_sign(&m, key, strlen((const char *)key));
+    if (aegis_detect_load_manifest(&m) != 0) return 0;
 
     /* Verify with modified/corrupted content */
     int res = aegis_detect_verify_component("kernel.sys", "MaliciousMod!", 13);
@@ -194,9 +191,8 @@ static int test_component_verification_missing(void) {
     m.entries[0].flags = AEGIS_FLAG_CRITICAL;
     sha256_hash("DATA", 4, m.entries[0].sha256);
 
-    size_t payload_len = sizeof(uint32_t) * 3 + sizeof(aegis_manifest_entry_t) * m.entry_count;
-    hmac_sha256(key, strlen((const char *)key), (const uint8_t *)&m, payload_len, m.auth_tag);
-    aegis_detect_load_manifest(&m);
+    aegis_manifest_sign(&m, key, strlen((const char *)key));
+    if (aegis_detect_load_manifest(&m) != 0) return 0;
 
     /* NULL data signifies missing component */
     int res = aegis_detect_verify_component("missing.sys", NULL, 0);
@@ -221,9 +217,8 @@ static int test_component_unauthorized_rejection(void) {
     strcpy(m.entries[0].name, "known.sys");
     sha256_hash("DATA", 4, m.entries[0].sha256);
 
-    size_t payload_len = sizeof(uint32_t) * 3 + sizeof(aegis_manifest_entry_t) * m.entry_count;
-    hmac_sha256(key, strlen((const char *)key), (const uint8_t *)&m, payload_len, m.auth_tag);
-    aegis_detect_load_manifest(&m);
+    aegis_manifest_sign(&m, key, strlen((const char *)key));
+    if (aegis_detect_load_manifest(&m) != 0) return 0;
 
     /* Unknown component must be rejected as unauthorized (-2) */
     int res = aegis_detect_verify_component("rootkit.sys", "EVIL", 4);
