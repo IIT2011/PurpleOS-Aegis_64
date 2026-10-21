@@ -96,7 +96,13 @@ def main():
             ("PurpleDetect Keyboard", "PS2KBD"),
             ("PurpleDetect ATA Controller", "ATA_PRI"),
             ("PCI Bus Inventory", "PCI Bus Device Inventory"),
-            ("PCI Discovered Host Bridge", "Host Bridge")
+            ("PCI Discovered Host Bridge", "Host Bridge"),
+            ("Desktop Environment Preview", "Purple OS / Aegis64 Native Desktop Environment"),
+            ("Desktop System Monitor Window", "Aegis64 System Monitor"),
+            ("Desktop PurpleFS Window", "PurpleFS v2 Storage"),
+            ("Desktop AegisDetect Window", "AegisDetect Security Console"),
+            ("Mouse Command Output", "PS/2 Mouse Subsystem"),
+            ("Mouse Position Output", "Position:")
         ]
 
         passed = True
