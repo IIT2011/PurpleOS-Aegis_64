@@ -7,6 +7,7 @@
 #define CMOS_ADDR 0x70
 #define CMOS_DATA 0x71
 
+#ifndef __KERNEL_HOST_TEST__
 static uint8_t cmos_read(uint8_t reg) {
     outb(CMOS_ADDR, reg);
     return inb(CMOS_DATA);
@@ -20,6 +21,7 @@ static int cmos_is_updating(void) {
     outb(CMOS_ADDR, 0x0A);
     return (inb(CMOS_DATA) & 0x80);
 }
+#endif
 
 int rtc_init(void) {
     rtc_time_t t;

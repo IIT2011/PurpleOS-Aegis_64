@@ -146,8 +146,11 @@ int apdrv_load(const void *image, uint32_t image_size, apdrv_module_t **out_mod)
 
     uint8_t *module_mem = NULL;
 #ifdef __KERNEL_HOST_TEST__
-    module_mem = (uint8_t *)calloc(1, page_count * 4096);
-    if (!module_mem) return -11;
+    if (posix_memalign((void **)&module_mem, 4096, page_count * 4096) != 0) {
+        return -11;
+    }
+    memset(module_mem, 0, page_count * 4096);
+    mprotect(module_mem, page_count * 4096, PROT_READ | PROT_WRITE | PROT_EXEC);
 #else
     module_mem = (uint8_t *)pmm_alloc_frames(page_count);
     if (!module_mem) {
