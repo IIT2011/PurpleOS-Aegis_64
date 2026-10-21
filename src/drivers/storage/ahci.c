@@ -426,24 +426,31 @@ int ahci_init_controller(ahci_controller_t *ctrl, const pci_device_t *pci_dev, a
             uint8_t ipm = (uint8_t)((ssts >> 8) & 0x0F);
 
             if (det == HBA_PORT_DET_PRESENT && ipm == HBA_PORT_IPM_ACTIVE) {
-                uint32_t sig = regs->sig;
-                kinfo("AHCI: Port %u link active (SSTS=0x%x, SIG=0x%08x)", i, ssts, sig);
+                ahci_port_t *port = &ctrl->ports[i];
+                port->port_num = (uint8_t)i;
+                port->regs = regs;
 
-                if (sig == AHCI_SIG_ATA) {
-                    ahci_port_t *port = &ctrl->ports[i];
-                    port->port_num = (uint8_t)i;
-                    port->regs = regs;
+                if (ahci_port_init(port) == 0) {
+                    // Wait briefly for initial D2H FIS signature to latch
+                    for (uint32_t t = 0; t < 100000; t++) {
+                        if ((regs->tfd & HBA_TFD_BSY) == 0 && regs->sig != 0xFFFFFFFF) {
+                            break;
+                        }
+                    }
 
-                    if (ahci_port_init(port) == 0) {
+                    uint32_t sig = regs->sig;
+                    kinfo("AHCI: Port %u link active (SSTS=0x%x, SIG=0x%08x)", i, ssts, sig);
+
+                    if (sig == AHCI_SIG_ATA || sig == 0 || sig == 0xFFFFFFFF) {
                         if (ahci_identify(port) == 0) {
                             if (g_active_port_count < AHCI_MAX_PORTS) {
                                 g_active_ports[g_active_port_count++] = port;
                             }
                             found++;
                         }
+                    } else if (sig == AHCI_SIG_ATAPI) {
+                        kinfo("AHCI: Port %u is ATAPI optical device (skipped)", i);
                     }
-                } else if (sig == AHCI_SIG_ATAPI) {
-                    kinfo("AHCI: Port %u is ATAPI optical device (skipped)", i);
                 }
             }
         }
