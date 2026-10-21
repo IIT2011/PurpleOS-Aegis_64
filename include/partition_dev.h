@@ -25,5 +25,7 @@ typedef struct partition_dev {
 } partition_dev_t;
 
 int partition_dev_init(partition_dev_t *pdev, ata_device_t *ata_dev, const gpt_partition_t *part);
+void partition_dev_set_writable(partition_dev_t *pdev, int writable);
+int partition_dev_is_writable(const partition_dev_t *pdev);
 
 #endif /* PARTITION_DEV_H */
