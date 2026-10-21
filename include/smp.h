@@ -15,11 +15,19 @@ typedef struct {
     volatile uint64_t bsp_ack;
 } __attribute__((packed)) smp_trampoline_data_t;
 
+#ifdef __KERNEL_HOST_TEST__
+static inline void smp_init(void) {}
+static inline void smp_broadcast_resched(void) {}
+static inline void smp_broadcast_halt(void) {}
+static inline void smp_send_resched(uint32_t cpu_id) { (void)cpu_id; }
+static inline uint32_t smp_get_online_count(void) { return 1; }
+#else
 void smp_init(void);
 void smp_ap_entry(void);
 void smp_send_resched(uint32_t cpu_id);
 void smp_broadcast_resched(void);
 void smp_broadcast_halt(void);
 uint32_t smp_get_online_count(void);
+#endif
 
 #endif /* SMP_H */

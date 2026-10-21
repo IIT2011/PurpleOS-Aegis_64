@@ -43,6 +43,7 @@ void task_set_affinity(task_t *task, uint64_t cpu_mask) {
     spinlock_acquire_irqsave(&sched_lock, &rflags);
     task->cpu_affinity = cpu_mask;
     spinlock_release_irqrestore(&sched_lock, rflags);
+    smp_broadcast_resched();
 }
 
 uint64_t task_get_affinity(const task_t *task) {
@@ -116,6 +117,7 @@ task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, ta
           t->id, t->name, stack, (uint32_t)priority);
 
     spinlock_release_irqrestore(&sched_lock, rflags);
+    smp_broadcast_resched();
     return t;
 }
 
