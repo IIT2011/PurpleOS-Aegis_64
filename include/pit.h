@@ -8,5 +8,6 @@
 
 void pit_init(uint32_t frequency);
 uint64_t pit_get_ticks(void);
+void pit_delay_10ms(void);
 
 #endif /* PIT_H */
