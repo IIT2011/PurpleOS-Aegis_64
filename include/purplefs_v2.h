@@ -143,6 +143,7 @@ int pfs2_read_file(pfs2_fs_t *fs, uint32_t inode_num, void *buf, size_t count, u
 int pfs2_write_file(pfs2_fs_t *fs, uint32_t inode_num, const void *buf, size_t count, uint64_t offset, size_t *out_bytes_written);
 int pfs2_truncate_file(pfs2_fs_t *fs, uint32_t inode_num, uint64_t new_size);
 int pfs2_read_inode(pfs2_fs_t *fs, uint32_t inode_num, pfs2_inode_t *out_inode);
+int pfs2_sync(pfs2_fs_t *fs);
 
 /* Crash Recovery & Journal Operations */
 int pfs2_journal_replay_if_needed(pfs2_fs_t *fs);

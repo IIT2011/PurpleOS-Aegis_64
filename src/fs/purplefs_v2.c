@@ -795,3 +795,11 @@ int pfs2_truncate_file(pfs2_fs_t *fs, uint32_t inode_num, uint64_t new_size) {
 
     return journal_commit_transaction(fs, slots, s_count);
 }
+
+int pfs2_sync(pfs2_fs_t *fs) {
+    if (!fs || !fs->is_mounted || !fs->dev) return PFS2_ERR_INVALID;
+    if (fs->dev->flush) {
+        return (fs->dev->flush(fs->dev) == 0) ? PFS2_OK : PFS2_ERR_IO;
+    }
+    return PFS2_OK;
+}
