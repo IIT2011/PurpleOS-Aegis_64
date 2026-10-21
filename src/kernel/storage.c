@@ -4,7 +4,15 @@
 
 kernel_storage_t g_kernel_storage;
 
+extern uint64_t boot_pd_3[];
+static void check_pd3_s(const char *where) {
+    if (boot_pd_3[503] == 0) {
+        kerror("STORAGE: boot_pd_3[503] wiped at %s!", where);
+    }
+}
+
 void storage_init(void) {
+    check_pd3_s("storage_init entry");
     memset(&g_kernel_storage, 0, sizeof(g_kernel_storage));
     g_kernel_storage.active_device_idx = -1;
     g_kernel_storage.active_part_idx = -1;
@@ -22,6 +30,7 @@ void storage_init(void) {
         ata_device_init(dev, channels[i], drives[i], ata_get_default_ops());
 
         int id_rc = ata_identify(dev);
+        check_pd3_s("after ata_identify");
         if (id_rc == ATA_OK && dev->is_present) {
             found_count++;
             uint32_t size_mib = (uint32_t)(dev->total_sectors * 512 / (1024 * 1024));
@@ -31,6 +40,7 @@ void storage_init(void) {
             // Attempt GPT parse
             gpt_info_t *gpt = &g_kernel_storage.gpt[i];
             int gpt_rc = gpt_parse(dev, gpt);
+            check_pd3_s("after gpt_parse");
             if (gpt_rc == GPT_OK && gpt->valid_header && gpt->partition_count > 0) {
                 kinfo("Storage: [%s] Valid GPT detected with %u partition(s)", names[i], gpt->partition_count);
 
@@ -47,8 +57,10 @@ void storage_init(void) {
                     kinfo("Storage: Found PurpleFS v2 partition at index %u on [%s]", pidx, names[i]);
 
                     int pinit = partition_dev_init(&g_kernel_storage.part_dev, dev, &gpt->partitions[pidx]);
+                    check_pd3_s("after partition_dev_init");
                     if (pinit == PART_DEV_OK) {
                         int mrc = pfs2_mount(&g_kernel_storage.fs, &g_kernel_storage.part_dev.base);
+                        check_pd3_s("after pfs2_mount");
                         if (mrc == PFS2_OK) {
                             g_kernel_storage.fs_mounted = 1;
                             g_kernel_storage.active_device_idx = i;
