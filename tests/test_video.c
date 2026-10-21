@@ -12,7 +12,7 @@
 #include "multiboot.h"
 
 #define FB_WIDTH  80
-#define FB_HEIGHT 40
+#define FB_HEIGHT 48
 #define FB_PITCH  (FB_WIDTH * 4)
 
 static uint32_t fake_fb[FB_WIDTH * FB_HEIGHT];
