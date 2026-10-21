@@ -107,6 +107,9 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     /* Step 4.5: Symmetric Multiprocessing (SMP AP Bootstrap) */
     smp_init();
 
+    /* Step 4.6: PCI Bus Enumeration */
+    pci_init();
+
     /* Step 5: Storage Discovery and PurpleFS v2 Mount */
     storage_init();
 
