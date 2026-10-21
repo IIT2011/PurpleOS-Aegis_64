@@ -88,6 +88,7 @@ int mouse_init(void) {
     mouse_state.buttons = 0;
     mouse_cycle = 0;
 
+#ifndef __KERNEL_HOST_TEST__
     // 1. Enable Auxiliary Device (second PS/2 port)
     mouse_wait_write();
     outb(0x64, 0xA8);
@@ -127,6 +128,9 @@ int mouse_init(void) {
     kinfo("Mouse: PS/2 Auxiliary device initialized on IRQ 12");
     purple_detect_register(PURPLE_CAT_INPUT, "PS2MOU", "Standard", "PS/2 Mouse", "ISA", 0x60, 12,
                            PURPLE_STATE_ACTIVE, PURPLE_DEV_FLAG_BUILTIN);
+#else
+    mouse_detected = 1;
+#endif
 
     return 0;
 }
