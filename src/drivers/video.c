@@ -238,14 +238,14 @@ static void video_scroll(void) {
 
 static void video_draw_glyph(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg) {
     uint8_t ch = (uint8_t)c;
-    if (ch >= 128) ch = '?';
     const uint8_t *bitmap = font8x16[ch];
 
     for (uint32_t row = 0; row < 16; row++) {
+        if (y + row >= fb_height) break;
         uint8_t bits = bitmap[row];
         uint32_t *dest = (uint32_t *)((uint8_t *)fb_ptr + (y + row) * fb_pitch) + x;
         for (uint32_t col = 0; col < 8; col++) {
-            if (x + col < fb_width && y + row < fb_height) {
+            if (x + col < fb_width) {
                 dest[col] = (bits & (0x80 >> col)) ? fg : bg;
             }
         }
