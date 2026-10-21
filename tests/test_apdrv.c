@@ -251,7 +251,7 @@ static void test_apdrv_module_lifecycle(void) {
     test_probe_called = 0;
     test_ioctl_called = 0;
 
-    uint8_t buffer[2048];
+    uint8_t buffer[2048] __attribute__((aligned(16)));
     memset(buffer, 0, sizeof(buffer));
 
     apdrv_header_t *hdr = (apdrv_header_t *)buffer;

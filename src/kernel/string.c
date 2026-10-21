@@ -87,6 +87,8 @@ char *strncpy(char *dest, const char *src, size_t n) {
     return dest;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnonnull-compare"
 char *strstr(const char *haystack, const char *needle) {
     if (!haystack || !needle) return NULL;
     if (*needle == '\0') return (char *)haystack;
@@ -103,3 +105,4 @@ char *strstr(const char *haystack, const char *needle) {
     }
     return NULL;
 }
+#pragma GCC diagnostic pop

@@ -133,9 +133,15 @@ void ksym_init(void) {
     ksym_register("pmm_free_frame", (uint64_t)(uintptr_t)pmm_free_frame);
 
     /* 7. Task Management */
+#ifndef __KERNEL_HOST_TEST__
     ksym_register("task_create", (uint64_t)(uintptr_t)task_create);
     ksym_register("task_sleep", (uint64_t)(uintptr_t)task_sleep);
     ksym_register("task_yield", (uint64_t)(uintptr_t)task_yield);
+#else
+    ksym_register("task_create", 0x1000);
+    ksym_register("task_sleep", 0x2000);
+    ksym_register("task_yield", 0x3000);
+#endif
 
     /* 8. Desktop GUI & Window Subsystem */
     ksym_register("desktop_create_window", (uint64_t)(uintptr_t)desktop_create_window);

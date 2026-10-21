@@ -87,6 +87,7 @@ typedef struct {
     uint16_t target_device;
     uint32_t flags;             /* APDRV_FLAG_* */
     uint32_t checksum;          /* Simple CRC32 / Fletcher checksum of payload */
+    uint32_t reserved;          /* 8-byte alignment pad */
 } __attribute__((packed)) apdrv_header_t;
 
 /* Module State */

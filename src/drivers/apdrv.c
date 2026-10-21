@@ -107,6 +107,17 @@ int apdrv_load(const void *image, uint32_t image_size, apdrv_module_t **out_mod)
         return -8;
     }
 
+    /* Verify checksum if provided */
+    if (hdr->checksum != 0) {
+        uint32_t csum = calc_checksum((const uint8_t *)image + sizeof(apdrv_header_t),
+                                      image_size - sizeof(apdrv_header_t));
+        if (csum != hdr->checksum) {
+            kerror("APDRV: Module '%s' checksum mismatch (calculated 0x%08x != header 0x%08x)",
+                   hdr->name, csum, hdr->checksum);
+            return -13;
+        }
+    }
+
     /* 2. Resolve Symbol Imports (Fail-Closed) */
     uint64_t resolved_imports[APDRV_MAX_SYMBOLS];
     if (hdr->import_count > APDRV_MAX_SYMBOLS) {
@@ -305,9 +316,9 @@ int apdrv_load(const void *image, uint32_t image_size, apdrv_module_t **out_mod)
     }
 
     /* Register with PurpleDetect as an active driver */
-    purple_detect_register(DEVICE_CAT_OTHER, hdr->name, hdr->description,
-                           hdr->author, DEVICE_BUS_PCI, (uint32_t)(uintptr_t)module_mem,
-                           0, DEVICE_STATE_ACTIVE);
+    purple_detect_register(PURPLE_CAT_VIRTUAL, hdr->name, hdr->description,
+                           hdr->author, "PCI", (uint32_t)(uintptr_t)module_mem,
+                           0, PURPLE_STATE_ACTIVE, 0);
 
     kinfo("APDRV: Module '%s' v%u.%u.%u loaded successfully (Mem=%p, %u bytes, W^X=%s, Bound=%u)",
           hdr->name,
@@ -352,16 +363,16 @@ int apdrv_unload(const char *name) {
     }
 
     /* Unregister from PurpleDetect */
-    purple_device_t *pdev = purple_detect_find_by_name(mod->hdr.name);
+    const purple_device_t *pdev = purple_detect_find_by_name(mod->hdr.name);
     if (pdev) {
         purple_detect_unregister(pdev->id);
     }
 
     /* Free memory */
-    uint32_t page_count = (mod->total_size + 4095) / 4096;
 #ifdef __KERNEL_HOST_TEST__
     free(mod->memory);
 #else
+    uint32_t page_count = (mod->total_size + 4095) / 4096;
     pmm_free_frames(mod->memory, page_count);
 #endif
 
