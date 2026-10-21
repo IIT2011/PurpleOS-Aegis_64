@@ -51,7 +51,9 @@ def main():
             "peek version.txt\n",
             "aegisdetect\n",
             "devices\n",
-            "lspci\n"
+            "lspci\n",
+            "desktop\n",
+            "mouse\n"
         ]
 
         for c in commands:
