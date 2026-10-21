@@ -9,6 +9,7 @@ static volatile uint32_t *lapic_base = NULL;
 static uint64_t lapic_phys_address = 0;
 static int apic_enabled = 0;
 static uint32_t apic_timer_frequency = 0;
+static uint32_t apic_ticks_per_quantum = 0;
 
 static inline uint32_t lapic_read(uint32_t reg) {
     if (!lapic_base) return 0;
@@ -84,6 +85,40 @@ int apic_init(uint64_t phys_base) {
     return 0;
 }
 
+void apic_init_ap(void) {
+    if (!lapic_base) return;
+
+    /* 1. Ensure Local APIC is enabled in MSR 0x1B on this AP */
+    uint64_t msr = rdmsr(0x1B);
+    if (!(msr & (1ULL << 11))) {
+        wrmsr(0x1B, msr | (1ULL << 11));
+    }
+
+    /* 2. Configure Local Destination and Format Registers */
+    lapic_write(LAPIC_DFR, 0xFFFFFFFF); // Flat model
+    lapic_write(LAPIC_LDR, (lapic_read(LAPIC_ID) & 0xFF000000));
+
+    /* 3. Register Spurious Interrupt Handler & Enable APIC Software Flag */
+    lapic_write(LAPIC_SVR, LAPIC_SPURIOUS_VECTOR | LAPIC_SVR_ENABLE);
+
+    /* 4. Accept all interrupts by setting Task Priority Register to 0 */
+    lapic_write(LAPIC_TPR, 0);
+
+    /* 5. Clear error status */
+    lapic_write(LAPIC_ESR, 0);
+    lapic_write(LAPIC_ESR, 0);
+
+    /* 6. Send initial EOI to clear stale pending interrupts */
+    lapic_write(LAPIC_EOI, 0);
+
+    /* 7. Start periodic timer on this AP if quantum was calibrated by BSP */
+    if (apic_ticks_per_quantum > 0) {
+        lapic_write(LAPIC_TIMER_DIVIDE, 0x03);
+        lapic_write(LAPIC_LVT_TIMER, LAPIC_TIMER_VECTOR | LAPIC_TIMER_PERIODIC);
+        lapic_write(LAPIC_TIMER_INIT_CNT, apic_ticks_per_quantum);
+    }
+}
+
 uint32_t apic_get_id(void) {
     return (lapic_read(LAPIC_ID) >> 24) & 0xFF;
 }
@@ -139,6 +174,7 @@ void apic_timer_init(uint32_t frequency_hz) {
     if (ticks_per_quantum == 0) ticks_per_quantum = 10000;
 
     apic_timer_frequency = frequency_hz;
+    apic_ticks_per_quantum = ticks_per_quantum;
 
     /* 2. Configure Periodic Timer on Vector 32 (matches scheduler IRQ 0) */
     lapic_write(LAPIC_TIMER_DIVIDE, 0x03);
