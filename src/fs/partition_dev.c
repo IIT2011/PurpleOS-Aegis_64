@@ -132,3 +132,13 @@ int partition_dev_init(partition_dev_t *pdev, ata_device_t *ata_dev, const gpt_p
 
     return PART_DEV_OK;
 }
+
+void partition_dev_set_writable(partition_dev_t *pdev, int writable) {
+    if (pdev) {
+        pdev->read_only = writable ? 0 : 1;
+    }
+}
+
+int partition_dev_is_writable(const partition_dev_t *pdev) {
+    return (pdev && !pdev->read_only);
+}
