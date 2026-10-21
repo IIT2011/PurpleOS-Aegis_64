@@ -89,16 +89,6 @@ static void shell_prompt(void) {
     serial_write("aegis64@purple:~$ ");
 }
 
-static void reboot_system(void) {
-    shell_print("Rebooting Aegis64 system via 8042 keyboard controller...\n");
-    uint8_t good = 0x02;
-    while (good & 0x02) {
-        good = inb(0x64);
-    }
-    outb(0x64, 0xFE);
-    hlt();
-}
-
 static void test_task_worker(void *arg) {
     const char *name = (const char *)arg;
     for (int i = 0; i < 3; i++) {

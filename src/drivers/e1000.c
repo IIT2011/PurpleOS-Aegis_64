@@ -197,51 +197,46 @@ int e1000_init(void) {
     e1000_read_mac();
 
     /* Allocate Coherent DMA Memory for Descriptors */
-    dma_buffer_t rx_dma, tx_dma;
-    if (dma_alloc_coherent(&rx_dma, E1000_NUM_RX_DESC * sizeof(e1000_rx_desc_t)) != 0 ||
-        dma_alloc_coherent(&tx_dma, E1000_NUM_TX_DESC * sizeof(e1000_tx_desc_t)) != 0) {
+    uint64_t rx_phys = 0, tx_phys = 0;
+    e1000_dev.rx_descs = (e1000_rx_desc_t *)dma_alloc_coherent(E1000_NUM_RX_DESC * sizeof(e1000_rx_desc_t), &rx_phys);
+    e1000_dev.tx_descs = (e1000_tx_desc_t *)dma_alloc_coherent(E1000_NUM_TX_DESC * sizeof(e1000_tx_desc_t), &tx_phys);
+
+    if (!e1000_dev.rx_descs || !e1000_dev.tx_descs) {
         kerror("e1000: Failed to allocate coherent DMA memory for descriptors");
         return -3;
     }
 
-    e1000_dev.rx_descs = (e1000_rx_desc_t *)rx_dma.virt_addr;
-    e1000_dev.tx_descs = (e1000_tx_desc_t *)tx_dma.virt_addr;
-
     /* Allocate packet buffer pointer arrays */
-    dma_buffer_t rx_bufs_dma, tx_bufs_dma;
-    dma_alloc_coherent(&rx_bufs_dma, E1000_NUM_RX_DESC * sizeof(void *));
-    dma_alloc_coherent(&tx_bufs_dma, E1000_NUM_TX_DESC * sizeof(void *));
-    e1000_dev.rx_buffers = (void **)rx_bufs_dma.virt_addr;
-    e1000_dev.tx_buffers = (void **)tx_bufs_dma.virt_addr;
+    uint64_t dummy = 0;
+    e1000_dev.rx_buffers = (void **)dma_alloc_coherent(E1000_NUM_RX_DESC * sizeof(void *), &dummy);
+    e1000_dev.tx_buffers = (void **)dma_alloc_coherent(E1000_NUM_TX_DESC * sizeof(void *), &dummy);
 
     for (uint32_t i = 0; i < E1000_NUM_RX_DESC; i++) {
-        dma_buffer_t b;
-        dma_alloc_coherent(&b, E1000_BUFFER_SIZE);
-        e1000_dev.rx_buffers[i] = b.virt_addr;
-        e1000_dev.rx_descs[i].addr = b.phys_addr;
+        uint64_t buf_phys = 0;
+        e1000_dev.rx_buffers[i] = dma_alloc_coherent(E1000_BUFFER_SIZE, &buf_phys);
+        e1000_dev.rx_descs[i].addr = buf_phys;
         e1000_dev.rx_descs[i].status = 0;
     }
 
     for (uint32_t i = 0; i < E1000_NUM_TX_DESC; i++) {
-        dma_buffer_t b;
-        dma_alloc_coherent(&b, E1000_BUFFER_SIZE);
-        e1000_dev.tx_buffers[i] = b.virt_addr;
-        e1000_dev.tx_descs[i].addr = b.phys_addr;
+        uint64_t buf_phys = 0;
+        e1000_dev.tx_buffers[i] = dma_alloc_coherent(E1000_BUFFER_SIZE, &buf_phys);
+        e1000_dev.tx_descs[i].addr = buf_phys;
         e1000_dev.tx_descs[i].status = TXD_STAT_DD;
         e1000_dev.tx_descs[i].cmd = 0;
     }
 
     /* Initialize Hardware RX */
-    e1000_write32(REG_RDBAL, (uint32_t)rx_dma.phys_addr);
-    e1000_write32(REG_RDBAH, (uint32_t)(rx_dma.phys_addr >> 32));
+    e1000_write32(REG_RDBAL, (uint32_t)rx_phys);
+    e1000_write32(REG_RDBAH, (uint32_t)(rx_phys >> 32));
     e1000_write32(REG_RDLEN, E1000_NUM_RX_DESC * sizeof(e1000_rx_desc_t));
     e1000_write32(REG_RDH, 0);
     e1000_write32(REG_RDT, E1000_NUM_RX_DESC - 1);
     e1000_write32(REG_RCTL, RCTL_EN | RCTL_SBP | RCTL_UPE | RCTL_MPE | RCTL_BAM | RCTL_SECRC);
 
     /* Initialize Hardware TX */
-    e1000_write32(REG_TDBAL, (uint32_t)tx_dma.phys_addr);
-    e1000_write32(REG_TDBAH, (uint32_t)(tx_dma.phys_addr >> 32));
+    e1000_write32(REG_TDBAL, (uint32_t)tx_phys);
+    e1000_write32(REG_TDBAH, (uint32_t)(tx_phys >> 32));
     e1000_write32(REG_TDLEN, E1000_NUM_TX_DESC * sizeof(e1000_tx_desc_t));
     e1000_write32(REG_TDH, 0);
     e1000_write32(REG_TDT, 0);
