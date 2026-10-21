@@ -72,6 +72,9 @@ int vmm_split_huge_page(page_table_t *pml4, uint64_t vaddr) {
     write_cr3(read_cr3());
 
     uint64_t lapic_phys = 0, lapic_flags = 0;
+    page_table_t *pd3 = (page_table_t *)(uintptr_t)(pdpt->entries[3] & ENTRY_ADDR_MASK);
+    kinfo("VMM: After split, pdpt[3]=0x%llx, pd3=%p, pd3[503]=0x%llx",
+          (unsigned long long)pdpt->entries[3], pd3, (unsigned long long)pd3->entries[503]);
     int lapic_res = vmm_get_mapping(pml4, 0xfee00000, &lapic_phys, &lapic_flags);
     kinfo("VMM: After split, LAPIC (0xfee00000) mapping res=%d, phys=0x%llx, flags=0x%llx",
           lapic_res, (unsigned long long)lapic_phys, (unsigned long long)lapic_flags);
