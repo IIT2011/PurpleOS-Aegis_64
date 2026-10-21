@@ -117,6 +117,19 @@ static void mock_outb(uint16_t port, uint8_t val) {
             } else {
                 g_mock.reg_status = ATA_SR_DRDY | ATA_SR_DRQ;
             }
+        } else if (val == ATA_CMD_WRITE_PIO) {
+            g_mock.in_identify = 0;
+            uint32_t count = (g_mock.reg_sec_count == 0) ? 256 : g_mock.reg_sec_count;
+            uint32_t lba = (uint32_t)g_mock.reg_lba_lo |
+                           ((uint32_t)g_mock.reg_lba_mid << 8) |
+                           ((uint32_t)g_mock.reg_lba_hi << 16) |
+                           (((uint32_t)g_mock.reg_drive_head & 0x0F) << 24);
+            g_mock.current_lba = lba;
+            g_mock.sectors_remaining = count;
+            g_mock.word_offset_in_sector = 0;
+            g_mock.reg_status = ATA_SR_DRDY | ATA_SR_DRQ;
+        } else if (val == ATA_CMD_CACHE_FLUSH || val == ATA_CMD_CACHE_FLUSH_EXT) {
+            g_mock.reg_status = ATA_SR_DRDY;
         }
     }
 }
@@ -141,8 +154,21 @@ static uint8_t mock_inb(uint16_t port) {
 }
 
 static void mock_outw(uint16_t port, uint16_t val) {
-    (void)port;
-    (void)val;
+    if (port != ATA_PRIMARY_IO_BASE) return;
+    if (g_mock.sectors_remaining > 0 && g_mock.current_lba < MOCK_DISK_SECTORS) {
+        uint8_t *sec = g_mock_disk[g_mock.current_lba];
+        sec[g_mock.word_offset_in_sector * 2]     = (uint8_t)(val & 0xFF);
+        sec[g_mock.word_offset_in_sector * 2 + 1] = (uint8_t)((val >> 8) & 0xFF);
+        g_mock.word_offset_in_sector++;
+        if (g_mock.word_offset_in_sector >= 256) {
+            g_mock.word_offset_in_sector = 0;
+            g_mock.current_lba++;
+            g_mock.sectors_remaining--;
+            if (g_mock.sectors_remaining == 0) {
+                g_mock.reg_status = ATA_SR_DRDY;
+            }
+        }
+    }
 }
 
 static uint16_t mock_inw(uint16_t port) {
