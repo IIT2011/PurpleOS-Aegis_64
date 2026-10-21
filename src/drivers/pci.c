@@ -168,6 +168,28 @@ const pci_device_t *pci_get_device(uint32_t index) {
     return &pci_devices[index];
 }
 
+const pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id) {
+    for (uint32_t i = 0; i < pci_device_count; i++) {
+        if (pci_devices[i].vendor_id == vendor_id &&
+            (device_id == 0xFFFF || pci_devices[i].device_id == device_id)) {
+            return &pci_devices[i];
+        }
+    }
+    return NULL;
+}
+
+void pci_enable_bus_mastering(uint8_t bus, uint8_t dev, uint8_t func) {
+    uint16_t cmd = pci_read_config_word(bus, dev, func, PCI_REG_COMMAND);
+    cmd |= 0x0004; /* Bit 2: Bus Master */
+    pci_write_config_word(bus, dev, func, PCI_REG_COMMAND, cmd);
+}
+
+void pci_enable_io(uint8_t bus, uint8_t dev, uint8_t func) {
+    uint16_t cmd = pci_read_config_word(bus, dev, func, PCI_REG_COMMAND);
+    cmd |= 0x0001 | 0x0002; /* Bit 0: I/O Space, Bit 1: Memory Space */
+    pci_write_config_word(bus, dev, func, PCI_REG_COMMAND, cmd);
+}
+
 void pci_print_devices(void) {
     kprintf("\n=== PCI Bus Device Inventory (%u devices detected) ===\n", pci_device_count);
     kprintf("  BDF      VENDOR:DEVICE  CLASS:SUBCLASS  IRQ  DESCRIPTION\n");
