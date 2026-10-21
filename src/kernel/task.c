@@ -3,10 +3,13 @@
 #include "string.h"
 #include "serial.h"
 #include "io.h"
+#include "cpu.h"
+#include "spinlock.h"
 
 static task_t task_table[MAX_TASKS];
-static task_t *current_task = NULL;
-static task_t *idle_task = NULL;
+static task_t *current_tasks[MAX_CPUS];
+static task_t *idle_tasks[MAX_CPUS];
+static spinlock_t sched_lock = SPINLOCK_INIT;
 static uint32_t next_task_id = 1;
 static uint64_t system_ticks = 0;
 
@@ -21,7 +24,9 @@ static uint32_t get_slice_for_priority(task_priority_t prio) {
 }
 
 task_t *task_get_current(void) {
-    return current_task;
+    uint32_t cpu_id = cpu_get_current_id();
+    if (cpu_id >= MAX_CPUS) cpu_id = 0;
+    return current_tasks[cpu_id];
 }
 
 static void idle_task_func(void *arg) {
@@ -31,8 +36,23 @@ static void idle_task_func(void *arg) {
     }
 }
 
+void task_set_affinity(task_t *task, uint64_t cpu_mask) {
+    if (!task || cpu_mask == 0) return;
+    uint64_t rflags;
+    spinlock_acquire_irqsave(&sched_lock, &rflags);
+    task->cpu_affinity = cpu_mask;
+    spinlock_release_irqrestore(&sched_lock, rflags);
+}
+
+uint64_t task_get_affinity(const task_t *task) {
+    if (!task) return 0;
+    return task->cpu_affinity;
+}
+
 task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, task_priority_t priority) {
-    cli();
+    uint64_t rflags;
+    spinlock_acquire_irqsave(&sched_lock, &rflags);
+
     task_t *t = NULL;
     for (int i = 0; i < MAX_TASKS; i++) {
         if (task_table[i].state == TASK_TERMINATED || task_table[i].id == 0) {
@@ -43,7 +63,7 @@ task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, ta
 
     if (!t) {
         kerror("Scheduler: Maximum task limit reached (%d)", MAX_TASKS);
-        sti();
+        spinlock_release_irqrestore(&sched_lock, rflags);
         return NULL;
     }
 
@@ -51,7 +71,7 @@ task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, ta
     void *stack = pmm_alloc_frames(TASK_STACK_SIZE / PMM_PAGE_SIZE);
     if (!stack) {
         kerror("Scheduler: Failed to allocate stack for task %s", name);
-        sti();
+        spinlock_release_irqrestore(&sched_lock, rflags);
         return NULL;
     }
 
@@ -63,6 +83,8 @@ task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, ta
     t->ticks_remaining = t->time_slice_ticks;
     t->sleep_until_ticks = 0;
     t->stack_base = stack;
+    t->cpu_affinity = ~0ULL; // Any CPU by default
+    t->last_cpu = cpu_get_current_id();
 
     /* Setup initial stack for switch_context and task_trampoline */
     uint64_t *sp = (uint64_t *)((uintptr_t)stack + TASK_STACK_SIZE);
@@ -92,26 +114,34 @@ task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, ta
     kinfo("Scheduler: Created task %u ('%s') at stack %p, priority %u",
           t->id, t->name, stack, (uint32_t)priority);
 
-    sti();
+    spinlock_release_irqrestore(&sched_lock, rflags);
     return t;
 }
 
 void task_exit(void) {
-    cli();
-    if (!current_task) {
+    uint32_t cpu_id = cpu_get_current_id();
+    if (cpu_id >= MAX_CPUS) cpu_id = 0;
+
+    uint64_t rflags;
+    spinlock_acquire_irqsave(&sched_lock, &rflags);
+    task_t *cur = current_tasks[cpu_id];
+    if (!cur) {
+        spinlock_release_irqrestore(&sched_lock, rflags);
         hlt();
     }
 
-    kinfo("Scheduler: Task %u ('%s') exiting", current_task->id, current_task->name);
-    current_task->state = TASK_TERMINATED;
+    kinfo("Scheduler: Task %u ('%s') exiting on CPU %u", cur->id, cur->name, cpu_id);
+    cur->state = TASK_TERMINATED;
 
     /* Free stack if not idle task */
-    if (current_task != idle_task && current_task->stack_base) {
-        pmm_free_frames(current_task->stack_base, TASK_STACK_SIZE / PMM_PAGE_SIZE);
-        current_task->stack_base = NULL;
+    if (cur != idle_tasks[cpu_id] && cur->stack_base) {
+        pmm_free_frames(cur->stack_base, TASK_STACK_SIZE / PMM_PAGE_SIZE);
+        cur->stack_base = NULL;
     }
 
+    spinlock_release_irqrestore(&sched_lock, rflags);
     schedule();
+
     /* Should never reach here */
     while (1) {
         hlt();
@@ -119,27 +149,37 @@ void task_exit(void) {
 }
 
 void task_sleep(uint32_t ticks) {
-    cli();
-    if (!current_task) {
-        sti();
+    uint32_t cpu_id = cpu_get_current_id();
+    if (cpu_id >= MAX_CPUS) cpu_id = 0;
+
+    uint64_t rflags;
+    spinlock_acquire_irqsave(&sched_lock, &rflags);
+    task_t *cur = current_tasks[cpu_id];
+    if (!cur) {
+        spinlock_release_irqrestore(&sched_lock, rflags);
         return;
     }
-    current_task->sleep_until_ticks = system_ticks + ticks;
-    current_task->state = TASK_SLEEPING;
+    cur->sleep_until_ticks = system_ticks + ticks;
+    cur->state = TASK_SLEEPING;
+    spinlock_release_irqrestore(&sched_lock, rflags);
     schedule();
-    sti();
 }
 
 void task_yield(void) {
-    cli();
-    if (current_task) {
-        current_task->ticks_remaining = 0;
+    uint32_t cpu_id = cpu_get_current_id();
+    if (cpu_id >= MAX_CPUS) cpu_id = 0;
+
+    uint64_t rflags;
+    spinlock_acquire_irqsave(&sched_lock, &rflags);
+    task_t *cur = current_tasks[cpu_id];
+    if (cur) {
+        cur->ticks_remaining = 0;
     }
+    spinlock_release_irqrestore(&sched_lock, rflags);
     schedule();
-    sti();
 }
 
-static task_t *pick_next_task(void) {
+static task_t *pick_next_task(uint32_t cpu_id) {
     /* 1. Wake up sleeping tasks whose timer expired */
     for (int i = 0; i < MAX_TASKS; i++) {
         if (task_table[i].id != 0 && task_table[i].state == TASK_SLEEPING) {
@@ -149,38 +189,46 @@ static task_t *pick_next_task(void) {
         }
     }
 
-    /* 2. Find highest priority ready task (High -> Normal -> Low) */
+    /* 2. Find highest priority ready task eligible for this CPU */
     for (int prio = PRIORITY_HIGH; prio >= PRIORITY_LOW; prio--) {
-        int start_idx = (current_task) ? (int)(current_task - task_table + 1) : 0;
+        int start_idx = (current_tasks[cpu_id]) ? (int)(current_tasks[cpu_id] - task_table + 1) : 0;
         for (int i = 0; i < MAX_TASKS; i++) {
             int idx = (start_idx + i) % MAX_TASKS;
             if (task_table[idx].id != 0 &&
                 task_table[idx].state == TASK_READY &&
                 task_table[idx].priority == (task_priority_t)prio &&
-                &task_table[idx] != idle_task) {
+                (task_table[idx].cpu_affinity & (1ULL << cpu_id))) {
                 return &task_table[idx];
             }
         }
     }
 
-    /* If current task is ready and still running, it can continue if no other tasks */
-    if (current_task && current_task->state == TASK_RUNNING && current_task != idle_task) {
-        return current_task;
+    /* If current task is ready and still running on this CPU, it can continue */
+    if (current_tasks[cpu_id] && current_tasks[cpu_id]->state == TASK_RUNNING &&
+        current_tasks[cpu_id] != idle_tasks[cpu_id]) {
+        return current_tasks[cpu_id];
     }
 
-    /* Otherwise, pick idle task */
-    return idle_task;
+    /* Otherwise, pick this CPU's idle task */
+    return idle_tasks[cpu_id];
 }
 
 void schedule(void) {
-    task_t *prev = current_task;
-    task_t *next = pick_next_task();
+    uint32_t cpu_id = cpu_get_current_id();
+    if (cpu_id >= MAX_CPUS) cpu_id = 0;
+
+    uint64_t rflags;
+    spinlock_acquire_irqsave(&sched_lock, &rflags);
+
+    task_t *prev = current_tasks[cpu_id];
+    task_t *next = pick_next_task(cpu_id);
 
     if (!next) {
-        next = idle_task;
+        next = idle_tasks[cpu_id];
     }
 
     if (prev == next && prev && prev->state == TASK_RUNNING) {
+        spinlock_release_irqrestore(&sched_lock, rflags);
         return;
     }
 
@@ -188,9 +236,14 @@ void schedule(void) {
         prev->state = TASK_READY;
     }
 
-    next->state = TASK_RUNNING;
-    next->ticks_remaining = next->time_slice_ticks;
-    current_task = next;
+    if (next) {
+        next->state = TASK_RUNNING;
+        next->ticks_remaining = next->time_slice_ticks;
+        next->last_cpu = cpu_id;
+    }
+    current_tasks[cpu_id] = next;
+
+    spinlock_release_irqrestore(&sched_lock, rflags);
 
     if (prev) {
         switch_context(&prev->rsp, next->rsp);
@@ -201,25 +254,36 @@ void schedule(void) {
 }
 
 void task_timer_tick(void) {
-    system_ticks++;
+    uint32_t cpu_id = cpu_get_current_id();
+    if (cpu_id >= MAX_CPUS) cpu_id = 0;
 
-    if (!current_task) return;
+    cpu_t *c = cpu_get(cpu_id);
+    if (c) c->lapic_timer_ticks++;
 
-    if (current_task->ticks_remaining > 0) {
-        current_task->ticks_remaining--;
+    if (cpu_id == 0) {
+        system_ticks++;
     }
 
-    if (current_task->ticks_remaining == 0) {
+    task_t *cur = current_tasks[cpu_id];
+    if (!cur) return;
+
+    if (cur->ticks_remaining > 0) {
+        cur->ticks_remaining--;
+    }
+
+    if (cur->ticks_remaining == 0) {
         schedule();
     }
 }
 
 void scheduler_init(void) {
     memset(task_table, 0, sizeof(task_table));
+    memset(current_tasks, 0, sizeof(current_tasks));
+    memset(idle_tasks, 0, sizeof(idle_tasks));
     system_ticks = 0;
     next_task_id = 1;
 
-    /* Initialize boot/main kernel context as Task 1 */
+    /* Initialize boot/main kernel context as Task 1 on CPU 0 */
     task_t *main_task = &task_table[0];
     main_task->id = next_task_id++;
     strncpy(main_task->name, "kernel_main", sizeof(main_task->name));
@@ -228,17 +292,45 @@ void scheduler_init(void) {
     main_task->ticks_remaining = main_task->time_slice_ticks;
     main_task->state = TASK_RUNNING;
     main_task->stack_base = NULL; // Uses kernel boot stack
-    current_task = main_task;
+    main_task->cpu_affinity = 1ULL << 0; // Bound to BSP
+    main_task->last_cpu = 0;
+    current_tasks[0] = main_task;
 
-    /* Create idle task */
-    idle_task = task_create("idle", idle_task_func, NULL, PRIORITY_IDLE);
+    /* Create idle task for CPU 0 */
+    idle_tasks[0] = task_create("idle-0", idle_task_func, NULL, PRIORITY_IDLE);
+    if (idle_tasks[0]) {
+        task_set_affinity(idle_tasks[0], 1ULL << 0);
+    }
 
     kinfo("Scheduler (AegisSched_64 / PurpleSched) Initialized");
 }
 
+void scheduler_init_ap(uint32_t cpu_id) {
+    if (cpu_id >= MAX_CPUS) return;
+
+    char name[16];
+    name[0] = 'i'; name[1] = 'd'; name[2] = 'l'; name[3] = 'e'; name[4] = '-';
+    if (cpu_id < 10) {
+        name[5] = '0' + cpu_id;
+        name[6] = '\0';
+    } else {
+        name[5] = '0' + (cpu_id / 10);
+        name[6] = '0' + (cpu_id % 10);
+        name[7] = '\0';
+    }
+
+    idle_tasks[cpu_id] = task_create(name, idle_task_func, NULL, PRIORITY_IDLE);
+    if (idle_tasks[cpu_id]) {
+        task_set_affinity(idle_tasks[cpu_id], 1ULL << cpu_id);
+        current_tasks[cpu_id] = idle_tasks[cpu_id];
+    }
+    kinfo("Scheduler: Initialized AP core CPU #%u with %s", cpu_id, name);
+}
+
 void task_list_print(void) {
     kprintf("\n=== AegisSched_64 Active Tasks ===\n");
-    kprintf("%-4s %-16s %-10s %-8s %-6s\n", "ID", "NAME", "STATE", "PRIORITY", "TICKS");
+    kprintf("%-4s %-16s %-10s %-8s %-6s %-10s %-6s\n",
+            "ID", "NAME", "STATE", "PRIORITY", "TICKS", "AFFINITY", "CPU#");
     for (int i = 0; i < MAX_TASKS; i++) {
         if (task_table[i].id != 0 && task_table[i].state != TASK_TERMINATED) {
             const char *state_str = "UNKNOWN";
@@ -256,17 +348,27 @@ void task_list_print(void) {
                 case PRIORITY_NORMAL: prio_str = "NORMAL"; break;
                 case PRIORITY_HIGH:   prio_str = "HIGH"; break;
             }
-            kprintf("%-4u %-16s %-10s %-8s %-6u\n",
-                    task_table[i].id, task_table[i].name, state_str, prio_str, task_table[i].ticks_remaining);
+            kprintf("%-4u %-16s %-10s %-8s %-6u 0x%-8x CPU#%u\n",
+                    task_table[i].id, task_table[i].name, state_str, prio_str,
+                    task_table[i].ticks_remaining, (uint32_t)task_table[i].cpu_affinity,
+                    task_table[i].last_cpu);
         }
     }
 }
 
 int task_kill(uint32_t task_id) {
-    if (task_id == 1 || (idle_task && task_id == idle_task->id)) {
-        kerror("Scheduler: Cannot terminate critical kernel/idle task");
+    if (task_id == 1) {
+        kerror("Scheduler: Cannot terminate critical kernel task");
         return -1;
     }
+    for (int c = 0; c < MAX_CPUS; c++) {
+        if (idle_tasks[c] && idle_tasks[c]->id == task_id) {
+            kerror("Scheduler: Cannot terminate idle task");
+            return -1;
+        }
+    }
+    uint64_t rflags;
+    spinlock_acquire_irqsave(&sched_lock, &rflags);
     for (int i = 0; i < MAX_TASKS; i++) {
         if (task_table[i].id == task_id) {
             task_table[i].state = TASK_TERMINATED;
@@ -275,9 +377,11 @@ int task_kill(uint32_t task_id) {
                 task_table[i].stack_base = NULL;
             }
             kinfo("Scheduler: Terminated task %u", task_id);
+            spinlock_release_irqrestore(&sched_lock, rflags);
             return 0;
         }
     }
+    spinlock_release_irqrestore(&sched_lock, rflags);
     kerror("Scheduler: Task ID %u not found", task_id);
     return -1;
 }

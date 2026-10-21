@@ -42,14 +42,19 @@ typedef struct task {
     uint64_t sleep_until_ticks;
     uint64_t rsp;
     void *stack_base;
+    uint64_t cpu_affinity;
+    uint32_t last_cpu;
     struct task *next;
 } task_t;
 
 void scheduler_init(void);
+void scheduler_init_ap(uint32_t cpu_id);
 task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, task_priority_t priority);
 void task_exit(void);
 void task_sleep(uint32_t ticks);
 void task_yield(void);
+void task_set_affinity(task_t *task, uint64_t cpu_mask);
+uint64_t task_get_affinity(const task_t *task);
 void schedule(void);
 void task_timer_tick(void);
 
