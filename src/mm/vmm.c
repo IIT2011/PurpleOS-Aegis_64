@@ -64,7 +64,7 @@ int vmm_split_huge_page(page_table_t *pml4, uint64_t vaddr) {
 
     /* Replace 2 MiB huge page in PD with pointer to new 4 KiB PT */
     pd->entries[pd_i] = (uint64_t)(uintptr_t)new_pt_frame | PAGE_PRESENT | PAGE_WRITABLE | (pd_val & PAGE_USER);
-    invlpg(vaddr);
+    write_cr3(read_cr3());
 
     return VMM_OK;
 }
