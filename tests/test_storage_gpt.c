@@ -668,6 +668,99 @@ static int test_partition_dev_writable_operations(void) {
     return 1;
 }
 
+static int mock_bdev_read(block_device_t *dev, uint64_t lba, uint32_t count, void *buf) {
+    (void)dev;
+    if (lba + count > MOCK_DISK_SECTORS) return BLOCK_DEV_ERR_BOUNDS;
+    for (uint32_t i = 0; i < count; i++) {
+        memcpy((uint8_t *)buf + i * 512, g_mock_disk[lba + i], 512);
+    }
+    return BLOCK_DEV_OK;
+}
+
+static int mock_bdev_write(block_device_t *dev, uint64_t lba, uint32_t count, const void *buf) {
+    (void)dev;
+    if (lba + count > MOCK_DISK_SECTORS) return BLOCK_DEV_ERR_BOUNDS;
+    for (uint32_t i = 0; i < count; i++) {
+        memcpy(g_mock_disk[lba + i], (const uint8_t *)buf + i * 512, 512);
+    }
+    return BLOCK_DEV_OK;
+}
+
+static int mock_bdev_flush(block_device_t *dev) {
+    (void)dev;
+    return BLOCK_DEV_OK;
+}
+
+static const block_device_ops_t s_mock_bdev_ops = {
+    .read_blocks = mock_bdev_read,
+    .write_blocks = mock_bdev_write,
+    .flush = mock_bdev_flush,
+};
+
+static int test_generic_block_dev_gpt_and_partition(void) {
+    mock_reset();
+    uint64_t part_start = 2048;
+    uint64_t part_blocks = 512;
+    uint64_t part_end = part_start + (part_blocks * 8) - 1;
+
+    setup_valid_gpt_disk(part_start, part_end, &GPT_GUID_PURPLEFS_V2);
+
+    // Format PurpleFS v2 into mock disk partition
+    pfs2_block_dev_t *mem_dev = pfs2_mem_dev_create((uint32_t)part_blocks);
+    if (!mem_dev) return 0;
+    if (pfs2_format(mem_dev, (uint32_t)part_blocks, "PurpleGeneric") != PFS2_OK) {
+        pfs2_mem_dev_destroy(mem_dev);
+        return 0;
+    }
+    for (uint32_t b = 0; b < part_blocks; b++) {
+        uint8_t block_buf[PFS2_BLOCK_SIZE];
+        mem_dev->read_block(mem_dev, b, block_buf);
+        for (int s = 0; s < 8; s++) {
+            memcpy(g_mock_disk[part_start + b * 8 + s], block_buf + s * 512, 512);
+        }
+    }
+    pfs2_mem_dev_destroy(mem_dev);
+
+    // Create a mock generic block_device_t (simulating SATA or NVMe)
+    block_device_t mock_bdev;
+    memset(&mock_bdev, 0, sizeof(mock_bdev));
+    strcpy(mock_bdev.name, "sata0");
+    mock_bdev.type = BLOCK_DEV_TYPE_AHCI;
+    mock_bdev.block_size = 512;
+    mock_bdev.total_blocks = MOCK_DISK_SECTORS;
+    mock_bdev.ops = &s_mock_bdev_ops;
+
+    // 1. Parse GPT directly via block_device_t
+    gpt_info_t gpt;
+    if (gpt_parse_block_dev(&mock_bdev, &gpt) != GPT_OK) return 0;
+    if (!gpt.valid_protective_mbr || !gpt.valid_header || !gpt.valid_entries) return 0;
+    if (gpt.partition_count != 1 || gpt.purplefs_part_index != 0) return 0;
+
+    // 2. Initialize partition device directly via block_device_t
+    partition_dev_t pdev;
+    if (partition_dev_init_bdev(&pdev, &mock_bdev, &gpt.partitions[0]) != PART_DEV_OK) return 0;
+    if (pdev.base.block_count != (uint32_t)part_blocks) return 0;
+
+    // 3. Mount PurpleFS v2 over partition_dev
+    pfs2_fs_t fs;
+    if (pfs2_mount(&fs, &pdev.base) != PFS2_OK) return 0;
+    if (strcmp(fs.sb.volume_label, "PurpleGeneric") != 0) return 0;
+    if (fs.read_only != 1) return 0;
+
+    // 4. Test writable partition operations
+    partition_dev_set_writable(&pdev, 1);
+    fs.read_only = 0;
+    uint32_t new_ino = 0;
+    if (pfs2_create_file(&fs, "generic_test.txt", 0644, &new_ino) != PFS2_OK) return 0;
+    const char *test_data = "Hello Generic Block Device!";
+    size_t written = 0;
+    if (pfs2_write_file(&fs, new_ino, test_data, strlen(test_data), 0, &written) != PFS2_OK) return 0;
+    if (written != strlen(test_data)) return 0;
+
+    pfs2_unmount(&fs);
+    return 1;
+}
+
 int main(void) {
     printf("=====================================================\n");
     printf(" Running Storage, ATA & GPT Unit Test Suite          \n");
@@ -685,6 +778,7 @@ int main(void) {
     RUN_TEST(test_partition_dev_writable_operations);
     RUN_TEST(test_purplefs_mount_through_partition_adapter);
     RUN_TEST(test_rejection_of_invalid_partition_no_format);
+    RUN_TEST(test_generic_block_dev_gpt_and_partition);
 
     printf("=====================================================\n");
     printf(" Storage & GPT Tests: %d/%d passed\n", tests_passed, tests_run);
