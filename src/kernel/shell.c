@@ -232,26 +232,31 @@ static void cmd_write_file(const char *name, const char *text) {
 }
 
 static void cmd_disk_status(void) {
-    shell_print("\n=== ATA Storage Devices & GPT Partition Status ===\n");
-    const char *names[4] = { "Primary Master", "Primary Slave", "Secondary Master", "Secondary Slave" };
+    shell_print("\n=== Storage Block Devices (ATA / AHCI SATA / NVMe) & GPT Status ===\n");
+    uint32_t count = block_dev_count();
 
-    int found_any = 0;
-    for (int i = 0; i < 4; i++) {
-        ata_device_t *dev = &g_kernel_storage.devices[i];
-        if (dev->is_present) {
-            found_any++;
-            uint32_t size_mib = (uint32_t)(dev->total_sectors * 512 / (1024 * 1024));
-            kprintf("[%d] Channel: %-16s Model: %-24s Sectors: %u (%u MiB)\n",
-                    i, names[i], dev->model, (uint32_t)dev->total_sectors, size_mib);
+    if (count == 0) {
+        shell_print("No block storage devices detected.\n\n");
+        return;
+    }
 
+    for (uint32_t i = 0; i < count; i++) {
+        block_device_t *dev = block_dev_get_by_index(i);
+        if (!dev) continue;
+
+        uint32_t size_mib = (uint32_t)((dev->total_blocks * dev->block_size) / (1024 * 1024));
+        kprintf("[%u] Device: %-8s Type: %-10s Model: %-22s Blocks: %u (%u MiB)\n",
+                i, dev->name, block_dev_type_to_str(dev->type), dev->model, (uint32_t)dev->total_blocks, size_mib);
+
+        if (i < MAX_BLOCK_DEVICES) {
             gpt_info_t *gpt = &g_kernel_storage.gpt[i];
             if (gpt->valid_header && gpt->partition_count > 0) {
                 kprintf("    GPT: Valid (Protective MBR: %s, Partitions: %u)\n",
                         gpt->valid_protective_mbr ? "Yes" : "No", gpt->partition_count);
                 for (uint32_t p = 0; p < gpt->partition_count; p++) {
                     const gpt_partition_t *part = &gpt->partitions[p];
-                    uint32_t part_mib = (uint32_t)(part->sector_count * 512 / (1024 * 1024));
-                    kprintf("    -> Part %u: %-16s LBA: %u..%u (%u sectors, %u MiB) %s\n",
+                    uint32_t part_mib = (uint32_t)(part->sector_count * dev->block_size / (1024 * 1024));
+                    kprintf("    -> Part %u: %-16s LBA: %u..%u (%u blocks, %u MiB) %s\n",
                             p, part->name, (uint32_t)part->start_lba, (uint32_t)part->end_lba,
                             (uint32_t)part->sector_count, part_mib,
                             part->is_purplefs ? "[PurpleFS v2]" : "");
@@ -260,9 +265,6 @@ static void cmd_disk_status(void) {
                 shell_print("    GPT: None / Unpartitioned\n");
             }
         }
-    }
-    if (!found_any) {
-        shell_print("No ATA storage devices detected.\n");
     }
     shell_print("\n");
 }
