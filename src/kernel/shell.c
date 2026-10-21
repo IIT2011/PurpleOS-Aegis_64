@@ -224,7 +224,11 @@ static void execute_command(int argc, char **argv) {
         shell_print("\n=== AegisShell / Purple Shell Commands ===\n");
         shell_print("  help              - Show available shell commands\n");
         shell_print("  sysinfo           - Display OS version and architectural parameters\n");
-        shell_print("  cpuinfo           - Display CPU long-mode features\n");
+        shell_print("  cpuinfo           - Display CPU long-mode features and topology\n");
+        shell_print("  smp               - Display multi-core topology, online cores, and ticks\n");
+        shell_print("  smptest           - Run concurrent multi-core task affinity benchmark\n");
+        shell_print("  acpi              - Display detected ACPI tables and MADT configuration\n");
+        shell_print("  apic              - Report Local APIC ID, version, and timer status\n");
         shell_print("  mem               - Display physical and virtual memory statistics\n");
         shell_print("  uptime            - Display system uptime and PIT timer ticks\n");
         shell_print("  tasks / ps        - Display task table and AegisSched_64 states\n");
