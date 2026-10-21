@@ -89,11 +89,12 @@ pfs2_fs_t *storage_get_fs(void) {
 
 int storage_is_writable(void) {
     if (!g_kernel_storage.fs_mounted) return 0;
-    return partition_dev_is_writable(&g_kernel_storage.part_dev);
+    return partition_dev_is_writable(&g_kernel_storage.part_dev) && !g_kernel_storage.fs.read_only;
 }
 
 int storage_set_writable(int writable) {
     if (!g_kernel_storage.fs_mounted) return -1;
     partition_dev_set_writable(&g_kernel_storage.part_dev, writable);
+    g_kernel_storage.fs.read_only = writable ? 0 : 1;
     return 0;
 }
