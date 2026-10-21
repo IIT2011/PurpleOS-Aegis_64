@@ -49,7 +49,9 @@ def main():
             "list files\n",
             "peek welcome.txt\n",
             "peek version.txt\n",
-            "aegisdetect\n"
+            "aegisdetect\n",
+            "devices\n",
+            "lspci\n"
         ]
 
         for c in commands:
@@ -86,7 +88,13 @@ def main():
             ("AegisDetect Boot Baseline", "AegisDetect: Loaded and authenticated trusted baseline"),
             ("AegisDetect File Verify", "AegisDetect: Verification summary: 3/3 components verified (3 trusted, 0 tampered/missing)"),
             ("AegisDetect Shell Status", "AegisDetect Boot Integrity & System Protection Subsystem"),
-            ("AegisDetect Shell Trusted Count", "3 total, 3 trusted, 0 tampered/missing")
+            ("AegisDetect Shell Trusted Count", "3 total, 3 trusted, 0 tampered/missing"),
+            ("PurpleDetect Registry", "PurpleDetect Hardware & Removable Device Registry"),
+            ("PurpleDetect COM1 Serial", "COM1"),
+            ("PurpleDetect Keyboard", "PS2KBD"),
+            ("PurpleDetect ATA Controller", "ATA_PRI"),
+            ("PCI Bus Inventory", "PCI Bus Device Inventory"),
+            ("PCI Discovered Host Bridge", "Host Bridge")
         ]
 
         passed = True
