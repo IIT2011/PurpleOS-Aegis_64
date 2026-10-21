@@ -138,6 +138,9 @@ check-scheduler-qemu: all
 check-storage-qemu: all $(BUILD_DIR)/mkpfs2_disk
 	@$(PYTHON) scripts/test_qemu_storage.py
 
+check-writable-storage-qemu: all $(BUILD_DIR)/mkpfs2_disk
+	@$(PYTHON) scripts/test_qemu_writable_storage.py
+
 check-smp-qemu: all
 	@$(PYTHON) scripts/test_qemu_smp.py
 
