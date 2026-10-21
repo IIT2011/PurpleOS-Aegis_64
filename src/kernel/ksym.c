@@ -8,6 +8,7 @@
 #include "io.h"
 #include "task.h"
 #include "desktop.h"
+#include "mouse.h"
 
 static ksym_entry_t ksym_table[KSYM_MAX_SYMBOLS];
 static uint32_t ksym_count = 0;
