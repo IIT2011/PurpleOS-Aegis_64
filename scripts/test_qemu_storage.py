@@ -53,7 +53,14 @@ def main():
             "devices\n",
             "lspci\n",
             "desktop\n",
-            "mouse\n"
+            "mouse\n",
+            "ksym\n",
+            "insmod e1000.apdrv\n",
+            "lsmod\n",
+            "ifconfig\n",
+            "app run sysmon.apapplications\n",
+            "apps\n",
+            "video\n"
         ]
 
         for c in commands:
@@ -85,6 +92,8 @@ def main():
             ("List Files Directory Content", "welcome.txt"),
             ("List Files Version File", "version.txt"),
             ("List Files MOTD", "motd"),
+            ("List Files APDRV Module", "e1000.apdrv"),
+            ("List Files App Bundle", "sysmon.apapplications"),
             ("Peek Content Welcome", "Welcome to Purple OS / Aegis64 Native Filesystem!"),
             ("Peek Content Version", "Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)"),
             ("AegisDetect Boot Baseline", "AegisDetect: Loaded and authenticated trusted baseline"),
@@ -102,7 +111,19 @@ def main():
             ("Desktop PurpleFS Window", "PurpleFS v2 Storage"),
             ("Desktop AegisDetect Window", "AegisDetect Security Console"),
             ("Mouse Command Output", "PS/2 Mouse Subsystem"),
-            ("Mouse Position Output", "Position:")
+            ("Mouse Position Output", "Position:"),
+            ("Kernel Symbol Table Output", "Aegis64 Kernel Symbol Table"),
+            ("KSYM Bus Mastering Export", "pci_enable_bus_mastering"),
+            ("APDRV e1000 Load Success", "APDRV: Module 'e1000' v1.0.0 loaded successfully"),
+            ("APDRV Loaded Modules List", "APDRV v3 Loaded Native Modules"),
+            ("APDRV e1000 in Mod List", "e1000"),
+            ("Network Subsystem Output", "Network Interface Configuration"),
+            ("App Bundle Authenticated", "AegisDetect: Application bundle 'sysmon.apapplications' AUTHENTICATED"),
+            ("App Bundle Launched", "APAPP: Application 'sysmon.apapplications' ('Aegis System Monitor' v1.0.0) launched"),
+            ("Active App Bundles List", "Active .apapplications Native Application Bundles"),
+            ("Active Sysmon App Running", "sysmon.apapplications"),
+            ("Video Configuration Output", "Video Display Configuration"),
+            ("Bochs VBE Support", "Bochs VBE:  Supported")
         ]
 
         passed = True
