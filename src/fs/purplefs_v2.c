@@ -1,5 +1,6 @@
 #include "purplefs_v2.h"
 #include "string.h"
+#include "serial.h"
 
 /* 16-byte PurpleFS v2 signature: "PURPLEFS\0PFS2\0\0\0" */
 const uint8_t PFS2_SIGNATURE[16] = {
