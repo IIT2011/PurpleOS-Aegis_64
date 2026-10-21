@@ -232,10 +232,21 @@ int apdrv_load(const void *image, uint32_t image_size, apdrv_module_t **out_mod)
 #ifndef __KERNEL_HOST_TEST__
     page_table_t *pml4 = vmm_get_kernel_pml4();
     if (pml4 && (hdr->flags & APDRV_FLAG_ENFORCE_WX)) {
-        /* Temporary test: skip vmm_set_permissions */
-        (void)text_aligned;
-        (void)rodata_aligned;
-        (void)data_aligned;
+        /* .text: Read + Execute (NO Write) */
+        for (uint32_t p = 0; p < text_aligned; p += 4096) {
+            vmm_set_permissions(pml4, (uint64_t)(uintptr_t)(text_base + p),
+                                VMM_PROT_READ | VMM_PROT_EXEC);
+        }
+        /* .rodata: Read-only (NO Write, NO Execute) */
+        for (uint32_t p = 0; p < rodata_aligned; p += 4096) {
+            vmm_set_permissions(pml4, (uint64_t)(uintptr_t)(rodata_base + p),
+                                VMM_PROT_READ | VMM_PROT_NO_EXEC);
+        }
+        /* .data + .bss: Read + Write (NO Execute) */
+        for (uint32_t p = 0; p < data_aligned; p += 4096) {
+            vmm_set_permissions(pml4, (uint64_t)(uintptr_t)(data_base + p),
+                                VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_NO_EXEC);
+        }
         wx_applied = 1;
     }
 #else
