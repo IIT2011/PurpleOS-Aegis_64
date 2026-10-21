@@ -9,23 +9,7 @@ static idt_ptr_t   idt_ptr;
 static isr_handler_t isr_handlers[256];
 
 extern void idt_load(idt_ptr_t *ptr);
-
-/* Declare assembly ISR symbols */
-#define DECLARE_ISR(i) extern void isr##i(void)
-
-DECLARE_ISR(0);  DECLARE_ISR(1);  DECLARE_ISR(2);  DECLARE_ISR(3);
-DECLARE_ISR(4);  DECLARE_ISR(5);  DECLARE_ISR(6);  DECLARE_ISR(7);
-DECLARE_ISR(8);  DECLARE_ISR(9);  DECLARE_ISR(10); DECLARE_ISR(11);
-DECLARE_ISR(12); DECLARE_ISR(13); DECLARE_ISR(14); DECLARE_ISR(15);
-DECLARE_ISR(16); DECLARE_ISR(17); DECLARE_ISR(18); DECLARE_ISR(19);
-DECLARE_ISR(20); DECLARE_ISR(21); DECLARE_ISR(22); DECLARE_ISR(23);
-DECLARE_ISR(24); DECLARE_ISR(25); DECLARE_ISR(26); DECLARE_ISR(27);
-DECLARE_ISR(28); DECLARE_ISR(29); DECLARE_ISR(30); DECLARE_ISR(31);
-
-DECLARE_ISR(32); DECLARE_ISR(33); DECLARE_ISR(34); DECLARE_ISR(35);
-DECLARE_ISR(36); DECLARE_ISR(37); DECLARE_ISR(38); DECLARE_ISR(39);
-DECLARE_ISR(40); DECLARE_ISR(41); DECLARE_ISR(42); DECLARE_ISR(43);
-DECLARE_ISR(44); DECLARE_ISR(45); DECLARE_ISR(46); DECLARE_ISR(47);
+extern uintptr_t isr_stub_table[256];
 
 void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags) {
     idt_entries[num].offset_low  = (uint16_t)(base & 0xFFFF);
@@ -54,20 +38,33 @@ static const char *exception_messages[32] = {
 
 void interrupt_dispatch(interrupt_frame_t *frame) {
     if (frame->int_no < 32) {
-        kerror("CPU EXCEPTION %u (%s) at RIP=%p (CS=%p, ERR=%p)",
+        kerror("=================================================");
+        kerror("!!! KERNEL PANIC: CPU EXCEPTION %u (%s) !!!",
                (uint32_t)frame->int_no,
-               exception_messages[frame->int_no],
-               (void *)frame->rip, (void *)frame->cs, (void *)frame->err_code);
+               exception_messages[frame->int_no]);
+        kerror("=================================================");
+        kerror("RIP: %p  CS: %p  RFLAGS: %p",
+               (void *)frame->rip, (void *)frame->cs, (void *)frame->rflags);
+        kerror("RSP: %p  SS: %p  ERR_CODE: %p",
+               (void *)frame->rsp, (void *)frame->ss, (void *)frame->err_code);
+        kerror("RAX: %p  RBX: %p  RCX: %p  RDX: %p",
+               (void *)frame->rax, (void *)frame->rbx, (void *)frame->rcx, (void *)frame->rdx);
+        kerror("RSI: %p  RDI: %p  RBP: %p",
+               (void *)frame->rsi, (void *)frame->rdi, (void *)frame->rbp);
+        kerror("R8 : %p  R9 : %p  R10: %p  R11: %p",
+               (void *)frame->r8, (void *)frame->r9, (void *)frame->r10, (void *)frame->r11);
+        kerror("R12: %p  R13: %p  R14: %p  R15: %p",
+               (void *)frame->r12, (void *)frame->r13, (void *)frame->r14, (void *)frame->r15);
 
         if (frame->int_no == 14) {
             uint64_t cr2 = read_cr2();
-            kerror("PAGE FAULT DETAILS: CR2 (Linear Address) = %p", (void *)cr2);
-            kerror("Flags: [Present=%u, Write=%u, User=%u, ReservedBit=%u, InstructionFetch=%u]",
-                   (uint32_t)(frame->err_code & 1),
-                   (uint32_t)((frame->err_code >> 1) & 1),
-                   (uint32_t)((frame->err_code >> 2) & 1),
-                   (uint32_t)((frame->err_code >> 3) & 1),
-                   (uint32_t)((frame->err_code >> 4) & 1));
+            kerror("CR2 (Faulting Address): %p", (void *)cr2);
+            kerror("Page Fault Reason: [%s, %s, %s, %s, %s]",
+                   (frame->err_code & 1) ? "Protection Violation" : "Non-Present Page",
+                   (frame->err_code & 2) ? "Write Access" : "Read Access",
+                   (frame->err_code & 4) ? "User Mode" : "Kernel Mode",
+                   (frame->err_code & 8) ? "Reserved Bit Overwrite" : "Valid Bits",
+                   (frame->err_code & 16) ? "Instruction Fetch" : "Data Access");
         }
 
         kerror("Halting system on unhandled CPU exception.");
@@ -81,6 +78,7 @@ void interrupt_dispatch(interrupt_frame_t *frame) {
         isr_handlers[frame->int_no](frame);
     }
 
+    /* Send EOI to legacy 8259 PIC if vector is in PIC range */
     if (frame->int_no >= 32 && frame->int_no < 48) {
         pic_send_eoi((uint8_t)(frame->int_no - 32));
     }
@@ -96,23 +94,10 @@ void idt_init(void) {
     /* 0x8E = Present, Ring 0, 64-bit Interrupt Gate */
     uint16_t cs = 0x08; // Kernel code segment
 
-#define SET_ISR(i) idt_set_gate(i, (uint64_t)isr##i, cs, 0x8E)
+    for (int i = 0; i < 256; i++) {
+        idt_set_gate((uint8_t)i, (uint64_t)isr_stub_table[i], cs, 0x8E);
+    }
 
-    SET_ISR(0);  SET_ISR(1);  SET_ISR(2);  SET_ISR(3);
-    SET_ISR(4);  SET_ISR(5);  SET_ISR(6);  SET_ISR(7);
-    SET_ISR(8);  SET_ISR(9);  SET_ISR(10); SET_ISR(11);
-    SET_ISR(12); SET_ISR(13); SET_ISR(14); SET_ISR(15);
-    SET_ISR(16); SET_ISR(17); SET_ISR(18); SET_ISR(19);
-    SET_ISR(20); SET_ISR(21); SET_ISR(22); SET_ISR(23);
-    SET_ISR(24); SET_ISR(25); SET_ISR(26); SET_ISR(27);
-    SET_ISR(28); SET_ISR(29); SET_ISR(30); SET_ISR(31);
-
-    SET_ISR(32); SET_ISR(33); SET_ISR(34); SET_ISR(35);
-    SET_ISR(36); SET_ISR(37); SET_ISR(38); SET_ISR(39);
-    SET_ISR(40); SET_ISR(41); SET_ISR(42); SET_ISR(43);
-    SET_ISR(44); SET_ISR(45); SET_ISR(46); SET_ISR(47);
-
-    pic_init();
     idt_load(&idt_ptr);
-    kinfo("IDT Initialized: 256 gates loaded, PIC remapped to IRQ 32..47");
+    kinfo("IDT Initialized: 256 gates loaded");
 }
