@@ -29,6 +29,23 @@
 static char shell_buf[SHELL_INPUT_BUFFER_LEN];
 static size_t shell_buf_len = 0;
 
+static int simple_atoi(const char *s) {
+    if (!s) return 0;
+    int sign = 1;
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+    int res = 0;
+    while (*s >= '0' && *s <= '9') {
+        res = res * 10 + (*s - '0');
+        s++;
+    }
+    return res * sign;
+}
+
 static void generic_app_task(void *arg) {
     const char *name = (const char *)arg;
     if (!name) name = "app_worker";
