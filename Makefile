@@ -43,7 +43,7 @@ OBJS = $(patsubst src/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS)) \
 KERNEL64_ELF = $(BUILD_DIR)/kernel64.elf
 KERNEL32_ELF = $(BUILD_DIR)/kernel.elf
 
-.PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu run-qemu run-uefi
+.PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu check-smp-qemu run-qemu run-uefi
 
 all: $(KERNEL32_ELF) $(KERNEL64_ELF)
 
@@ -119,6 +119,9 @@ check-scheduler-qemu: all
 
 check-storage-qemu: all $(BUILD_DIR)/mkpfs2_disk
 	@$(PYTHON) scripts/test_qemu_storage.py
+
+check-smp-qemu: all
+	@$(PYTHON) scripts/test_qemu_smp.py
 
 run-qemu: all
 	$(QEMU) -kernel $(KERNEL32_ELF) -serial stdio -m 256M
