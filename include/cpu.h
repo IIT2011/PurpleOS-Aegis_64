@@ -40,17 +40,21 @@ typedef struct cpu {
     uint32_t apic_id;
     uint32_t acpi_id;
     uint8_t  is_bsp;
-    uint8_t  is_online;
+    volatile uint8_t is_online;
     uint64_t kernel_stack;
     void    *current_task;
+    volatile uint64_t lapic_timer_ticks;
+    volatile uint32_t ipi_count;
 } cpu_t;
 
 void cpu_init_bsp(void);
 const cpu_features_t *cpu_get_features(void);
 uint32_t cpu_count(void);
+uint32_t cpu_online_count(void);
 uint32_t cpu_get_current_id(void);
 cpu_t *cpu_get(uint32_t id);
 int cpu_register_ap(uint32_t apic_id, uint32_t acpi_id);
+void cpu_set_online(uint32_t id, uint8_t online);
 void cpu_print_info(void);
 
 #endif /* CPU_H */

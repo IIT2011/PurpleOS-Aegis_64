@@ -2,6 +2,7 @@
 #include "io.h"
 #include "serial.h"
 #include "string.h"
+#include "apic.h"
 
 static cpu_features_t bsp_features;
 static cpu_t cpu_table[MAX_CPUS];
@@ -129,14 +130,42 @@ uint32_t cpu_count(void) {
     return active_cpu_count;
 }
 
+uint32_t cpu_online_count(void) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < active_cpu_count; i++) {
+        if (cpu_table[i].is_online) {
+            count++;
+        }
+    }
+    return count;
+}
+
 uint32_t cpu_get_current_id(void) {
-    /* Currently running on BSP */
+#ifdef __KERNEL_HOST_TEST__
     return 0;
+#else
+    if (!apic_is_enabled()) {
+        return 0;
+    }
+    uint32_t cur_apic = apic_get_id();
+    for (uint32_t i = 0; i < active_cpu_count; i++) {
+        if (cpu_table[i].apic_id == cur_apic) {
+            return cpu_table[i].id;
+        }
+    }
+    return 0;
+#endif
 }
 
 cpu_t *cpu_get(uint32_t id) {
     if (id >= MAX_CPUS) return NULL;
     return &cpu_table[id];
+}
+
+void cpu_set_online(uint32_t id, uint8_t online) {
+    if (id < MAX_CPUS) {
+        cpu_table[id].is_online = online;
+    }
 }
 
 int cpu_register_ap(uint32_t apic_id, uint32_t acpi_id) {
@@ -156,6 +185,8 @@ int cpu_register_ap(uint32_t apic_id, uint32_t acpi_id) {
     cpu_table[idx].acpi_id = acpi_id;
     cpu_table[idx].is_bsp = 0;
     cpu_table[idx].is_online = 0;
+    cpu_table[idx].lapic_timer_ticks = 0;
+    cpu_table[idx].ipi_count = 0;
     return (int)idx;
 }
 
@@ -173,4 +204,13 @@ void cpu_print_info(void) {
           (bsp_features.flags & CPU_FEAT_AVX) ? 1 : 0,
           (bsp_features.flags & CPU_FEAT_NX) ? 1 : 0,
           (bsp_features.flags & CPU_FEAT_INVARIANT_TSC) ? 1 : 0);
+    kinfo("SMP Cores Discovered: %u, Online: %u", active_cpu_count, cpu_online_count());
+    for (uint32_t i = 0; i < active_cpu_count; i++) {
+        kinfo("  CPU #%u: APIC ID=%u ACPI ID=%u [%s, %s] Ticks=%u IPIs=%u",
+              cpu_table[i].id, cpu_table[i].apic_id, cpu_table[i].acpi_id,
+              cpu_table[i].is_bsp ? "BSP" : "AP",
+              cpu_table[i].is_online ? "ONLINE" : "OFFLINE",
+              (uint32_t)cpu_table[i].lapic_timer_ticks,
+              cpu_table[i].ipi_count);
+    }
 }
