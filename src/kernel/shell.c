@@ -18,12 +18,26 @@
 #include "pci.h"
 #include "mouse.h"
 #include "desktop.h"
+#include "ksym.h"
+#include "netdev.h"
+#include "apdrv.h"
+#include "apapp.h"
 
 #define SHELL_INPUT_BUFFER_LEN 256
 #define MAX_ARGS 16
 
 static char shell_buf[SHELL_INPUT_BUFFER_LEN];
 static size_t shell_buf_len = 0;
+
+static void generic_app_task(void *arg) {
+    const char *name = (const char *)arg;
+    if (!name) name = "app_worker";
+    for (int i = 0; i < 3; i++) {
+        kinfo("AppTask [%s]: iteration %d/3 active", name, i + 1);
+        task_sleep(5);
+    }
+    kinfo("AppTask [%s]: completed work", name);
+}
 
 static void smp_worker_func(void *arg) {
     uint32_t target_cpu = (uint32_t)(uintptr_t)arg;
@@ -306,6 +320,15 @@ static void execute_command(int argc, char **argv) {
         shell_print("  lspci             - Display PCI bus device inventory\n");
         shell_print("  desktop / gui     - Render graphical desktop workspace and windows\n");
         shell_print("  mouse             - Report PS/2 mouse cursor position and buttons\n");
+        shell_print("  ksym [filter]     - Query Aegis64 Kernel Symbol Table exports\n");
+        shell_print("  insmod <path>     - Load native APDRV v3 Ring 0 driver package\n");
+        shell_print("  lsmod / drivers   - List loaded APDRV v3 kernel driver modules\n");
+        shell_print("  rmmod <name>      - Unload APDRV v3 kernel driver module\n");
+        shell_print("  ifconfig / net    - Report network interface adapters and metrics\n");
+        shell_print("  app list / apps   - List active .apapplications application bundles\n");
+        shell_print("  app run <path>    - Launch authenticated .apapplications bundle\n");
+        shell_print("  app kill <id>     - Terminate running application bundle\n");
+        shell_print("  video [w h]       - Query or switch video display resolution\n");
         shell_print("  aegisdetect [verify] - Report or run AegisDetect integrity verification\n");
         shell_print("  clear             - Clear terminal screen\n");
         shell_print("  echo <text>       - Display text arguments\n");

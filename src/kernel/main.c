@@ -20,6 +20,10 @@
 #include "pci.h"
 #include "mouse.h"
 #include "desktop.h"
+#include "ksym.h"
+#include "netdev.h"
+#include "apdrv.h"
+#include "apapp.h"
 #include "io.h"
 
 extern char _kernel_start[];
@@ -117,6 +121,17 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     purple_detect_init();
     purple_detect_scan_all();
     task_create("purple_detect", purple_detect_daemon, NULL, PRIORITY_LOW);
+
+    /* Step 5.6.5: Kernel Symbols, Native Drivers & App Bundles */
+    ksym_init();
+    netdev_init();
+    apdrv_subsystem_init();
+    apapp_subsystem_init();
+
+    /* Try Bochs VBE display adapter fallback if bootloader GOP not present */
+    if (!video_is_available()) {
+        video_init_bochs_vbe(1024, 768);
+    }
 
     /* Step 5.7: Desktop GUI Subsystem */
     desktop_init();
