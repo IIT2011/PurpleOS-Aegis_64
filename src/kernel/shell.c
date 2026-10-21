@@ -12,12 +12,24 @@
 #include "cpu.h"
 #include "acpi.h"
 #include "apic.h"
+#include "smp.h"
 
 #define SHELL_INPUT_BUFFER_LEN 256
 #define MAX_ARGS 16
 
 static char shell_buf[SHELL_INPUT_BUFFER_LEN];
 static size_t shell_buf_len = 0;
+
+static void smp_worker_func(void *arg) {
+    uint32_t target_cpu = (uint32_t)(uintptr_t)arg;
+    for (int i = 0; i < 3; i++) {
+        uint32_t my_cpu = cpu_get_current_id();
+        kinfo("SMP Worker (bound to CPU %u) executing on actual CPU %u [pass %d/3]",
+              target_cpu, my_cpu, i + 1);
+        task_sleep(5);
+    }
+    kinfo("SMP Worker for CPU %u complete", target_cpu);
+}
 
 static void shell_print(const char *s) {
     serial_write(s);
