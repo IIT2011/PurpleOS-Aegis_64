@@ -17,6 +17,8 @@
 #include "security/aegis_detect.h"
 #include "purple_detect.h"
 #include "pci.h"
+#include "mouse.h"
+#include "desktop.h"
 #include "io.h"
 
 extern char _kernel_start[];
@@ -75,6 +77,7 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     idt_init();
     pit_init(100);       // 100 Hz = 10 ms per tick
     keyboard_init();
+    mouse_init();
 
     /* Step 3.5: ACPI Platform Discovery & Local APIC */
     int acpi_res = acpi_init(mbi);
@@ -112,6 +115,9 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     purple_detect_init();
     purple_detect_scan_all();
     task_create("purple_detect", purple_detect_daemon, NULL, PRIORITY_LOW);
+
+    /* Step 5.7: Desktop GUI Subsystem */
+    desktop_init();
 
     /* Enable Interrupts */
     sti();
