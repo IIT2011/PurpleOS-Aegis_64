@@ -125,11 +125,15 @@ typedef struct {
     } isos[ACPI_MAX_ISO];
 } acpi_madt_info_t;
 
+/* Forward declaration of Multiboot info */
+struct multiboot_info;
+
 /* Public ACPI Subsystem API */
 int acpi_validate_checksum(const void *data, size_t length);
 const acpi_rsdp_t *acpi_find_rsdp(void);
+const acpi_rsdp_t *acpi_find_rsdp_with_mbi(const struct multiboot_info *mbi);
 int acpi_init_from_rsdp(const acpi_rsdp_t *rsdp);
-int acpi_init(void);
+int acpi_init(const struct multiboot_info *mbi);
 
 const acpi_sdt_header_t *acpi_find_table(const char *signature);
 uint32_t acpi_get_table_count(void);
