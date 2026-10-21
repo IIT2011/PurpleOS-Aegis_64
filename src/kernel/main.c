@@ -15,6 +15,8 @@
 #include "apic.h"
 #include "smp.h"
 #include "security/aegis_detect.h"
+#include "purple_detect.h"
+#include "pci.h"
 #include "io.h"
 
 extern char _kernel_start[];
@@ -105,6 +107,11 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     if (storage_is_fs_mounted()) {
         aegis_detect_verify_storage();
     }
+
+    /* Step 5.6: PurpleDetect Hardware Discovery & Daemon */
+    purple_detect_init();
+    purple_detect_scan_all();
+    task_create("purple_detect", purple_detect_daemon, NULL, PRIORITY_LOW);
 
     /* Enable Interrupts */
     sti();
