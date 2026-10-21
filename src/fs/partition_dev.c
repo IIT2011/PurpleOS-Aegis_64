@@ -115,7 +115,6 @@ int partition_dev_init_bdev(partition_dev_t *pdev, block_device_t *bdev, const g
         return PART_DEV_ERR_OVERFLOW;
     }
 
-    memset(pdev, 0, sizeof(*pdev));
     pdev->bdev = bdev;
     pdev->start_lba = part->start_lba;
     pdev->end_lba = part->end_lba;
@@ -124,6 +123,7 @@ int partition_dev_init_bdev(partition_dev_t *pdev, block_device_t *bdev, const g
     pdev->read_only = 1;
 
     pdev->base.block_count = (uint32_t)total_blocks;
+    pdev->base.block_size = PFS2_BLOCK_SIZE;
     pdev->base.read_block = part_read_block;
     pdev->base.write_block = part_write_block;
     pdev->base.flush = part_flush;
@@ -137,6 +137,7 @@ int partition_dev_init(partition_dev_t *pdev, ata_device_t *ata_dev, const gpt_p
     if (!ata_dev->is_present) return PART_DEV_ERR_INVALID;
     if (ata_dev->logical_sector_size == 0) return PART_DEV_ERR_INVALID;
 
+    memset(pdev, 0, sizeof(*pdev));
     ata_bind_block_dev(ata_dev, &pdev->embedded_bdev, "ata_part");
     int rc = partition_dev_init_bdev(pdev, &pdev->embedded_bdev, part);
     if (rc == PART_DEV_OK) {
