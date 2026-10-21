@@ -1,0 +1,105 @@
+# Purple OS Personal Use License (PPL) v1.0
+
+Copyright (c) 2026 [Copyright Holder / Project Owner]
+
+All rights reserved.
+
+This license applies to Purple OS, Aegis64, and the source code and other materials in this repository that are owned by the copyright holder, except where a file or component states otherwise.
+
+## 1. Definitions
+
+- **Software** means the covered source code, documentation, build scripts, and other materials in this project.
+- **Copyright Holder** means the person or entity legally holding the applicable rights.
+- **Personal Use** means private, non-commercial use by an individual for learning, experimentation, development, and running or modifying the Software on devices under their control.
+- **Commercial Use** means using the Software as part of a commercial activity, product, service, or business, or using it to obtain commercial or monetary benefit.
+- **Redistribution** means publishing, sharing, transferring, sublicensing, selling, or otherwise making the Software or a modified version available to another person or entity, whether in source or compiled form.
+
+## 2. Permission for Personal Use
+
+Subject to the terms of this license, the Copyright Holder grants each recipient a limited, revocable only as permitted by applicable law, non-exclusive, non-transferable license to:
+
+1. View and study the Software.
+2. Download and copy the Software for Personal Use.
+3. Modify the Software for Personal Use.
+4. Compile and run original or modified versions for Personal Use.
+5. Keep private copies and private modifications.
+
+These permissions do not grant ownership of the Software or its intellectual property.
+
+## 3. Restrictions
+
+Without the Copyright Holder's prior written permission, you may not:
+
+1. Redistribute, publish, or share the Software or modified versions outside the limited permissions necessary for hosting and viewing it on the repository platform.
+2. Distribute compiled binaries, system images, installers, or other packaged versions of the Software.
+3. Use, incorporate, or deploy the Software for Commercial Use.
+4. Sell, sublicense, rent, or commercially license the Software or modified versions.
+5. Offer products or services based on the Software for commercial purposes.
+6. Claim authorship or ownership of the original Software.
+7. Remove or misrepresent applicable copyright notices or this license.
+
+A public repository platform may independently permit certain viewing, hosting, or forking activities under its terms of service. This license does not attempt to override those platform terms. Such platform permissions do not grant a general right to redistribute the Software elsewhere.
+
+## 4. Modified Versions
+
+You may modify the Software and keep those modifications private for Personal Use.
+
+You may not publish or distribute modified source code, patches, derivative works, binaries, or images without prior written permission from the Copyright Holder, except to the extent expressly permitted by applicable law or another applicable license.
+
+## 5. Requesting Additional Permission
+
+The Copyright Holder may grant additional permissions on a case-by-case basis, including permission to:
+
+- Redistribute original or modified source code.
+- Publish forks or derivative projects.
+- Distribute binaries, images, or installers.
+- Use the Software commercially.
+- Incorporate the Software into commercial products or services.
+
+Such permission must be granted in writing by the Copyright Holder or an authorized representative. The written permission may specify its own conditions, scope, duration, and fees.
+
+## 6. Third-Party Components
+
+This license applies only to materials for which the Copyright Holder has the necessary rights.
+
+Third-party software, libraries, assets, and other externally owned materials remain subject to their respective licenses and terms. Nothing in this license removes rights granted by those separate licenses.
+
+## 7. Contributions
+
+Unless a separate written agreement states otherwise, contributors retain the rights they hold in their own contributions. A contribution does not automatically transfer ownership to the Copyright Holder or authorize the Copyright Holder to relicense third-party-owned material.
+
+Before accepting or incorporating contributions, the project may require a separate contributor agreement defining the relevant permissions.
+
+## 8. No Warranty
+
+To the maximum extent permitted by applicable law, the Software is provided "AS IS", without warranties or conditions of any kind, whether express or implied, including warranties of merchantability, fitness for a particular purpose, and non-infringement.
+
+## 9. Limitation of Liability
+
+To the maximum extent permitted by applicable law, the Copyright Holder shall not be liable for claims, damages, or other liabilities arising from the use of or inability to use the Software, including direct, indirect, incidental, or consequential damages.
+
+Nothing in this section excludes liability that cannot legally be excluded or limited.
+
+## 10. Termination
+
+If you materially violate this license, your permissions under it may terminate to the extent permitted by applicable law. Rights and remedies are subject to applicable law, including any legally required notice or opportunity to remedy a violation.
+
+Termination does not remove rights you independently hold under applicable law or a separate valid license.
+
+## 11. Governing Law
+
+This license is subject to applicable law. Any governing-law or jurisdiction provision must be interpreted consistently with mandatory laws that apply to the parties.
+
+## 12. Contact and Additional Permissions
+
+For permission to redistribute, publish modifications, or use the Software commercially, contact the Copyright Holder through the project's official GitHub repository:
+
+https://github.com/IIT2011/PurpleOS-Aegis_64
+
+A request does not constitute permission. Permission is granted only when confirmed in writing by an authorized rights holder.
+
+---
+
+**Purple OS / Aegis64 — Personal Use License v1.0**
+
+This is a custom source-available license, not an OSI-approved Open Source license.
