@@ -1,4 +1,6 @@
+#ifndef __KERNEL_HOST_TEST__
 #define __KERNEL_HOST_TEST__
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
