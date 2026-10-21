@@ -403,6 +403,12 @@ static void execute_command(int argc, char **argv) {
     } else if ((strcmp(argv[0], "filesystem") == 0 && argc >= 2 && strcmp(argv[1], "status") == 0) ||
                strcmp(argv[0], "df") == 0) {
         cmd_filesystem_status();
+    } else if (strcmp(argv[0], "aegisdetect") == 0 || strcmp(argv[0], "integrity") == 0) {
+        if (argc >= 2 && strcmp(argv[1], "verify") == 0) {
+            shell_print("Running AegisDetect filesystem integrity verification...\n");
+            aegis_detect_verify_storage();
+        }
+        aegis_detect_print_status();
     } else if (strcmp(argv[0], "clear") == 0) {
         if (video_is_available()) {
             video_clear(COLOR_PURPLE_BG);
