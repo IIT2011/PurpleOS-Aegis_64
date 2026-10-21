@@ -1,6 +1,16 @@
 #include "purplefs_v2.h"
 #include "string.h"
 
+#ifndef __KERNEL_HOST_TEST__
+extern void serial_puts(const char *s);
+#define CHECK_WIPE(tag) do { \
+    volatile uint64_t *p = (volatile uint64_t *)0x129FB8; \
+    if (*p == 0) serial_puts("[WIPE] " tag "\n"); \
+} while (0)
+#else
+#define CHECK_WIPE(tag) ((void)0)
+#endif
+
 /* 16-byte PurpleFS v2 signature: "PURPLEFS\0PFS2\0\0\0" */
 const uint8_t PFS2_SIGNATURE[16] = {
     'P', 'U', 'R', 'P', 'L', 'E', 'F', 'S',
@@ -308,14 +318,19 @@ int pfs2_format(pfs2_block_dev_t *dev, uint32_t total_blocks, const char *label)
 }
 
 int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
+    CHECK_WIPE("mount_entry");
     if (!fs || !dev) return PFS2_ERR_INVALID;
     memset(fs, 0, sizeof(*fs));
+    CHECK_WIPE("after_memset_fs");
     fs->dev = dev;
 
     uint8_t sb_block[PFS2_BLOCK_SIZE];
+    CHECK_WIPE("after_sb_block_alloc");
     if (dev->read_block(dev, 0, sb_block) != 0) return PFS2_ERR_IO;
+    CHECK_WIPE("after_read_block_0");
 
     memcpy(&fs->sb, sb_block, sizeof(pfs2_superblock_t));
+    CHECK_WIPE("after_memcpy_sb");
 
     // Validate signature
     if (memcmp(fs->sb.magic, PFS2_SIGNATURE, sizeof(PFS2_SIGNATURE)) != 0) {
@@ -345,15 +360,18 @@ int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
     if (dev->read_block(dev, fs->sb.bitmap_start_block, fs->bitmap) != 0) {
         return PFS2_ERR_IO;
     }
+    CHECK_WIPE("after_read_bitmap");
 
     // Replay journal if interrupted commit exists
     int replay_res = pfs2_journal_replay_if_needed(fs);
+    CHECK_WIPE("after_replay_if_needed");
     if (replay_res != PFS2_OK) {
         return replay_res;
     }
 
     // Read updated bitmap after potential journal replay
     dev->read_block(dev, fs->sb.bitmap_start_block, fs->bitmap);
+    CHECK_WIPE("after_read_bitmap_2");
 
     // Update superblock mount metadata if device is writable
     if (dev->write_block) {
@@ -362,6 +380,7 @@ int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
         fs->sb.checksum = pfs2_crc32(&fs->sb, 0x80);
         memcpy(sb_block, &fs->sb, sizeof(fs->sb));
         int wrc = dev->write_block(dev, 0, sb_block);
+        CHECK_WIPE("after_write_block_0");
         if (wrc == 0) {
             dev->flush(dev);
         } else {
@@ -373,6 +392,7 @@ int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev) {
     }
 
     fs->is_mounted = 1;
+    CHECK_WIPE("mount_exit");
     return PFS2_OK;
 }
 
