@@ -15,9 +15,37 @@ static uint32_t verified_components_count = 0;
 static const uint8_t default_trust_key[] = "PurpleOS-Aegis64-TrustAnchor-2026";
 
 static void calculate_manifest_hmac(const aegis_manifest_t *m, const uint8_t *key, size_t key_len, uint8_t out_mac[32]) {
-    /* Hash header fields (magic, version, entry_count) and all valid entries */
-    size_t payload_len = sizeof(uint32_t) * 3 + sizeof(aegis_manifest_entry_t) * m->entry_count;
-    hmac_sha256(key, key_len, (const uint8_t *)m, payload_len, out_mac);
+    sha256_ctx_t ctx;
+    uint8_t k_pad[SHA256_BLOCK_SIZE];
+    uint8_t inner[SHA256_DIGEST_SIZE];
+
+    /* Inner hash: H((K ^ ipad) || header || entries) */
+    memset(k_pad, 0x36, SHA256_BLOCK_SIZE);
+    for (size_t i = 0; i < key_len && i < SHA256_BLOCK_SIZE; i++) {
+        k_pad[i] ^= key[i];
+    }
+    sha256_init(&ctx);
+    sha256_update(&ctx, k_pad, SHA256_BLOCK_SIZE);
+    sha256_update(&ctx, m, sizeof(uint32_t) * 4); // magic, version, entry_count, reserved
+    if (m->entry_count > 0) {
+        sha256_update(&ctx, m->entries, sizeof(aegis_manifest_entry_t) * m->entry_count);
+    }
+    sha256_final(&ctx, inner);
+
+    /* Outer hash: H((K ^ opad) || inner) */
+    memset(k_pad, 0x5c, SHA256_BLOCK_SIZE);
+    for (size_t i = 0; i < key_len && i < SHA256_BLOCK_SIZE; i++) {
+        k_pad[i] ^= key[i];
+    }
+    sha256_init(&ctx);
+    sha256_update(&ctx, k_pad, SHA256_BLOCK_SIZE);
+    sha256_update(&ctx, inner, SHA256_DIGEST_SIZE);
+    sha256_final(&ctx, out_mac);
+}
+
+void aegis_manifest_sign(aegis_manifest_t *m, const uint8_t *key, size_t key_len) {
+    if (!m || !key || key_len == 0) return;
+    calculate_manifest_hmac(m, key, key_len, m->auth_tag);
 }
 
 int aegis_detect_authenticate_manifest(const aegis_manifest_t *m, const uint8_t *key, size_t key_len) {
