@@ -1,0 +1,40 @@
+=====================================================
+ Running PurpleFS v2 Host Test Suite (13 Test Cases) 
+=====================================================
+[TEST  1] Running test_format_and_mount                        ... PASSED
+[TEST  2] Running test_invalid_signature_and_corrupt_sb        ... PASSED
+[TEST  3] Running test_volume_size_limits                      ... PASSED
+[TEST  4] Running test_file_create_and_lookup                  ... PASSED
+[TEST  5] Running test_file_read_write_small                   ... PASSED
+[TEST  6] Running test_empty_and_multiblock_files              ... PASSED
+[TEST  7] Running test_truncate_file                           ... PASSED
+[TEST  8] Running test_regular_file_persistence                ... PASSED
+[TEST  9] Running test_allocation_exhaustion                   ... PASSED
+[TEST 10] Running test_corrupt_inode_rejection                 ... PASSED
+[TEST 11] Running test_journal_crash_recovery                  ... PASSED
+[TEST 12] Running test_journal_corrupt_after_image_rejection   ... PASSED
+[TEST 13] Running test_fault_injection_failures                ... PASSED
+[TEST 14] Running test_repeated_mount_unmount                  ... PASSED
+=====================================================
+ PurpleFS v2 Tests: 14/14 passed
+=====================================================
+=====================================================
+ Running PurpleFS v2 Host Test Suite (13 Test Cases) 
+=====================================================
+[TEST  1] Running test_format_and_mount                        ... PASSED
+[TEST  2] Running test_invalid_signature_and_corrupt_sb        ... PASSED
+[TEST  3] Running test_volume_size_limits                      ... PASSED
+[TEST  4] Running test_file_create_and_lookup                  ... PASSED
+[TEST  5] Running test_file_read_write_small                   ... PASSED
+[TEST  6] Running test_empty_and_multiblock_files              ... PASSED
+[TEST  7] Running test_truncate_file                           ... PASSED
+[TEST  8] Running test_regular_file_persistence                ... PASSED
+[TEST  9] Running test_allocation_exhaustion                   ... PASSED
+[TEST 10] Running test_corrupt_inode_rejection                 ... PASSED
+[TEST 11] Running test_journal_crash_recovery                  ... PASSED
+[TEST 12] Running test_journal_corrupt_after_image_rejection   ... PASSED
+[TEST 13] Running test_fault_injection_failures                ... PASSED
+[TEST 14] Running test_repeated_mount_unmount                  ... PASSED
+=====================================================
+ PurpleFS v2 Tests: 14/14 passed
+=====================================================
