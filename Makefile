@@ -34,6 +34,8 @@ C_SRCS = src/kernel/main.c \
          src/fs/gpt.c \
          src/fs/partition_dev.c \
          src/fs/purplefs_v2.c \
+         src/crypto/sha256.c \
+         src/security/aegis_detect.c \
          src/mm/pmm.c \
          src/mm/vmm.c
 
