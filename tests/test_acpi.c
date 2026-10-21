@@ -2,7 +2,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <sys/mman.h>
 #include "acpi.h"
+
+/* Helper to allocate memory under 2 GiB so 32-bit pointers (RSDT) do not truncate on 64-bit host */
+static void *alloc_32bit(size_t size) {
+    size_t aligned_size = (size + 4095) & ~4095ULL;
+    void *ptr = mmap(NULL, aligned_size, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    assert(ptr != MAP_FAILED);
+    assert((uintptr_t)ptr <= 0xFFFFFFFFULL);
+    memset(ptr, 0, aligned_size);
+    return ptr;
+}
+
+static void free_32bit(void *ptr, size_t size) {
+    size_t aligned_size = (size + 4095) & ~4095ULL;
+    munmap(ptr, aligned_size);
+}
 
 /* Helper to compute and set 8-bit ACPI checksum */
 static void set_acpi_checksum(void *data, size_t length, size_t checksum_offset) {
@@ -49,19 +66,18 @@ static void test_acpi_rsdp_validation(void) {
 
 static void test_acpi_rsdt_parsing_valid(void) {
     printf("[TEST  3] Running test_acpi_rsdt_parsing_valid                 ... ");
-    /* Create synthetic FACP table */
-    acpi_sdt_header_t facp;
-    memset(&facp, 0, sizeof(facp));
-    memcpy(facp.signature, "FACP", 4);
-    facp.length = sizeof(facp);
-    facp.revision = 1;
-    memcpy(facp.oem_id, "PURPLE", 6);
-    memcpy(facp.oem_table_id, "PURPLE01", 8);
-    set_acpi_checksum(&facp, sizeof(facp), offsetof(acpi_sdt_header_t, checksum));
+    /* Allocate 32-bit buffer for FACP table */
+    acpi_sdt_header_t *facp = (acpi_sdt_header_t *)alloc_32bit(sizeof(acpi_sdt_header_t));
+    memcpy(facp->signature, "FACP", 4);
+    facp->length = sizeof(acpi_sdt_header_t);
+    facp->revision = 1;
+    memcpy(facp->oem_id, "PURPLE", 6);
+    memcpy(facp->oem_table_id, "PURPLE01", 8);
+    set_acpi_checksum(facp, sizeof(acpi_sdt_header_t), offsetof(acpi_sdt_header_t, checksum));
 
     /* Create synthetic RSDT with 1 entry */
     uint32_t rsdt_len = sizeof(acpi_sdt_header_t) + sizeof(uint32_t);
-    uint8_t *rsdt_buf = calloc(1, rsdt_len);
+    uint8_t *rsdt_buf = (uint8_t *)alloc_32bit(rsdt_len);
     acpi_sdt_header_t *rsdt = (acpi_sdt_header_t *)rsdt_buf;
     memcpy(rsdt->signature, "RSDT", 4);
     rsdt->length = rsdt_len;
@@ -69,7 +85,7 @@ static void test_acpi_rsdt_parsing_valid(void) {
     memcpy(rsdt->oem_id, "PURPLE", 6);
 
     uint32_t *entries = (uint32_t *)(rsdt_buf + sizeof(acpi_sdt_header_t));
-    entries[0] = (uint32_t)(uintptr_t)&facp;
+    entries[0] = (uint32_t)(uintptr_t)facp;
     set_acpi_checksum(rsdt_buf, rsdt_len, offsetof(acpi_sdt_header_t, checksum));
 
     /* Create RSDP pointing to RSDT */
@@ -90,7 +106,8 @@ static void test_acpi_rsdt_parsing_valid(void) {
     assert(memcmp(found_facp->oem_table_id, "PURPLE01", 8) == 0);
 
     assert(acpi_find_table("NONX") == NULL);
-    free(rsdt_buf);
+    free_32bit(rsdt_buf, rsdt_len);
+    free_32bit(facp, sizeof(acpi_sdt_header_t));
     printf("PASSED\n");
 }
 
@@ -114,8 +131,8 @@ static void test_acpi_xsdt_parsing_64bit(void) {
     xsdt->revision = 1;
     memcpy(xsdt->oem_id, "PURPLE", 6);
 
-    uint64_t *entries = (uint64_t *)(xsdt_buf + sizeof(acpi_sdt_header_t));
-    entries[0] = (uint64_t)(uintptr_t)&hpet;
+    uint64_t hpet_addr = (uint64_t)(uintptr_t)&hpet;
+    memcpy(xsdt_buf + sizeof(acpi_sdt_header_t), &hpet_addr, sizeof(uint64_t));
     set_acpi_checksum(xsdt_buf, xsdt_len, offsetof(acpi_sdt_header_t, checksum));
 
     /* Create RSDP 2.0 */
@@ -246,21 +263,21 @@ static void test_acpi_madt_truncated(void) {
 
 static void test_acpi_duplicate_table_dedup(void) {
     printf("[TEST  8] Running test_acpi_duplicate_table_dedup              ... ");
-    acpi_sdt_header_t tbl;
-    memcpy(tbl.signature, "TEST", 4);
-    tbl.length = sizeof(tbl);
-    set_acpi_checksum(&tbl, sizeof(tbl), offsetof(acpi_sdt_header_t, checksum));
+    acpi_sdt_header_t *tbl = (acpi_sdt_header_t *)alloc_32bit(sizeof(acpi_sdt_header_t));
+    memcpy(tbl->signature, "TEST", 4);
+    tbl->length = sizeof(acpi_sdt_header_t);
+    set_acpi_checksum(tbl, sizeof(acpi_sdt_header_t), offsetof(acpi_sdt_header_t, checksum));
 
     /* Create RSDT referencing tbl twice */
     uint32_t rsdt_len = sizeof(acpi_sdt_header_t) + 2 * sizeof(uint32_t);
-    uint8_t *rsdt_buf = calloc(1, rsdt_len);
+    uint8_t *rsdt_buf = (uint8_t *)alloc_32bit(rsdt_len);
     acpi_sdt_header_t *rsdt = (acpi_sdt_header_t *)rsdt_buf;
     memcpy(rsdt->signature, "RSDT", 4);
     rsdt->length = rsdt_len;
 
     uint32_t *entries = (uint32_t *)(rsdt_buf + sizeof(acpi_sdt_header_t));
-    entries[0] = (uint32_t)(uintptr_t)&tbl;
-    entries[1] = (uint32_t)(uintptr_t)&tbl;
+    entries[0] = (uint32_t)(uintptr_t)tbl;
+    entries[1] = (uint32_t)(uintptr_t)tbl;
     set_acpi_checksum(rsdt_buf, rsdt_len, offsetof(acpi_sdt_header_t, checksum));
 
     acpi_rsdp_t rsdp;
@@ -273,7 +290,8 @@ static void test_acpi_duplicate_table_dedup(void) {
     assert(rc == ACPI_OK);
     /* Should register RSDT + 1 instance of TEST (deduplicated) */
     assert(acpi_get_table_count() == 2);
-    free(rsdt_buf);
+    free_32bit(rsdt_buf, rsdt_len);
+    free_32bit(tbl, sizeof(acpi_sdt_header_t));
     printf("PASSED\n");
 }
 

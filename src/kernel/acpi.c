@@ -116,10 +116,11 @@ int acpi_init_from_rsdp(const acpi_rsdp_t *rsdp) {
         register_table(xsdt);
 
         uint32_t num_entries = (xsdt->length - sizeof(acpi_sdt_header_t)) / sizeof(uint64_t);
-        const uint64_t *entries = (const uint64_t *)((uintptr_t)xsdt + sizeof(acpi_sdt_header_t));
+        const uint8_t *entries_bytes = (const uint8_t *)xsdt + sizeof(acpi_sdt_header_t);
 
         for (uint32_t i = 0; i < num_entries; i++) {
-            uint64_t table_addr = entries[i];
+            uint64_t table_addr = 0;
+            memcpy(&table_addr, entries_bytes + i * sizeof(uint64_t), sizeof(uint64_t));
             if (table_addr == 0 || table_addr > 0xFFFFFFFFFFFFF000ULL) continue;
 
             const acpi_sdt_header_t *hdr = (const acpi_sdt_header_t *)(uintptr_t)table_addr;
