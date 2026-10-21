@@ -128,11 +128,6 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     apdrv_subsystem_init();
     apapp_subsystem_init();
 
-    /* Try Bochs VBE display adapter fallback if bootloader GOP not present */
-    if (!video_is_available()) {
-        video_init_bochs_vbe(1024, 768);
-    }
-
     /* Step 5.7: Desktop GUI Subsystem */
     desktop_init();
 

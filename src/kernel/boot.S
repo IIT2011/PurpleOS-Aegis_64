@@ -39,23 +39,28 @@ multiboot_entry:
     movl $boot_pdpt, %eax
     orl $0x03, %eax          /* Present | Writable */
     movl %eax, (boot_pml4)
+    movl $0, (boot_pml4 + 4)
 
     /* Link boot_pdpt[0..3] -> boot_pd_0..3 */
     movl $boot_pd_0, %eax
     orl $0x03, %eax
     movl %eax, (boot_pdpt + 0)
+    movl $0, (boot_pdpt + 4)
 
     movl $boot_pd_1, %eax
     orl $0x03, %eax
     movl %eax, (boot_pdpt + 8)
+    movl $0, (boot_pdpt + 12)
 
     movl $boot_pd_2, %eax
     orl $0x03, %eax
     movl %eax, (boot_pdpt + 16)
+    movl $0, (boot_pdpt + 20)
 
     movl $boot_pd_3, %eax
     orl $0x03, %eax
     movl %eax, (boot_pdpt + 24)
+    movl $0, (boot_pdpt + 28)
 
     /* Fill each boot_pd with 512 entries of 2 MiB pages: 4 * 512 * 2 MiB = 4 GiB */
     movl $0, %ecx            /* Page index: 0..2047 */
