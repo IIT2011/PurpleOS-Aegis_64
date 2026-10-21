@@ -14,6 +14,7 @@
 #include "acpi.h"
 #include "apic.h"
 #include "smp.h"
+#include "security/aegis_detect.h"
 #include "io.h"
 
 extern char _kernel_start[];
