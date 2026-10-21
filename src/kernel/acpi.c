@@ -22,7 +22,8 @@ const acpi_rsdp_t *acpi_find_rsdp(void) {
     return NULL;
 #else
     /* 1. Search Extended BIOS Data Area (EBDA) */
-    uint16_t ebda_seg = *(const uint16_t *)(uintptr_t)0x40E;
+    uint16_t ebda_seg = 0;
+    __asm__ volatile ("movw 0x40E, %0" : "=r"(ebda_seg));
     if (ebda_seg != 0) {
         uintptr_t ebda_base = (uintptr_t)ebda_seg << 4;
         if (ebda_base >= 0x80000 && ebda_base < 0xA0000) {

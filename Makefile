@@ -17,6 +17,8 @@ C_SRCS = src/kernel/main.c \
          src/kernel/string.c \
          src/kernel/idt.c \
          src/kernel/pic.c \
+         src/kernel/cpu.c \
+         src/kernel/acpi.c \
          src/kernel/task.c \
          src/kernel/shell.c \
          src/kernel/storage.c \
@@ -25,6 +27,7 @@ C_SRCS = src/kernel/main.c \
          src/drivers/font8x16.c \
          src/drivers/pit.c \
          src/drivers/keyboard.c \
+         src/drivers/apic.c \
          src/drivers/storage/ata_pio.c \
          src/fs/gpt.c \
          src/fs/partition_dev.c \
@@ -58,13 +61,14 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
 	./$(BUILD_DIR)/test_scheduler
 	./$(BUILD_DIR)/test_purplefs_v2
 	./$(BUILD_DIR)/test_storage_gpt
+	./$(BUILD_DIR)/test_acpi
 
 test-asan:
 	@mkdir -p $(BUILD_DIR)
@@ -72,6 +76,12 @@ test-asan:
 	./$(BUILD_DIR)/test_purplefs_v2_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c -o $(BUILD_DIR)/test_storage_gpt_asan
 	./$(BUILD_DIR)/test_storage_gpt_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_acpi.c src/kernel/acpi.c src/kernel/cpu.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_acpi_asan
+	./$(BUILD_DIR)/test_acpi_asan
+
+$(BUILD_DIR)/test_acpi: tests/test_acpi.c src/kernel/acpi.c src/kernel/cpu.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
 $(BUILD_DIR)/mkpfs2_disk: host/mkpfs2_disk.c src/drivers/storage/ata_pio.c src/fs/purplefs_v2.c src/fs/gpt.c host/purplefs_v2_host.c src/kernel/string.c
 	@mkdir -p $(BUILD_DIR)
