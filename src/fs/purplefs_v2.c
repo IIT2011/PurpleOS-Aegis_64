@@ -1,11 +1,11 @@
 #include "purplefs_v2.h"
 #include "string.h"
 
-#ifndef __KERNEL_HOST_TEST__
-extern void serial_puts(const char *s);
+#if !__STDC_HOSTED__
+extern void serial_write(const char *s);
 #define CHECK_WIPE(tag) do { \
     volatile uint64_t *p = (volatile uint64_t *)0x129FB8; \
-    if (*p == 0) serial_puts("[WIPE] " tag "\n"); \
+    if (*p == 0) serial_write("[WIPE] " tag "\n"); \
 } while (0)
 #else
 #define CHECK_WIPE(tag) ((void)0)
