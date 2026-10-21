@@ -679,6 +679,10 @@ static void execute_command(int argc, char **argv) {
 }
 
 static void parse_and_execute(char *cmd) {
+    extern uint64_t boot_pd_3[];
+    if (boot_pd_3[503] == 0) {
+        kerror("SHELL: boot_pd_3[503] ALREADY WIPED BEFORE: '%s'", cmd);
+    }
     char *argv[MAX_ARGS];
     int argc = 0;
     char *p = cmd;
@@ -707,6 +711,9 @@ static void parse_and_execute(char *cmd) {
     }
 
     execute_command(argc, argv);
+    if (boot_pd_3[503] == 0) {
+        kerror("SHELL: boot_pd_3[503] WAS WIPED BY COMMAND: '%s'", cmd);
+    }
 }
 
 void shell_init(void) {
