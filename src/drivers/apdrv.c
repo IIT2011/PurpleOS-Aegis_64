@@ -7,6 +7,7 @@
 
 #ifdef __KERNEL_HOST_TEST__
 #include <stdlib.h>
+#include <sys/mman.h>
 #else
 #include "pmm.h"
 #include "vmm.h"
