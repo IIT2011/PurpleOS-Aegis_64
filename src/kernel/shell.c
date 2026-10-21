@@ -22,6 +22,9 @@
 #include "netdev.h"
 #include "apdrv.h"
 #include "apapp.h"
+#include "rtc.h"
+#include "usb.h"
+#include "audio.h"
 
 #define SHELL_INPUT_BUFFER_LEN 256
 #define MAX_ARGS 16
@@ -344,6 +347,9 @@ static void execute_command(int argc, char **argv) {
         shell_print("  lsmod / drivers   - List loaded APDRV v3 kernel driver modules\n");
         shell_print("  rmmod <name>      - Unload APDRV v3 kernel driver module\n");
         shell_print("  ifconfig / net    - Report network interface adapters and metrics\n");
+        shell_print("  usb               - Report detected USB host controllers\n");
+        shell_print("  audio             - Report detected multimedia audio controllers\n");
+        shell_print("  date / time       - Display current RTC CMOS time and date\n");
         shell_print("  app list / apps   - List active .apapplications application bundles\n");
         shell_print("  app run <path>    - Launch authenticated .apapplications bundle\n");
         shell_print("  app kill <id>     - Terminate running application bundle\n");
@@ -352,6 +358,7 @@ static void execute_command(int argc, char **argv) {
         shell_print("  clear             - Clear terminal screen\n");
         shell_print("  echo <text>       - Display text arguments\n");
         shell_print("  reboot/restart    - Perform ACPI/controller system reboot\n");
+        shell_print("  poweroff/shutdown - Power off computer via ACPI\n");
         shell_print("  panic             - Trigger intentional kernel panic for diagnostics\n\n");
     } else if (strcmp(argv[0], "sysinfo") == 0) {
         shell_print("\nPurple OS (Aegis64 Kernel)\n");
@@ -724,8 +731,18 @@ static void execute_command(int argc, char **argv) {
             cli();
             hlt();
         }
+    } else if (strcmp(argv[0], "date") == 0 || strcmp(argv[0], "time") == 0) {
+        char time_buf[32];
+        rtc_format_time(time_buf, sizeof(time_buf));
+        kprintf("Current System Time: %s UTC\n", time_buf);
+    } else if (strcmp(argv[0], "usb") == 0) {
+        usb_dump_controllers();
+    } else if (strcmp(argv[0], "audio") == 0) {
+        audio_dump_devices();
     } else if (strcmp(argv[0], "reboot") == 0 || strcmp(argv[0], "restart") == 0) {
-        reboot_system();
+        power_reboot();
+    } else if (strcmp(argv[0], "poweroff") == 0 || strcmp(argv[0], "shutdown") == 0) {
+        power_shutdown();
     } else {
         shell_print("Unknown command: '");
         shell_print(argv[0]);

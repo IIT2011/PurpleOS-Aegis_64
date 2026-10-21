@@ -35,6 +35,10 @@ C_SRCS = src/kernel/main.c \
          src/drivers/desktop.c \
          src/drivers/netdev.c \
          src/drivers/apdrv.c \
+         src/drivers/usb.c \
+         src/drivers/e1000.c \
+         src/drivers/audio.c \
+         src/drivers/rtc.c \
          src/drivers/apic.c \
          src/drivers/pci.c \
          src/drivers/purple_detect.c \
