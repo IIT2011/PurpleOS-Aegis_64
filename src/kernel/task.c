@@ -5,6 +5,7 @@
 #include "io.h"
 #include "cpu.h"
 #include "spinlock.h"
+#include "smp.h"
 
 static task_t task_table[MAX_TASKS];
 static task_t *current_tasks[MAX_CPUS];
