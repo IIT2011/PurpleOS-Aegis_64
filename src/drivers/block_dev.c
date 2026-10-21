@@ -38,10 +38,12 @@ int block_dev_register(block_device_t *dev) {
     dev->flags |= BLOCK_DEV_FLAG_ONLINE;
     g_devices[g_device_count++] = dev;
 
+    uint64_t total_bytes = dev->total_blocks * (uint64_t)dev->block_size;
+    uint32_t size_mib = (uint32_t)(total_bytes / (1024ULL * 1024ULL));
+
     kinfo("BlockDev: Registered '%s' [%s] id=%u, size=%u bytes/blk, total_blocks=%u (%u MiB)",
           dev->name, block_dev_type_to_str(dev->type), dev->id,
-          dev->block_size, (uint32_t)dev->total_blocks,
-          (uint32_t)((dev->total_blocks * dev->block_size) / (1024 * 1024)));
+          dev->block_size, (uint32_t)dev->total_blocks, size_mib);
 
     return BLOCK_DEV_OK;
 }
@@ -101,7 +103,7 @@ int block_dev_read(block_device_t *dev, uint64_t lba, uint32_t count, void *buf)
     if (count == 0) return BLOCK_DEV_OK;
 
     // Bounds checking
-    if (lba >= dev->total_blocks || lba + count > dev->total_blocks || lba + count < lba) {
+    if (lba >= dev->total_blocks || count > dev->total_blocks - lba || lba + count < lba) {
         return BLOCK_DEV_ERR_BOUNDS;
     }
 
@@ -118,7 +120,7 @@ int block_dev_write(block_device_t *dev, uint64_t lba, uint32_t count, const voi
     if (count == 0) return BLOCK_DEV_OK;
 
     // Bounds checking
-    if (lba >= dev->total_blocks || lba + count > dev->total_blocks || lba + count < lba) {
+    if (lba >= dev->total_blocks || count > dev->total_blocks - lba || lba + count < lba) {
         return BLOCK_DEV_ERR_BOUNDS;
     }
 

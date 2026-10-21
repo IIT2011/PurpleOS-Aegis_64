@@ -50,11 +50,38 @@ static void mock_nvme_hardware_hook(nvme_controller_t *ctrl, nvme_queue_t *q, nv
             uint64_t lba = (uint64_t)sqe->cdw10 | ((uint64_t)sqe->cdw11 << 32);
             uint32_t count = sqe->cdw12 + 1;
             assert(lba + count <= 256);
+
+            // Verify PRP specification compliance
+            uint32_t bytes = count * 512;
+            if (bytes <= 4096) {
+                assert(sqe->prp1 != 0);
+                assert(sqe->prp2 == 0);
+            } else if (bytes <= 8192) {
+                assert(sqe->prp1 != 0);
+                assert(sqe->prp2 == sqe->prp1 + 4096);
+            } else {
+                assert(sqe->prp1 != 0);
+                assert(sqe->prp2 == ctrl->prp_list_phys);
+            }
+
             memcpy(ctrl->dma_buf, s_mock_nvme_storage + lba * 512, count * 512);
         } else if (sqe->opcode == NVME_CMD_WRITE) {
             uint64_t lba = (uint64_t)sqe->cdw10 | ((uint64_t)sqe->cdw11 << 32);
             uint32_t count = sqe->cdw12 + 1;
             assert(lba + count <= 256);
+
+            uint32_t bytes = count * 512;
+            if (bytes <= 4096) {
+                assert(sqe->prp1 != 0);
+                assert(sqe->prp2 == 0);
+            } else if (bytes <= 8192) {
+                assert(sqe->prp1 != 0);
+                assert(sqe->prp2 == sqe->prp1 + 4096);
+            } else {
+                assert(sqe->prp1 != 0);
+                assert(sqe->prp2 == ctrl->prp_list_phys);
+            }
+
             memcpy(s_mock_nvme_storage + lba * 512, ctrl->dma_buf, count * 512);
         }
         cqe->status = (0 << 1) | (q->cq_phase & 1);
@@ -118,7 +145,7 @@ static void test_nvme_io_operations(void) {
     memset(&pdev, 0, sizeof(pdev));
     assert(nvme_init_controller(&ctrl, &pdev, s_mock_bar0) == 0);
 
-    // Test write to LBA 5
+    // Test write to LBA 5 (2 blocks = 1024 B, 1 page)
     uint8_t wbuf[1024];
     for (int i = 0; i < 1024; i++) wbuf[i] = (uint8_t)(i ^ 0x99);
 
@@ -134,6 +161,28 @@ static void test_nvme_io_operations(void) {
     int rrc = nvme_read_blocks(&ctrl, 5, 2, rbuf);
     assert(rrc == 0);
     assert(memcmp(rbuf, wbuf, 1024) == 0);
+
+    // Test multi-page write to LBA 16 (16 blocks = 8192 B = exactly 2 pages)
+    uint8_t wbuf_2p[8192];
+    for (int i = 0; i < 8192; i++) wbuf_2p[i] = (uint8_t)(i * 3 + 7);
+    assert(nvme_write_blocks(&ctrl, 16, 16, wbuf_2p) == 0);
+    assert(memcmp(s_mock_nvme_storage + 16 * 512, wbuf_2p, 8192) == 0);
+
+    uint8_t rbuf_2p[8192];
+    memset(rbuf_2p, 0, sizeof(rbuf_2p));
+    assert(nvme_read_blocks(&ctrl, 16, 16, rbuf_2p) == 0);
+    assert(memcmp(rbuf_2p, wbuf_2p, 8192) == 0);
+
+    // Test PRP-list multi-page write to LBA 40 (32 blocks = 16384 B = 4 pages)
+    uint8_t wbuf_4p[16384];
+    for (int i = 0; i < 16384; i++) wbuf_4p[i] = (uint8_t)(i * 5 + 13);
+    assert(nvme_write_blocks(&ctrl, 40, 32, wbuf_4p) == 0);
+    assert(memcmp(s_mock_nvme_storage + 40 * 512, wbuf_4p, 16384) == 0);
+
+    uint8_t rbuf_4p[16384];
+    memset(rbuf_4p, 0, sizeof(rbuf_4p));
+    assert(nvme_read_blocks(&ctrl, 40, 32, rbuf_4p) == 0);
+    assert(memcmp(rbuf_4p, wbuf_4p, 16384) == 0);
 
     // Test flush
     assert(nvme_flush(&ctrl) == 0);

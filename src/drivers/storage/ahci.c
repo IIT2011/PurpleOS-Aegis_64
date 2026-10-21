@@ -1,5 +1,6 @@
 #include "ahci.h"
 #include "dma.h"
+#include "io.h"
 #include "string.h"
 #include "serial.h"
 
@@ -137,6 +138,9 @@ static int ahci_issue_command_slot0(ahci_port_t *port) {
         }
     }
 
+    // Memory barrier: ensure command table and PRDT writes are globally visible before MMIO doorbell write
+    mfence();
+
     // Issue slot 0
     port->regs->ci = (1U << 0);
 
@@ -159,8 +163,14 @@ static int ahci_issue_command_slot0(ahci_port_t *port) {
 
     if (port->regs->ci & (1U << 0)) {
         kwarn("AHCI: Command timeout on port %u (CI=0x%x)", port->port_num, port->regs->ci);
+        ahci_stop_cmd(port->regs);
+        port->regs->serr = port->regs->serr;
+        ahci_start_cmd(port->regs);
         return -2;
     }
+
+    // Memory barrier: ensure DMA writes from hardware to memory are visible
+    mfence();
 
     if (port->regs->tfd & HBA_TFD_ERR) {
         return -1;
@@ -335,6 +345,9 @@ int ahci_write_sectors(ahci_port_t *port, uint64_t lba, uint32_t count, const vo
 
         memcpy(port->dma_buffer, src, chunk * 512);
 
+        // Memory barrier: ensure buffer data is written before command issuance
+        mfence();
+
         memset(port->cmd_table, 0, sizeof(ahci_cmd_table_t));
         fis_reg_h2d_t *fis = (fis_reg_h2d_t *)port->cmd_table->cfis;
         fis->fis_type = FIS_TYPE_REG_H2D;
@@ -404,10 +417,16 @@ int ahci_init_controller(ahci_controller_t *ctrl, const pci_device_t *pci_dev, a
 
     // 2. Perform HBA Reset
     ctrl->hba->ghc |= HBA_GHC_HR;
+    int hr_ok = 0;
     for (uint32_t t = 0; t < 100000; t++) {
         if ((ctrl->hba->ghc & HBA_GHC_HR) == 0) {
+            hr_ok = 1;
             break;
         }
+    }
+    if (!hr_ok) {
+        kwarn("AHCI: HBA reset timed out (GHC=0x%x)", ctrl->hba->ghc);
+        return -1;
     }
     // Re-enable AHCI after reset
     ctrl->hba->ghc |= HBA_GHC_AE;

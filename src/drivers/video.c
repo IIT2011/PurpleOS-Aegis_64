@@ -104,7 +104,7 @@ void video_init(struct multiboot_info *mbi) {
 #define VBE_DISPI_LFB_ENABLED  0x40
 
 int video_init_bochs_vbe(uint32_t width, uint32_t height) {
-    if (fb_available) return 0;
+    if (fb_available && fb_width == width && fb_height == height) return 0;
 
     outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ID);
     uint16_t vbe_id = inw(VBE_DISPI_IOPORT_DATA);
@@ -113,14 +113,17 @@ int video_init_bochs_vbe(uint32_t width, uint32_t height) {
     }
 
     const pci_device_t *vga = pci_find_device(0x1234, 0x1111);
-    if (!vga || vga->bar[0] == 0) {
+    if (!vga) {
         return -2;
     }
 
     /* Enable I/O and Memory Space decoding on PCI VGA controller */
     pci_enable_io(vga->bus, vga->dev, vga->func);
 
-    uint64_t lfb_phys = vga->bar[0] & 0xFFFFFFF0ULL;
+    uint64_t lfb_phys = pci_get_bar_address(vga, 0);
+    if (lfb_phys == 0) {
+        return -2;
+    }
 
     /* Ensure linear framebuffer is mapped in page tables */
     page_table_t *pml4 = vmm_get_kernel_pml4();

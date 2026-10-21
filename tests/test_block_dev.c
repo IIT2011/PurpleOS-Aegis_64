@@ -179,6 +179,12 @@ static void test_block_dev_bounds_and_readonly(void) {
     assert(block_dev_read(&dev, MOCK_BLOCK_COUNT - 1, 2, buf) == BLOCK_DEV_ERR_BOUNDS);
     assert(block_dev_write(&dev, MOCK_BLOCK_COUNT - 1, 2, buf) == BLOCK_DEV_ERR_BOUNDS);
 
+    // 64-bit arithmetic overflow resistance
+    assert(block_dev_read(&dev, 0xFFFFFFFFFFFFFFFFULL, 1, buf) == BLOCK_DEV_ERR_BOUNDS);
+    assert(block_dev_read(&dev, 10, 0xFFFFFFFFU, buf) == BLOCK_DEV_ERR_BOUNDS);
+    assert(block_dev_write(&dev, 0xFFFFFFFFFFFFFFFFULL, 1, buf) == BLOCK_DEV_ERR_BOUNDS);
+    assert(block_dev_write(&dev, 10, 0xFFFFFFFFU, buf) == BLOCK_DEV_ERR_BOUNDS);
+
     // Read-only enforcement
     dev.flags |= BLOCK_DEV_FLAG_READONLY;
     assert(block_dev_write(&dev, 0, 1, buf) == BLOCK_DEV_ERR_ROFS);

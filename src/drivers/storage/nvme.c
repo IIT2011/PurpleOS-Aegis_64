@@ -1,5 +1,6 @@
 #include "nvme.h"
 #include "dma.h"
+#include "io.h"
 #include "string.h"
 #include "serial.h"
 
@@ -102,6 +103,9 @@ static int nvme_submit_cmd(nvme_controller_t *ctrl, nvme_queue_t *q, const nvme_
     // Advance tail
     q->sq_tail = (uint16_t)((tail + 1) % q->size);
 
+    // Memory barrier: ensure SQE writes to system memory complete before doorbell write
+    mfence();
+
     // Ring submission queue doorbell
     *q->sq_doorbell = q->sq_tail;
 
@@ -118,6 +122,9 @@ static int nvme_submit_cmd(nvme_controller_t *ctrl, nvme_queue_t *q, const nvme_
         uint8_t phase = (uint8_t)(status & 1);
 
         if (phase == q->cq_phase) {
+            // Ensure CQE read is ordered after hardware phase write
+            mfence();
+
             // Completion entry received!
             uint16_t status_code = (status >> 1) & 0x7FFF;
 
@@ -301,12 +308,26 @@ int nvme_read_blocks(nvme_controller_t *ctrl, uint64_t lba, uint32_t count, void
 
     while (remaining > 0) {
         uint32_t chunk = (remaining > max_blocks) ? max_blocks : remaining;
+        uint32_t transfer_bytes = chunk * ctrl->ns_block_size;
 
         nvme_sq_entry_t sqe;
         memset(&sqe, 0, sizeof(sqe));
         sqe.opcode = NVME_CMD_READ;
         sqe.nsid = 1;
         sqe.prp1 = ctrl->dma_buf_phys;
+
+        // Spec-compliant PRP construction:
+        // <= 4096 bytes (1 page): PRP1 = buffer, PRP2 = 0
+        // <= 8192 bytes (2 pages): PRP1 = page 0, PRP2 = page 1
+        // > 8192 bytes: PRP1 = page 0, PRP2 = PRP List page pointer
+        if (transfer_bytes <= 4096) {
+            sqe.prp2 = 0;
+        } else if (transfer_bytes <= 8192) {
+            sqe.prp2 = ctrl->dma_buf_phys + 4096;
+        } else {
+            sqe.prp2 = ctrl->prp_list_phys;
+        }
+
         sqe.cdw10 = (uint32_t)(cur_lba & 0xFFFFFFFFU);
         sqe.cdw11 = (uint32_t)(cur_lba >> 32);
         sqe.cdw12 = (chunk - 1); // 0-based block count
@@ -316,9 +337,12 @@ int nvme_read_blocks(nvme_controller_t *ctrl, uint64_t lba, uint32_t count, void
             return rc;
         }
 
-        memcpy(dest, ctrl->dma_buf, chunk * ctrl->ns_block_size);
+        // Memory barrier: ensure DMA writes to buffer are visible before copying out
+        mfence();
 
-        dest += (chunk * ctrl->ns_block_size);
+        memcpy(dest, ctrl->dma_buf, transfer_bytes);
+
+        dest += transfer_bytes;
         cur_lba += chunk;
         remaining -= chunk;
     }
@@ -339,14 +363,27 @@ int nvme_write_blocks(nvme_controller_t *ctrl, uint64_t lba, uint32_t count, con
 
     while (remaining > 0) {
         uint32_t chunk = (remaining > max_blocks) ? max_blocks : remaining;
+        uint32_t transfer_bytes = chunk * ctrl->ns_block_size;
 
-        memcpy(ctrl->dma_buf, src, chunk * ctrl->ns_block_size);
+        memcpy(ctrl->dma_buf, src, transfer_bytes);
+
+        // Memory barrier: ensure data in dma_buf is committed before hardware fetches it
+        mfence();
 
         nvme_sq_entry_t sqe;
         memset(&sqe, 0, sizeof(sqe));
         sqe.opcode = NVME_CMD_WRITE;
         sqe.nsid = 1;
         sqe.prp1 = ctrl->dma_buf_phys;
+
+        if (transfer_bytes <= 4096) {
+            sqe.prp2 = 0;
+        } else if (transfer_bytes <= 8192) {
+            sqe.prp2 = ctrl->dma_buf_phys + 4096;
+        } else {
+            sqe.prp2 = ctrl->prp_list_phys;
+        }
+
         sqe.cdw10 = (uint32_t)(cur_lba & 0xFFFFFFFFU);
         sqe.cdw11 = (uint32_t)(cur_lba >> 32);
         sqe.cdw12 = (chunk - 1);
@@ -356,7 +393,7 @@ int nvme_write_blocks(nvme_controller_t *ctrl, uint64_t lba, uint32_t count, con
             return rc;
         }
 
-        src += (chunk * ctrl->ns_block_size);
+        src += transfer_bytes;
         cur_lba += chunk;
         remaining -= chunk;
     }
@@ -383,6 +420,10 @@ void nvme_controller_free(nvme_controller_t *ctrl) {
         dma_free_coherent(ctrl->dma_buf, 65536);
         ctrl->dma_buf = NULL;
     }
+    if (ctrl->prp_list) {
+        dma_free_coherent(ctrl->prp_list, 4096);
+        ctrl->prp_list = NULL;
+    }
 }
 
 int nvme_init_controller(nvme_controller_t *ctrl, const pci_device_t *pci_dev, volatile uint8_t *bar0) {
@@ -401,10 +442,15 @@ int nvme_init_controller(nvme_controller_t *ctrl, const pci_device_t *pci_dev, v
     uint32_t cc = nvme_read32(ctrl, NVME_REG_CC);
     if (cc & NVME_CC_EN) {
         nvme_write32(ctrl, NVME_REG_CC, cc & ~NVME_CC_EN);
+        int dis_ok = 0;
         for (uint32_t t = 0; t < 100000; t++) {
             if ((nvme_read32(ctrl, NVME_REG_CSTS) & NVME_CSTS_RDY) == 0) {
+                dis_ok = 1;
                 break;
             }
+        }
+        if (!dis_ok) {
+            kwarn("NVMe: Timeout waiting for controller to disable");
         }
     }
 
@@ -415,7 +461,19 @@ int nvme_init_controller(nvme_controller_t *ctrl, const pci_device_t *pci_dev, v
         return -1;
     }
 
-    // 4. Initialize Admin Queue (QID 0, size 64)
+    // 4. Allocate 4 KiB PRP List Page (holds up to 512 page pointers)
+    ctrl->prp_list = (uint64_t *)dma_alloc_coherent(4096, &ctrl->prp_list_phys);
+    if (!ctrl->prp_list) {
+        kwarn("NVMe: Failed to allocate PRP list page");
+        nvme_controller_free(ctrl);
+        return -1;
+    }
+    // Populate PRP list with physical addresses of pages 1 through 15 of dma_buf
+    for (uint32_t i = 1; i < 16; i++) {
+        ctrl->prp_list[i - 1] = ctrl->dma_buf_phys + (uint64_t)i * 4096;
+    }
+
+    // 5. Initialize Admin Queue (QID 0, size 64)
     if (nvme_init_queue(ctrl, &ctrl->admin_queue, 0, NVME_QUEUE_ENTRIES) != 0) {
         nvme_controller_free(ctrl);
         return -1;

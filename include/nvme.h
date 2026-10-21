@@ -126,6 +126,10 @@ typedef struct nvme_controller {
     void               *dma_buf;
     uint64_t           dma_buf_phys;
 
+    // PRP List Page for transfers > 2 pages (up to 64 KiB / 16 pages)
+    uint64_t           *prp_list;
+    uint64_t           prp_list_phys;
+
     block_device_t     bdev;
 } nvme_controller_t;
 
