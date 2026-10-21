@@ -88,6 +88,7 @@ void video_init(struct multiboot_info *mbi) {
 #ifndef __KERNEL_HOST_TEST__
 #include "io.h"
 #include "pci.h"
+#include "vmm.h"
 
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF
@@ -116,7 +117,20 @@ int video_init_bochs_vbe(uint32_t width, uint32_t height) {
         return -2;
     }
 
+    /* Enable I/O and Memory Space decoding on PCI VGA controller */
+    pci_enable_io(vga->bus, vga->dev, vga->func);
+
     uint64_t lfb_phys = vga->bar[0] & 0xFFFFFFF0ULL;
+
+    /* Ensure linear framebuffer is mapped in page tables */
+    page_table_t *pml4 = vmm_get_kernel_pml4();
+    if (pml4) {
+        uint32_t fb_size_pages = (width * height * 4 + 4095) / 4096;
+        for (uint32_t p = 0; p < fb_size_pages; p++) {
+            uint64_t addr = lfb_phys + ((uint64_t)p * 4096ULL);
+            vmm_map_page(pml4, addr, addr, PAGE_PRESENT | PAGE_WRITABLE);
+        }
+    }
 
     outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
     outw(VBE_DISPI_IOPORT_DATA, VBE_DISPI_DISABLED);
