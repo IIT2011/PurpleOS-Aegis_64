@@ -2,7 +2,10 @@
 #define KERNEL_STORAGE_H
 
 #include "types.h"
+#include "block_dev.h"
 #include "ata_pio.h"
+#include "ahci.h"
+#include "nvme.h"
 #include "gpt.h"
 #include "partition_dev.h"
 #include "purplefs_v2.h"
@@ -11,7 +14,8 @@
 
 typedef struct kernel_storage {
     ata_device_t    devices[MAX_ATA_DEVICES];
-    gpt_info_t      gpt[MAX_ATA_DEVICES];
+    block_device_t  ata_bdevs[MAX_ATA_DEVICES];
+    gpt_info_t      gpt[MAX_BLOCK_DEVICES];
     partition_dev_t part_dev;
     pfs2_fs_t       fs;
     int             devices_count;
