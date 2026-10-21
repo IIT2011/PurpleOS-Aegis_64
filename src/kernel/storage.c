@@ -86,3 +86,14 @@ int storage_is_fs_mounted(void) {
 pfs2_fs_t *storage_get_fs(void) {
     return g_kernel_storage.fs_mounted ? &g_kernel_storage.fs : NULL;
 }
+
+int storage_is_writable(void) {
+    if (!g_kernel_storage.fs_mounted) return 0;
+    return partition_dev_is_writable(&g_kernel_storage.part_dev);
+}
+
+int storage_set_writable(int writable) {
+    if (!g_kernel_storage.fs_mounted) return -1;
+    partition_dev_set_writable(&g_kernel_storage.part_dev, writable);
+    return 0;
+}

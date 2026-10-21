@@ -162,6 +162,59 @@ static void cmd_peek_file(const char *name) {
     shell_print("\n=== End of File Preview ===\n\n");
 }
 
+static void cmd_touch(const char *name) {
+    if (!storage_is_fs_mounted()) {
+        shell_print("Error: No PurpleFS volume mounted. Check 'disk status'.\n");
+        return;
+    }
+    if (!storage_is_writable()) {
+        shell_print("Error: Filesystem mounted Read-Only. Remount with 'remount rw'.\n");
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    uint32_t ino = 0;
+    if (pfs2_lookup(fs, name, &ino) == PFS2_OK) {
+        kprintf("File '%s' already exists (Inode %u).\n", name, ino);
+        return;
+    }
+    int rc = pfs2_create_file(fs, name, 0644, &ino);
+    if (rc != PFS2_OK) {
+        kprintf("Error: Failed to create file '%s' (code %d).\n", name, rc);
+        return;
+    }
+    pfs2_sync(fs);
+    kprintf("Successfully created file '%s' (Inode %u).\n", name, ino);
+}
+
+static void cmd_write_file(const char *name, const char *text) {
+    if (!storage_is_fs_mounted()) {
+        shell_print("Error: No PurpleFS volume mounted. Check 'disk status'.\n");
+        return;
+    }
+    if (!storage_is_writable()) {
+        shell_print("Error: Filesystem mounted Read-Only. Remount with 'remount rw'.\n");
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    uint32_t ino = 0;
+    if (pfs2_lookup(fs, name, &ino) != PFS2_OK) {
+        int rc = pfs2_create_file(fs, name, 0644, &ino);
+        if (rc != PFS2_OK) {
+            kprintf("Error: Failed to create file '%s' (code %d).\n", name, rc);
+            return;
+        }
+    }
+    size_t len = strlen(text);
+    size_t written = 0;
+    int rc = pfs2_write_file(fs, ino, text, len, 0, &written);
+    if (rc != PFS2_OK) {
+        kprintf("Error: Failed to write to file '%s' (code %d).\n", name, rc);
+        return;
+    }
+    pfs2_sync(fs);
+    kprintf("Successfully wrote %u bytes to '%s' (Inode %u).\n", (uint32_t)written, name, ino);
+}
+
 static void cmd_disk_status(void) {
     shell_print("\n=== ATA Storage Devices & GPT Partition Status ===\n");
     const char *names[4] = { "Primary Master", "Primary Slave", "Secondary Master", "Secondary Slave" };
@@ -209,7 +262,8 @@ static void cmd_filesystem_status(void) {
     uint32_t free_kib  = fs->sb.free_blocks * (fs->sb.block_size / 1024);
     uint32_t used_kib  = total_kib - free_kib;
 
-    kprintf("  Mount State:   MOUNTED (Read-Only Kernel Mode)\n");
+    kprintf("  Mount State:   MOUNTED (%s)\n",
+            storage_is_writable() ? "Read-Write Kernel Mode" : "Read-Only Kernel Mode");
     kprintf("  Volume Label:  %s\n", fs->sb.volume_label);
     kprintf("  Block Size:    %u bytes\n", fs->sb.block_size);
     kprintf("  Total Blocks:  %u (%u KiB / %u MiB)\n", fs->sb.total_blocks, total_kib, total_kib / 1024);
