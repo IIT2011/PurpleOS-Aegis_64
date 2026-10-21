@@ -11,13 +11,15 @@ BUILD_DIR = build
 
 ASM_SRCS = src/kernel/boot.S \
            src/kernel/switch.S \
-           src/kernel/interrupt.S
+           src/kernel/interrupt.S \
+           src/kernel/smp_trampoline.S
 
 C_SRCS = src/kernel/main.c \
          src/kernel/string.c \
          src/kernel/idt.c \
          src/kernel/pic.c \
          src/kernel/cpu.c \
+         src/kernel/smp.c \
          src/kernel/acpi.c \
          src/kernel/task.c \
          src/kernel/shell.c \
@@ -103,7 +105,7 @@ $(BUILD_DIR)/test_vmm: tests/test_vmm.c src/mm/vmm.c src/mm/pmm.c src/kernel/str
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/test_scheduler: tests/test_scheduler.c src/kernel/task.c src/kernel/switch.S src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+$(BUILD_DIR)/test_scheduler: tests/test_scheduler.c src/kernel/task.c src/kernel/switch.S src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
