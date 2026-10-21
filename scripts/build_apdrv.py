@@ -8,8 +8,8 @@ import struct
 import sys
 import os
 
-HEADER_FMT = "<8sII8s32s64s32sIIIIIIIIIIIIIIIIHHIII"
-HEADER_SIZE = struct.calcsize(HEADER_FMT) # 232 bytes
+HEADER_FMT = "<8sII8s32s64s32s" + ("I" * 17) + "HHIII"
+HEADER_SIZE = struct.calcsize(HEADER_FMT) # 240 bytes
 
 RELOC_FMT = "<IIHq" # offset: uint32, type: uint32, sym_index: uint16, pad: uint16, addend: int64 -> packed struct
 # In C:
