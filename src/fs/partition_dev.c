@@ -43,17 +43,51 @@ static int part_read_block(pfs2_block_dev_t *dev, uint32_t block_num, void *buf)
 }
 
 static int part_write_block(pfs2_block_dev_t *dev, uint32_t block_num, const void *buf) {
-    (void)dev;
-    (void)block_num;
-    (void)buf;
-    // Stage 4B strictly enforces read-only storage integration
-    return PART_DEV_ERR_ROFS;
+    if (!dev || !buf) return PART_DEV_ERR_INVALID;
+    partition_dev_t *pdev = (partition_dev_t *)dev->priv;
+    if (!pdev || !pdev->ata_dev) return PART_DEV_ERR_INVALID;
+
+    if (pdev->read_only) {
+        return PART_DEV_ERR_ROFS;
+    }
+
+    if (block_num >= dev->block_count) {
+        return PART_DEV_ERR_BOUNDS;
+    }
+
+    uint64_t rel_sector = (uint64_t)block_num * pdev->sectors_per_block;
+    if (rel_sector / pdev->sectors_per_block != block_num) {
+        return PART_DEV_ERR_OVERFLOW;
+    }
+
+    uint64_t abs_lba = pdev->start_lba + rel_sector;
+    if (abs_lba < pdev->start_lba) {
+        return PART_DEV_ERR_OVERFLOW;
+    }
+
+    uint64_t end_req_lba = abs_lba + (pdev->sectors_per_block - 1);
+    if (end_req_lba > pdev->end_lba || end_req_lba >= pdev->ata_dev->total_sectors) {
+        return PART_DEV_ERR_BOUNDS;
+    }
+
+    int rc = ata_write_sectors(pdev->ata_dev, abs_lba, pdev->sectors_per_block, buf);
+    if (rc != ATA_OK) {
+        return PART_DEV_ERR_IO;
+    }
+
+    return PART_DEV_OK;
 }
 
 static int part_flush(pfs2_block_dev_t *dev) {
-    (void)dev;
-    // No-op for read-only device
-    return PART_DEV_OK;
+    if (!dev) return PART_DEV_ERR_INVALID;
+    partition_dev_t *pdev = (partition_dev_t *)dev->priv;
+    if (!pdev || !pdev->ata_dev) return PART_DEV_ERR_INVALID;
+
+    if (pdev->read_only) {
+        return PART_DEV_OK;
+    }
+
+    return (ata_flush_cache(pdev->ata_dev) == ATA_OK) ? PART_DEV_OK : PART_DEV_ERR_IO;
 }
 
 int partition_dev_init(partition_dev_t *pdev, ata_device_t *ata_dev, const gpt_partition_t *part) {
