@@ -1,4 +1,5 @@
 #include "keyboard.h"
+#include "mouse.h"
 #include "io.h"
 #include "idt.h"
 #include "serial.h"
@@ -30,10 +31,7 @@ static const char scancode_ascii_upper[128] = {
     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
 };
 
-static void keyboard_handler(interrupt_frame_t *frame) {
-    (void)frame;
-    uint8_t scancode = inb(0x60);
-
+void keyboard_process_scancode(uint8_t scancode) {
     if (scancode == 0x2A || scancode == 0x36) { // Left / Right Shift pressed
         shift_pressed = 1;
         return;
@@ -64,6 +62,22 @@ static void keyboard_handler(interrupt_frame_t *frame) {
             kbd_buffer[kbd_head] = ch;
             kbd_head = next_head;
         }
+    }
+}
+
+static void keyboard_handler(interrupt_frame_t *frame) {
+    (void)frame;
+    uint8_t status = inb(0x64);
+    while (status & 0x01) {
+        uint8_t data = inb(0x60);
+        if (status & 0x20) {
+            /* 8042 output port has mouse data waiting */
+            mouse_process_byte(data);
+        } else {
+            /* Keyboard scancode */
+            keyboard_process_scancode(data);
+        }
+        status = inb(0x64);
     }
 }
 
