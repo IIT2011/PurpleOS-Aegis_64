@@ -555,7 +555,11 @@ static void execute_command(int argc, char **argv) {
     } else if (strcmp(argv[0], "lspci") == 0 || strcmp(argv[0], "pci") == 0) {
         pci_print_devices();
     } else if (strcmp(argv[0], "desktop") == 0 || strcmp(argv[0], "gui") == 0) {
-        desktop_render();
+        if (argc > 1 && strcmp(argv[1], "preview") == 0) {
+            desktop_render_preview();
+        } else {
+            desktop_render();
+        }
     } else if (strcmp(argv[0], "mouse") == 0) {
         mouse_state_t ms;
         mouse_get_state(&ms);

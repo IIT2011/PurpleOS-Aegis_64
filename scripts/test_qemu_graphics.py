@@ -33,6 +33,7 @@ def main():
         "video\n",
         "echo Hello Purple OS Graphical Console!\n",
         "desktop\n",
+        "desktop preview\n",
         "clear\n",
         "help\n"
     ]
@@ -41,7 +42,7 @@ def main():
         try:
             proc.stdin.write(c)
             proc.stdin.flush()
-            time.sleep(0.15)
+            time.sleep(0.18)
         except Exception:
             break
 
@@ -62,9 +63,10 @@ def main():
         ("Video Mode Switch", "Video mode switched to 800x600@32bpp"),
         ("Video Framebuffer Active", "Resolution: 800x600@32bpp"),
         ("Echo Rendering Text", "Hello Purple OS Graphical Console!"),
-        ("Desktop GUI Rendering", "Purple OS / Aegis64 Native Desktop Environment"),
+        ("Desktop Framebuffer Render", "Desktop: Graphical desktop frame rendered to framebuffer (800x600)"),
+        ("Desktop GUI Preview Rendering", "Purple OS / Aegis64 Native Desktop Environment"),
         ("Desktop Windows Rendered", "Aegis64 System Monitor"),
-        ("Help Command Rendered", "AegisShell Commands")
+        ("Help Command Rendered", "AegisShell / Purple Shell Commands")
     ]
 
     failed = 0
