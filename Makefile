@@ -73,7 +73,7 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
@@ -86,6 +86,7 @@ test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(
 	./$(BUILD_DIR)/test_desktop
 	./$(BUILD_DIR)/test_apdrv
 	./$(BUILD_DIR)/test_apapp
+	./$(BUILD_DIR)/test_video
 
 test-asan:
 	@mkdir -p $(BUILD_DIR)
@@ -105,6 +106,12 @@ test-asan:
 	./$(BUILD_DIR)/test_apdrv_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apapp_asan
 	./$(BUILD_DIR)/test_apapp_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_video.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_video_asan
+	./$(BUILD_DIR)/test_video_asan
+
+$(BUILD_DIR)/test_video: tests/test_video.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
 $(BUILD_DIR)/test_apapp: tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
