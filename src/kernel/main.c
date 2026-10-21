@@ -99,6 +99,13 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     /* Step 5: Storage Discovery and PurpleFS v2 Mount */
     storage_init();
 
+    /* Step 5.5: AegisDetect Boot Integrity Verification */
+    aegis_detect_init(NULL, 0);
+    aegis_detect_load_default_manifest();
+    if (storage_is_fs_mounted()) {
+        aegis_detect_verify_storage();
+    }
+
     /* Enable Interrupts */
     sti();
     kinfo("Interrupts enabled, entering AegisShell...");

@@ -13,6 +13,7 @@
 #include "acpi.h"
 #include "apic.h"
 #include "smp.h"
+#include "security/aegis_detect.h"
 
 #define SHELL_INPUT_BUFFER_LEN 256
 #define MAX_ARGS 16
@@ -239,6 +240,7 @@ static void execute_command(int argc, char **argv) {
         shell_print("  peek <name> / cat - Display bounded file content preview\n");
         shell_print("  disk status       - Report detected ATA storage and GPT partitions\n");
         shell_print("  filesystem status - Report PurpleFS mount state and space metrics\n");
+        shell_print("  aegisdetect [verify] - Report or run AegisDetect integrity verification\n");
         shell_print("  clear             - Clear terminal screen\n");
         shell_print("  echo <text>       - Display text arguments\n");
         shell_print("  reboot/restart    - Perform ACPI/controller system reboot\n");
