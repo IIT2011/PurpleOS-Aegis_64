@@ -1,9 +1,11 @@
 #include "serial.h"
 #include "io.h"
 #include "string.h"
+#include "spinlock.h"
 #include <stdarg.h>
 
 static int serial_initialized = 0;
+static spinlock_t serial_print_lock = SPINLOCK_INIT;
 
 void serial_init(void) {
     outb(COM1 + 1, 0x00);    // Disable all interrupts
@@ -211,13 +213,18 @@ void kvprintf(const char *fmt, va_list args) {
 }
 
 void kprintf(const char *fmt, ...) {
+    uint64_t flags = 0;
+    spinlock_acquire_irqsave(&serial_print_lock, &flags);
     va_list args;
     va_start(args, fmt);
     kvprintf(fmt, args);
     va_end(args);
+    spinlock_release_irqrestore(&serial_print_lock, flags);
 }
 
 void kinfo(const char *fmt, ...) {
+    uint64_t flags = 0;
+    spinlock_acquire_irqsave(&serial_print_lock, &flags);
     serial_write("[INFO] ");
     va_list args;
     va_start(args, fmt);
@@ -225,9 +232,12 @@ void kinfo(const char *fmt, ...) {
     va_end(args);
     serial_putchar('\n');
     serial_putchar('\r');
+    spinlock_release_irqrestore(&serial_print_lock, flags);
 }
 
 void kerror(const char *fmt, ...) {
+    uint64_t flags = 0;
+    spinlock_acquire_irqsave(&serial_print_lock, &flags);
     serial_write("[ERROR] ");
     va_list args;
     va_start(args, fmt);
@@ -235,9 +245,12 @@ void kerror(const char *fmt, ...) {
     va_end(args);
     serial_putchar('\n');
     serial_putchar('\r');
+    spinlock_release_irqrestore(&serial_print_lock, flags);
 }
 
 void kwarn(const char *fmt, ...) {
+    uint64_t flags = 0;
+    spinlock_acquire_irqsave(&serial_print_lock, &flags);
     serial_write("[WARN] ");
     va_list args;
     va_start(args, fmt);
@@ -245,4 +258,5 @@ void kwarn(const char *fmt, ...) {
     va_end(args);
     serial_putchar('\n');
     serial_putchar('\r');
+    spinlock_release_irqrestore(&serial_print_lock, flags);
 }
