@@ -203,6 +203,12 @@ check-writable-storage-qemu: all $(BUILD_DIR)/mkpfs2_disk
 check-smp-qemu: all
 	@$(PYTHON) scripts/test_qemu_smp.py
 
+check-modern-storage-qemu: all
+	@$(PYTHON) scripts/test_qemu_ahci_nvme.py
+
+check-graphics-qemu: all
+	@$(PYTHON) scripts/test_qemu_graphics.py
+
 run-qemu: all
 	$(QEMU) -kernel $(KERNEL32_ELF) -serial stdio -m 256M
 
