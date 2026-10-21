@@ -57,7 +57,7 @@ OBJS = $(patsubst src/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS)) \
 KERNEL64_ELF = $(BUILD_DIR)/kernel64.elf
 KERNEL32_ELF = $(BUILD_DIR)/kernel.elf
 
-.PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu check-smp-qemu run-qemu run-uefi
+.PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu check-smp-qemu check-graphics-qemu check-desktop-qemu run-qemu run-uefi
 
 all: $(KERNEL32_ELF) $(KERNEL64_ELF)
 
@@ -208,6 +208,9 @@ check-modern-storage-qemu: all
 
 check-graphics-qemu: all
 	@$(PYTHON) scripts/test_qemu_graphics.py
+
+check-desktop-qemu: all
+	@$(PYTHON) scripts/test_qemu_desktop_input.py
 
 run-qemu: all
 	$(QEMU) -kernel $(KERNEL32_ELF) -serial stdio -m 256M
