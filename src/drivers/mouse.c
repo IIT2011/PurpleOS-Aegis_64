@@ -7,11 +7,11 @@
 #include "purple_detect.h"
 
 static mouse_state_t mouse_state;
-static uint8_t mouse_cycle = 0;
-static uint8_t mouse_packet[3];
 static int mouse_detected = 0;
 
 #ifndef __KERNEL_HOST_TEST__
+static uint8_t mouse_cycle = 0;
+static uint8_t mouse_packet[3];
 static void mouse_wait_write(void) {
     uint32_t timeout = 100000;
     while (timeout--) {
