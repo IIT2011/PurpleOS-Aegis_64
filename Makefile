@@ -130,7 +130,7 @@ $(BUILD_DIR)/test_acpi: tests/test_acpi.c src/kernel/acpi.c src/kernel/cpu.c src
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/mkpfs2_disk: host/mkpfs2_disk.c src/drivers/storage/ata_pio.c src/fs/purplefs_v2.c src/fs/gpt.c host/purplefs_v2_host.c src/kernel/string.c
+$(BUILD_DIR)/mkpfs2_disk: host/mkpfs2_disk.c src/drivers/storage/ata_pio.c src/fs/purplefs_v2.c src/fs/gpt.c host/purplefs_v2_host.c src/crypto/sha256.c src/kernel/string.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -Wall -Wextra -Iinclude $^ -o $@
 
