@@ -145,7 +145,16 @@ void ksym_init(void) {
 
     /* 8. Desktop GUI & Window Subsystem */
     ksym_register("desktop_create_window", (uint64_t)(uintptr_t)desktop_create_window);
+    ksym_register("desktop_close_window", (uint64_t)(uintptr_t)desktop_close_window);
+    ksym_register("desktop_focus_window", (uint64_t)(uintptr_t)desktop_focus_window);
+    ksym_register("desktop_toggle_window", (uint64_t)(uintptr_t)desktop_toggle_window);
     ksym_register("desktop_render", (uint64_t)(uintptr_t)desktop_render);
+    ksym_register("desktop_handle_mouse", (uint64_t)(uintptr_t)desktop_handle_mouse);
+    ksym_register("mouse_get_state", (uint64_t)(uintptr_t)mouse_get_state);
+    ksym_register("mouse_get_x", (uint64_t)(uintptr_t)mouse_get_x);
+    ksym_register("mouse_get_y", (uint64_t)(uintptr_t)mouse_get_y);
+    ksym_register("mouse_get_buttons", (uint64_t)(uintptr_t)mouse_get_buttons);
+    ksym_register("mouse_set_position", (uint64_t)(uintptr_t)mouse_set_position);
 
     /* 9. I/O Port Access */
     ksym_register("inb", (uint64_t)(uintptr_t)ksym_inb_wrap);
