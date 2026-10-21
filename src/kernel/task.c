@@ -305,10 +305,7 @@ void scheduler_init(void) {
     current_tasks[0] = main_task;
 
     /* Create idle task for CPU 0 */
-    idle_tasks[0] = task_create("idle-0", idle_task_func, NULL, PRIORITY_IDLE);
-    if (idle_tasks[0]) {
-        task_set_affinity(idle_tasks[0], 1ULL << 0);
-    }
+    idle_tasks[0] = task_create_affined("idle-0", idle_task_func, NULL, PRIORITY_IDLE, 1ULL << 0);
 
     kinfo("Scheduler (AegisSched_64 / PurpleSched) Initialized");
 }
@@ -327,9 +324,8 @@ void scheduler_init_ap(uint32_t cpu_id) {
         name[7] = '\0';
     }
 
-    idle_tasks[cpu_id] = task_create(name, idle_task_func, NULL, PRIORITY_IDLE);
+    idle_tasks[cpu_id] = task_create_affined(name, idle_task_func, NULL, PRIORITY_IDLE, 1ULL << cpu_id);
     if (idle_tasks[cpu_id]) {
-        task_set_affinity(idle_tasks[cpu_id], 1ULL << cpu_id);
         current_tasks[cpu_id] = idle_tasks[cpu_id];
     }
     kinfo("Scheduler: Initialized AP core CPU #%u with %s", cpu_id, name);
