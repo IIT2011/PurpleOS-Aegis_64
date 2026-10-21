@@ -3,6 +3,10 @@
 #include "string.h"
 #include "serial.h"
 
+#ifndef __KERNEL_HOST_TEST__
+#include "kernel_storage.h"
+#endif
+
 static uint8_t active_auth_key[SHA256_BLOCK_SIZE];
 static size_t active_key_len = 0;
 static int manifest_loaded = 0;
