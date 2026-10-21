@@ -8,6 +8,7 @@
 #include "pit.h"
 #include "apic.h"
 #include "ata_pio.h"
+#include "kernel_storage.h"
 #include "task.h"
 #endif
 
@@ -246,13 +247,12 @@ int purple_detect_scan_all(void) {
                            PURPLE_STATE_ACTIVE, PURPLE_DEV_FLAG_BUILTIN);
 
     /* Register Discovered ATA Drives */
-    for (int d = 0; d < 4; d++) {
-        ata_device_t *adev = ata_get_device(d);
-        if (adev && adev->present) {
+    for (int d = 0; d < MAX_ATA_DEVICES; d++) {
+        if (g_kernel_storage.devices[d].is_present) {
             char dname[32];
             dname[0] = 'a'; dname[1] = 't'; dname[2] = 'a'; dname[3] = '0' + (char)d; dname[4] = '\0';
-            purple_detect_register(PURPLE_CAT_STORAGE, dname, "ATA/IDE", adev->model, "ATA",
-                                   (uint64_t)adev->sector_count, 14, PURPLE_STATE_ACTIVE,
+            purple_detect_register(PURPLE_CAT_STORAGE, dname, "ATA/IDE", g_kernel_storage.devices[d].model, "ATA",
+                                   g_kernel_storage.devices[d].total_sectors, 14, PURPLE_STATE_ACTIVE,
                                    PURPLE_DEV_FLAG_REMOVABLE);
         }
     }
@@ -302,7 +302,7 @@ int purple_detect_scan_all(void) {
 void purple_detect_daemon(void *arg) {
     (void)arg;
 #ifndef __KERNEL_HOST_TEST__
-    task_t *cur = task_current();
+    task_t *cur = task_get_current();
     kinfo("PurpleDetect: Background device monitoring daemon online (PID %u)", cur ? cur->id : 0);
     while (1) {
         task_sleep(200); // Check every 2 seconds
