@@ -69,20 +69,20 @@ void gpt_guid_to_str(const gpt_guid_t *guid, char *out_str) {
     out_str[36] = '\0';
 }
 
-int gpt_parse(ata_device_t *dev, gpt_info_t *out_info) {
-    if (!dev || !dev->is_present || !out_info) return GPT_ERR_IO;
+int gpt_parse_block_dev(block_device_t *bdev, gpt_info_t *out_info) {
+    if (!bdev || !out_info) return GPT_ERR_IO;
 
     memset(out_info, 0, sizeof(*out_info));
     out_info->purplefs_part_index = -1;
 
     // Must have at least 34 sectors for Protective MBR + Primary GPT
-    if (dev->total_sectors < 34) {
+    if (bdev->total_blocks < 34) {
         return GPT_ERR_BAD_BOUNDS;
     }
 
     // 1. Read Protective MBR (LBA 0)
     uint8_t mbr_buf[512];
-    if (ata_read_sectors(dev, 0, 1, mbr_buf) != ATA_OK) {
+    if (block_dev_read(bdev, 0, 1, mbr_buf) != BLOCK_DEV_OK) {
         return GPT_ERR_IO;
     }
 
@@ -106,7 +106,7 @@ int gpt_parse(ata_device_t *dev, gpt_info_t *out_info) {
 
     // 2. Read Primary GPT Header (LBA 1)
     uint8_t gpt_hdr_buf[512];
-    if (ata_read_sectors(dev, 1, 1, gpt_hdr_buf) != ATA_OK) {
+    if (block_dev_read(bdev, 1, 1, gpt_hdr_buf) != BLOCK_DEV_OK) {
         return GPT_ERR_IO;
     }
 
@@ -124,7 +124,7 @@ int gpt_parse(ata_device_t *dev, gpt_info_t *out_info) {
     }
 
     if (hdr->first_usable_lba >= hdr->last_usable_lba ||
-        hdr->last_usable_lba >= dev->total_sectors) {
+        hdr->last_usable_lba >= bdev->total_blocks) {
         return GPT_ERR_BAD_BOUNDS;
     }
 
@@ -171,7 +171,7 @@ int gpt_parse(ata_device_t *dev, gpt_info_t *out_info) {
 
     // First pass: compute CRC of entire partition entry array
     for (uint32_t s = 0; s < sectors_needed; s++) {
-        if (ata_read_sectors(dev, entry_lba + s, 1, sector_buf) != ATA_OK) {
+        if (block_dev_read(bdev, entry_lba + s, 1, sector_buf) != BLOCK_DEV_OK) {
             return GPT_ERR_IO;
         }
 
@@ -196,7 +196,7 @@ int gpt_parse(ata_device_t *dev, gpt_info_t *out_info) {
     uint32_t entry_index = 0;
 
     for (uint32_t s = 0; s < sectors_needed && parsed_count < GPT_MAX_PARTITIONS; s++) {
-        if (ata_read_sectors(dev, entry_lba + s, 1, sector_buf) != ATA_OK) {
+        if (block_dev_read(bdev, entry_lba + s, 1, sector_buf) != BLOCK_DEV_OK) {
             return GPT_ERR_IO;
         }
 
@@ -214,7 +214,7 @@ int gpt_parse(ata_device_t *dev, gpt_info_t *out_info) {
             }
             if (entry->starting_lba < hdr->first_usable_lba ||
                 entry->ending_lba > hdr->last_usable_lba ||
-                entry->ending_lba >= dev->total_sectors) {
+                entry->ending_lba >= bdev->total_blocks) {
                 return GPT_ERR_BAD_BOUNDS;
             }
 
@@ -265,4 +265,15 @@ int gpt_parse(ata_device_t *dev, gpt_info_t *out_info) {
 
     out_info->partition_count = parsed_count;
     return GPT_OK;
+}
+
+int gpt_parse(ata_device_t *dev, gpt_info_t *out_info) {
+    if (!dev || !dev->is_present || !out_info) return GPT_ERR_IO;
+
+    block_device_t bdev;
+    if (ata_bind_block_dev(dev, &bdev, "ata_gpt") != 0) {
+        return GPT_ERR_IO;
+    }
+
+    return gpt_parse_block_dev(&bdev, out_info);
 }
