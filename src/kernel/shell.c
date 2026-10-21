@@ -9,6 +9,9 @@
 #include "pit.h"
 #include "io.h"
 #include "kernel_storage.h"
+#include "cpu.h"
+#include "acpi.h"
+#include "apic.h"
 
 #define SHELL_INPUT_BUFFER_LEN 256
 #define MAX_ARGS 16
@@ -236,7 +239,60 @@ static void execute_command(int argc, char **argv) {
         shell_print("\nCPU Configuration:\n");
         shell_print("  Mode: 64-bit Long Mode enabled\n");
         shell_print("  Paging: 4-Level Paging (PML4, PDPT, PD, PT)\n");
-        shell_print("  Protection: CR0.WP enforced, EFER.NXE enabled (W^X)\n\n");
+        shell_print("  Protection: CR0.WP enforced, EFER.NXE enabled (W^X)\n");
+        const cpu_features_t *f = cpu_get_features();
+        kprintf("  Processor:  %s (%s)\n", f->brand, f->vendor);
+        kprintf("  Topology:   Family=%u Model=%u Stepping=%u Active CPUs=%u\n",
+                f->family, f->model, f->stepping, cpu_count());
+        kprintf("  Features:   [APIC=%u x2APIC=%u SSE=%u SSE2=%u SSE4.1=%u AVX=%u NX=%u InvTSC=%u]\n\n",
+                (f->flags & CPU_FEAT_APIC) ? 1 : 0,
+                (f->flags & CPU_FEAT_x2APIC) ? 1 : 0,
+                (f->flags & CPU_FEAT_SSE) ? 1 : 0,
+                (f->flags & CPU_FEAT_SSE2) ? 1 : 0,
+                (f->flags & CPU_FEAT_SSE4_1) ? 1 : 0,
+                (f->flags & CPU_FEAT_AVX) ? 1 : 0,
+                (f->flags & CPU_FEAT_NX) ? 1 : 0,
+                (f->flags & CPU_FEAT_INVARIANT_TSC) ? 1 : 0);
+    } else if (strcmp(argv[0], "acpi") == 0) {
+        uint32_t count = acpi_get_table_count();
+        kprintf("\n=== ACPI System Description Tables (%u detected) ===\n", count);
+        for (uint32_t i = 0; i < count; i++) {
+            const acpi_sdt_header_t *h = acpi_get_table(i);
+            kprintf("  [%2u] Table '%.4s' Rev=%u Length=%-5u OEM='%.6s' TableID='%.8s'\n",
+                    i, h->signature, h->revision, h->length, h->oem_id, h->oem_table_id);
+        }
+        const acpi_madt_info_t *madt = acpi_get_madt_info();
+        if (madt) {
+            kprintf("\n=== ACPI MADT (Multiple APIC Description Table) ===\n");
+            kprintf("  Local APIC Address: %p\n", (void *)madt->lapic_phys_addr);
+            kprintf("  Dual-PIC Controller: %s\n", madt->has_dual_pic ? "Yes (8259 PC-AT Compatible)" : "No");
+            kprintf("  Processor Count:    %u\n", madt->cpu_count);
+            for (uint32_t i = 0; i < madt->cpu_count; i++) {
+                kprintf("    -> CPU %u: APIC ID=%u, ACPI ID=%u, Flags=0x%x\n",
+                        i, madt->cpus[i].apic_id, madt->cpus[i].acpi_id, madt->cpus[i].flags);
+            }
+            kprintf("  I/O APIC Count:     %u\n", madt->ioapic_count);
+            for (uint32_t i = 0; i < madt->ioapic_count; i++) {
+                kprintf("    -> IOAPIC %u: ID=%u, Base=%p, GSI Base=%u\n",
+                        i, madt->ioapics[i].id, (void *)madt->ioapics[i].phys_addr, madt->ioapics[i].gsi_base);
+            }
+            kprintf("  Interrupt Overrides: %u\n", madt->iso_count);
+            for (uint32_t i = 0; i < madt->iso_count; i++) {
+                kprintf("    -> ISO %u: Bus=%u (ISA) IRQ %u -> GSI %u (Flags=0x%x)\n",
+                        i, madt->isos[i].bus, madt->isos[i].source_irq, madt->isos[i].gsi, madt->isos[i].flags);
+            }
+        }
+        shell_print("\n");
+    } else if (strcmp(argv[0], "apic") == 0) {
+        if (!apic_is_enabled()) {
+            shell_print("\nLocal APIC is not enabled (running on legacy PIC).\n\n");
+        } else {
+            kprintf("\n=== Local APIC (Advanced Programmable Interrupt Controller) ===\n");
+            kprintf("  Status:     ENABLED (Software APIC Active)\n");
+            kprintf("  APIC ID:    %u\n", apic_get_id());
+            kprintf("  Version:    0x%x\n", apic_get_version());
+            kprintf("  Timer HZ:   %u Hz\n\n", apic_get_timer_freq());
+        }
     } else if (strcmp(argv[0], "mem") == 0) {
         size_t total = pmm_get_total_frames();
         size_t free_f = pmm_get_free_frames();
