@@ -14,6 +14,8 @@
 #include "apic.h"
 #include "smp.h"
 #include "security/aegis_detect.h"
+#include "purple_detect.h"
+#include "pci.h"
 
 #define SHELL_INPUT_BUFFER_LEN 256
 #define MAX_ARGS 16
@@ -240,6 +242,8 @@ static void execute_command(int argc, char **argv) {
         shell_print("  peek <name> / cat - Display bounded file content preview\n");
         shell_print("  disk status       - Report detected ATA storage and GPT partitions\n");
         shell_print("  filesystem status - Report PurpleFS mount state and space metrics\n");
+        shell_print("  devices           - Report hardware devices discovered by PurpleDetect\n");
+        shell_print("  lspci             - Display PCI bus device inventory\n");
         shell_print("  aegisdetect [verify] - Report or run AegisDetect integrity verification\n");
         shell_print("  clear             - Clear terminal screen\n");
         shell_print("  echo <text>       - Display text arguments\n");
@@ -409,6 +413,10 @@ static void execute_command(int argc, char **argv) {
             aegis_detect_verify_storage();
         }
         aegis_detect_print_status();
+    } else if (strcmp(argv[0], "devices") == 0 || strcmp(argv[0], "purpledetect") == 0) {
+        purple_detect_print_table();
+    } else if (strcmp(argv[0], "lspci") == 0 || strcmp(argv[0], "pci") == 0) {
+        pci_print_devices();
     } else if (strcmp(argv[0], "clear") == 0) {
         if (video_is_available()) {
             video_clear(COLOR_PURPLE_BG);
