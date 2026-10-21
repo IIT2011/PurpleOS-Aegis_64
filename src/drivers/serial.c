@@ -124,6 +124,16 @@ void kvprintf(const char *fmt, va_list args) {
             p++;
         }
 
+        int precision = -1;
+        if (*p == '.') {
+            p++;
+            precision = 0;
+            while (*p >= '0' && *p <= '9') {
+                precision = precision * 10 + (*p - '0');
+                p++;
+            }
+        }
+
         int is_long = 0;
         if (*p == 'l') {
             is_long = 1;
@@ -143,11 +153,19 @@ void kvprintf(const char *fmt, va_list args) {
             case 's': {
                 const char *s = va_arg(args, const char *);
                 if (!s) s = "(null)";
-                int len = (int)strlen(s);
+                int len = 0;
+                if (precision >= 0) {
+                    while (s[len] && len < precision) len++;
+                } else {
+                    len = (int)strlen(s);
+                }
                 if (!left_align && width > len) {
                     for (int w = 0; w < width - len; w++) serial_putchar(' ');
                 }
-                serial_write(s);
+                for (int i = 0; i < len; i++) {
+                    if (s[i] == '\n') serial_putchar('\r');
+                    serial_putchar(s[i]);
+                }
                 if (left_align && width > len) {
                     for (int w = 0; w < width - len; w++) serial_putchar(' ');
                 }
