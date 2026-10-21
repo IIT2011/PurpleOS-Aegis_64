@@ -155,7 +155,6 @@ gdt64_ptr:
 .section .bss
 .align 4096
 .global boot_pml4
-.global boot_pd_3
 boot_pml4:
     .skip 4096
 boot_pdpt:
@@ -169,9 +168,9 @@ boot_pd_2:
 boot_pd_3:
     .skip 4096
 
-.align 16
+.align 4096
 boot_stack_bottom:
-    .skip 32768                 /* 32 KiB boot stack */
+    .skip 65536                 /* 64 KiB boot stack */
 boot_stack_top:
 
 boot_mb_magic:

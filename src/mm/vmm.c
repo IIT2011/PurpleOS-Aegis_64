@@ -51,13 +51,6 @@ int vmm_split_huge_page(page_table_t *pml4, uint64_t vaddr) {
         return VMM_ERR_NO_MEM;
     }
 
-    kinfo("VMM: Splitting huge page at %p (pd=%p, pd_i=%u, pd_val=0x%llx, new_pt=%p)",
-          (void *)vaddr, pd, (uint32_t)pd_i, (unsigned long long)pd_val, new_pt_frame);
-    page_table_t *pd3_before = (page_table_t *)(uintptr_t)(pdpt->entries[3] & ENTRY_ADDR_MASK);
-    kinfo("VMM: Before split, pdpt=%p, pdpt[0]=0x%llx, pdpt[3]=0x%llx, pd3[503]=0x%llx",
-          pdpt, (unsigned long long)pdpt->entries[0], (unsigned long long)pdpt->entries[3],
-          (unsigned long long)pd3_before->entries[503]);
-
     page_table_t *new_pt = (page_table_t *)new_pt_frame;
     memset(new_pt, 0, sizeof(page_table_t));
 
@@ -72,14 +65,6 @@ int vmm_split_huge_page(page_table_t *pml4, uint64_t vaddr) {
     /* Replace 2 MiB huge page in PD with pointer to new 4 KiB PT */
     pd->entries[pd_i] = (uint64_t)(uintptr_t)new_pt_frame | PAGE_PRESENT | PAGE_WRITABLE | (pd_val & PAGE_USER);
     write_cr3(read_cr3());
-
-    uint64_t lapic_phys = 0, lapic_flags = 0;
-    page_table_t *pd3 = (page_table_t *)(uintptr_t)(pdpt->entries[3] & ENTRY_ADDR_MASK);
-    kinfo("VMM: After split, pdpt[3]=0x%llx, pd3=%p, pd3[503]=0x%llx",
-          (unsigned long long)pdpt->entries[3], pd3, (unsigned long long)pd3->entries[503]);
-    int lapic_res = vmm_get_mapping(pml4, 0xfee00000, &lapic_phys, &lapic_flags);
-    kinfo("VMM: After split, LAPIC (0xfee00000) mapping res=%d, phys=0x%llx, flags=0x%llx",
-          lapic_res, (unsigned long long)lapic_phys, (unsigned long long)lapic_flags);
 
     return VMM_OK;
 }
