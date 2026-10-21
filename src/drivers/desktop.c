@@ -118,7 +118,11 @@ void desktop_render(void) {
     video_set_colors(COLOR_WHITE, COLOR_PURPLE_BAR);
     video_puts("  |  System  Files  Security  Devices  |  ");
 
+#ifndef __KERNEL_HOST_TEST__
     uint64_t sec = pit_get_ticks() / 100;
+#else
+    uint64_t sec = 0;
+#endif
     char stat[64];
     stat[0] = 'C'; stat[1] = 'P'; stat[2] = 'U'; stat[3] = 's'; stat[4] = ':'; stat[5] = ' ';
     stat[6] = '0' + (char)cpu_count();
@@ -194,8 +198,13 @@ void desktop_render_preview(void) {
     kprintf("\n========================================================================================\n");
     kprintf("   Purple OS / Aegis64 Native Desktop Environment (Workspace Canvas)                     \n");
     kprintf("========================================================================================\n");
+#ifndef __KERNEL_HOST_TEST__
+    uint32_t uptime_sec = (uint32_t)(pit_get_ticks() / 100);
+#else
+    uint32_t uptime_sec = 0;
+#endif
     kprintf("  [Top Bar]  Purple OS  |  System   Files   Security   Devices  |  CPUs: %u  Uptime: %us\n",
-            cpu_count(), (uint32_t)(pit_get_ticks() / 100));
+            cpu_count(), uptime_sec);
     kprintf("  --------------------------------------------------------------------------------------\n");
     kprintf("  +-----------------------------------+    +-------------------------------------------+\n");
     kprintf("  | [X] Aegis64 System Monitor        |    | [X] PurpleFS v2 Storage                   |\n");
