@@ -48,7 +48,8 @@ def main():
             "filesystem status\n",
             "list files\n",
             "peek welcome.txt\n",
-            "peek version.txt\n"
+            "peek version.txt\n",
+            "aegisdetect\n"
         ]
 
         for c in commands:
@@ -81,7 +82,11 @@ def main():
             ("List Files Version File", "version.txt"),
             ("List Files MOTD", "motd"),
             ("Peek Content Welcome", "Welcome to Purple OS / Aegis64 Native Filesystem!"),
-            ("Peek Content Version", "Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)")
+            ("Peek Content Version", "Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)"),
+            ("AegisDetect Boot Baseline", "AegisDetect: Loaded and authenticated trusted baseline"),
+            ("AegisDetect File Verify", "AegisDetect: Verification summary: 3/3 components verified (3 trusted, 0 tampered/missing)"),
+            ("AegisDetect Shell Status", "AegisDetect Boot Integrity & System Protection Subsystem"),
+            ("AegisDetect Shell Trusted Count", "3 total, 3 trusted, 0 tampered/missing")
         ]
 
         passed = True
