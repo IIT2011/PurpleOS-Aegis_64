@@ -30,6 +30,8 @@ C_SRCS = src/kernel/main.c \
          src/drivers/pit.c \
          src/drivers/keyboard.c \
          src/drivers/apic.c \
+         src/drivers/pci.c \
+         src/drivers/purple_detect.c \
          src/drivers/storage/ata_pio.c \
          src/fs/gpt.c \
          src/fs/partition_dev.c \
