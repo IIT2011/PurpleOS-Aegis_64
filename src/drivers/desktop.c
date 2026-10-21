@@ -495,8 +495,17 @@ void desktop_run_session(void) {
             lb = cb;
         }
 #ifndef __KERNEL_HOST_TEST__
+        char c = 0;
+        int got_key = 0;
         if (keyboard_has_char()) {
-            char c = keyboard_getchar();
+            c = keyboard_getchar();
+            got_key = 1;
+        } else if (serial_has_char()) {
+            c = serial_getchar();
+            got_key = 1;
+        }
+
+        if (got_key) {
             if (c == 'q' || c == 'Q' || c == 27) {
                 running = 0;
             } else if (c == '1' && window_count > 0) {
