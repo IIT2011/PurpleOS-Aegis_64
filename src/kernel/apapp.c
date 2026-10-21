@@ -146,7 +146,7 @@ int apapp_launch(const apapp_manifest_t *manifest,
         uint32_t wx = 40 + (app_count * 30);
         uint32_t wy = 50 + (app_count * 25);
         win_id = desktop_create_window(manifest->app_name, wx, wy, w, h,
-                                       COLOR_LIGHT_GRAY, COLOR_PURPLE_DARK);
+                                       COLOR_PURPLE_BG);
     }
 
     /* 3. Task Creation under AegisSched */
