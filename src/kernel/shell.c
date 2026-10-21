@@ -305,6 +305,46 @@ static void execute_command(int argc, char **argv) {
             kprintf("  Version:    0x%x\n", apic_get_version());
             kprintf("  Timer HZ:   %u Hz\n\n", apic_get_timer_freq());
         }
+    } else if (strcmp(argv[0], "smp") == 0) {
+        uint32_t total = cpu_count();
+        uint32_t online = cpu_online_count();
+        uint32_t cur = cpu_get_current_id();
+
+        kprintf("\n=== Symmetric Multiprocessing (SMP) Subsystem ===\n");
+        kprintf("  Topology:        %u discovered cores, %u online cores\n", total, online);
+        kprintf("  Current CPU:     CPU #%u (APIC ID %u)\n", cur, apic_get_id());
+        kprintf("  -------------------------------------------------------------------------\n");
+        kprintf("  CPU#  ROLE  STATUS   APIC_ID  ACPI_ID  STACK_TOP           TICKS      IPIS\n");
+        kprintf("  -------------------------------------------------------------------------\n");
+        for (uint32_t i = 0; i < total; i++) {
+            cpu_t *c = cpu_get(i);
+            if (c) {
+                kprintf("  %-4u  %-4s  %-7s  %-7u  %-7u  0x%-16x  %-9u  %-5u\n",
+                        c->id,
+                        c->is_bsp ? "BSP" : "AP",
+                        c->is_online ? "ONLINE" : "OFFLINE",
+                        c->apic_id, c->acpi_id,
+                        c->kernel_stack,
+                        (uint32_t)c->lapic_timer_ticks,
+                        c->ipi_count);
+            }
+        }
+        kprintf("  -------------------------------------------------------------------------\n\n");
+    } else if (strcmp(argv[0], "smptest") == 0) {
+        uint32_t online = cpu_online_count();
+        shell_print("Spawning SMP multi-core concurrent test tasks...\n");
+        for (uint32_t i = 0; i < online; i++) {
+            char name[16];
+            name[0] = 's'; name[1] = 'm'; name[2] = 'p'; name[3] = '_';
+            name[4] = 'c'; name[5] = 'p'; name[6] = 'u'; name[7] = '0' + (char)i;
+            name[8] = '\0';
+            task_t *t = task_create(name, smp_worker_func, (void *)(uintptr_t)i, PRIORITY_NORMAL);
+            if (t) {
+                task_set_affinity(t, 1ULL << i);
+                kprintf("  Spawned '%s' (Task ID %u) bound to CPU #%u\n", name, t->id, i);
+            }
+        }
+        shell_print("All SMP test tasks queued with strict core affinity.\n\n");
     } else if (strcmp(argv[0], "mem") == 0) {
         size_t total = pmm_get_total_frames();
         size_t free_f = pmm_get_free_frames();
