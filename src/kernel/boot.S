@@ -155,6 +155,7 @@ gdt64_ptr:
 .section .bss
 .align 4096
 .global boot_pml4
+.global boot_pd_3
 boot_pml4:
     .skip 4096
 boot_pdpt:

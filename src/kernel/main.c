@@ -46,6 +46,8 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     kinfo("    Aegis64 Kernel (Purple OS) Initializing      ");
     kinfo("=================================================");
     kinfo("Kernel binary loaded: %p to %p", (void *)_kernel_start, (void *)_kernel_end);
+    extern uint64_t boot_pd_3[];
+    kinfo("MAIN: boot_pd_3[503]=0x%llx", (unsigned long long)boot_pd_3[503]);
 
     if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
         kinfo("Multiboot 1 bootloader detected (magic: 0x%x)", magic);
