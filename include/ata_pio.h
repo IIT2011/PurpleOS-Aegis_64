@@ -28,8 +28,12 @@
 /* ATA Commands */
 #define ATA_CMD_READ_PIO           0x20
 #define ATA_CMD_READ_PIO_EXT       0x24
+#define ATA_CMD_WRITE_PIO          0x30
+#define ATA_CMD_WRITE_PIO_EXT      0x34
 #define ATA_CMD_IDENTIFY           0xEC
 #define ATA_CMD_IDENTIFY_PACKET    0xA1
+#define ATA_CMD_CACHE_FLUSH        0xE7
+#define ATA_CMD_CACHE_FLUSH_EXT    0xEA
 
 /* ATA Error Codes */
 #define ATA_OK                      0
@@ -74,5 +78,8 @@ void ata_device_init(ata_device_t *dev, uint8_t channel, uint8_t drive, const at
 int ata_identify(ata_device_t *dev);
 int ata_read_sectors(ata_device_t *dev, uint64_t lba, uint32_t count, void *buf);
 int ata_read_blocks_4k(ata_device_t *dev, uint32_t block_num, uint32_t block_count, void *buf);
+int ata_write_sectors(ata_device_t *dev, uint64_t lba, uint32_t count, const void *buf);
+int ata_write_blocks_4k(ata_device_t *dev, uint32_t block_num, uint32_t block_count, const void *buf);
+int ata_flush_cache(ata_device_t *dev);
 
 #endif /* ATA_PIO_H */
