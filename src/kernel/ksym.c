@@ -9,6 +9,10 @@
 #include "task.h"
 #include "desktop.h"
 #include "mouse.h"
+#include "rtc.h"
+#include "usb.h"
+#include "e1000.h"
+#include "audio.h"
 
 static ksym_entry_t ksym_table[KSYM_MAX_SYMBOLS];
 static uint32_t ksym_count = 0;
@@ -157,7 +161,23 @@ void ksym_init(void) {
     ksym_register("mouse_get_buttons", (uint64_t)(uintptr_t)mouse_get_buttons);
     ksym_register("mouse_set_position", (uint64_t)(uintptr_t)mouse_set_position);
 
-    /* 9. I/O Port Access */
+    /* 9. Hardware Drivers & Platform APIs */
+    ksym_register("rtc_get_time", (uint64_t)(uintptr_t)rtc_get_time);
+    ksym_register("rtc_format_time", (uint64_t)(uintptr_t)rtc_format_time);
+    ksym_register("power_shutdown", (uint64_t)(uintptr_t)power_shutdown);
+    ksym_register("power_reboot", (uint64_t)(uintptr_t)power_reboot);
+    ksym_register("usb_get_controller_count", (uint64_t)(uintptr_t)usb_get_controller_count);
+    ksym_register("usb_get_controller", (uint64_t)(uintptr_t)usb_get_controller);
+    ksym_register("usb_dump_controllers", (uint64_t)(uintptr_t)usb_dump_controllers);
+    ksym_register("e1000_is_present", (uint64_t)(uintptr_t)e1000_is_present);
+    ksym_register("e1000_get_device", (uint64_t)(uintptr_t)e1000_get_device);
+    ksym_register("e1000_transmit", (uint64_t)(uintptr_t)e1000_transmit);
+    ksym_register("e1000_receive", (uint64_t)(uintptr_t)e1000_receive);
+    ksym_register("audio_get_device_count", (uint64_t)(uintptr_t)audio_get_device_count);
+    ksym_register("audio_get_device", (uint64_t)(uintptr_t)audio_get_device);
+    ksym_register("audio_dump_devices", (uint64_t)(uintptr_t)audio_dump_devices);
+
+    /* 10. I/O Port Access */
     ksym_register("inb", (uint64_t)(uintptr_t)ksym_inb_wrap);
     ksym_register("outb", (uint64_t)(uintptr_t)ksym_outb_wrap);
     ksym_register("inw", (uint64_t)(uintptr_t)ksym_inw_wrap);
