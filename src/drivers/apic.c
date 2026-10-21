@@ -71,9 +71,8 @@ int apic_init(uint64_t phys_base) {
     /* 6. Send initial EOI to clear stale pending interrupts */
     lapic_write(LAPIC_EOI, 0);
 
-    /* 7. Disable legacy 8259 PIC by masking all lines */
-    outb(0x21, 0xFF);
-    outb(0xA1, 0xFF);
+    /* 7. Mask IRQ 0 (PIT timer) on 8259 PIC so Local APIC timer drives scheduling ticks */
+    outb(0x21, inb(0x21) | 0x01);
 
     apic_enabled = 1;
 
