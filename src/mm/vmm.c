@@ -53,6 +53,8 @@ int vmm_split_huge_page(page_table_t *pml4, uint64_t vaddr) {
 
     kinfo("VMM: Splitting huge page at %p (pd=%p, pd_i=%u, pd_val=0x%llx, new_pt=%p)",
           (void *)vaddr, pd, (uint32_t)pd_i, (unsigned long long)pd_val, new_pt_frame);
+    kinfo("VMM: Before split, pdpt=%p, pdpt[0]=0x%llx, pdpt[3]=0x%llx",
+          pdpt, (unsigned long long)pdpt->entries[0], (unsigned long long)pdpt->entries[3]);
 
     page_table_t *new_pt = (page_table_t *)new_pt_frame;
     memset(new_pt, 0, sizeof(page_table_t));
