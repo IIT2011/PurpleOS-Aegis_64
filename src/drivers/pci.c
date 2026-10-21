@@ -178,6 +178,54 @@ const pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id) {
     return NULL;
 }
 
+const pci_device_t *pci_find_by_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if) {
+    for (uint32_t i = 0; i < pci_device_count; i++) {
+        if (pci_devices[i].class_code == class_code &&
+            pci_devices[i].subclass == subclass &&
+            (prog_if == 0xFF || pci_devices[i].prog_if == prog_if)) {
+            return &pci_devices[i];
+        }
+    }
+    return NULL;
+}
+
+uint64_t pci_get_bar_address(const pci_device_t *dev, uint8_t bar_index) {
+    if (!dev || bar_index >= 6) return 0;
+    uint32_t bar_val = dev->bar[bar_index];
+    if (bar_val & 1) {
+        // I/O space
+        return (uint64_t)(bar_val & 0xFFFFFFFCU);
+    } else {
+        // Memory space
+        uint8_t type = (bar_val >> 1) & 0x03;
+        if (type == 0x02 && bar_index < 5) {
+            // 64-bit memory space
+            uint64_t high = (uint64_t)dev->bar[bar_index + 1];
+            return (high << 32) | (bar_val & 0xFFFFFFF0ULL);
+        } else {
+            // 32-bit memory space
+            return (uint64_t)(bar_val & 0xFFFFFFF0ULL);
+        }
+    }
+}
+
+uint64_t pci_get_bar_size(const pci_device_t *dev, uint8_t bar_index) {
+    if (!dev || bar_index >= 6) return 0;
+    uint8_t offset = PCI_REG_BAR0 + (bar_index * 4);
+    uint32_t orig = pci_read_config_dword(dev->bus, dev->dev, dev->func, offset);
+    pci_write_config_dword(dev->bus, dev->dev, dev->func, offset, 0xFFFFFFFF);
+    uint32_t mask = pci_read_config_dword(dev->bus, dev->dev, dev->func, offset);
+    pci_write_config_dword(dev->bus, dev->dev, dev->func, offset, orig);
+
+    if (orig & 1) {
+        mask &= 0xFFFFFFFC;
+        return (uint64_t)((~mask) + 1);
+    } else {
+        mask &= 0xFFFFFFF0;
+        return (uint64_t)((~mask) + 1);
+    }
+}
+
 void pci_enable_bus_mastering(uint8_t bus, uint8_t dev, uint8_t func) {
     uint16_t cmd = pci_read_config_word(bus, dev, func, PCI_REG_COMMAND);
     cmd |= 0x0004; /* Bit 2: Bus Master */
