@@ -16,6 +16,8 @@
 #include "security/aegis_detect.h"
 #include "purple_detect.h"
 #include "pci.h"
+#include "mouse.h"
+#include "desktop.h"
 
 #define SHELL_INPUT_BUFFER_LEN 256
 #define MAX_ARGS 16
@@ -302,6 +304,8 @@ static void execute_command(int argc, char **argv) {
         shell_print("  filesystem status - Report PurpleFS mount state and space metrics\n");
         shell_print("  devices           - Report hardware devices discovered by PurpleDetect\n");
         shell_print("  lspci             - Display PCI bus device inventory\n");
+        shell_print("  desktop / gui     - Render graphical desktop workspace and windows\n");
+        shell_print("  mouse             - Report PS/2 mouse cursor position and buttons\n");
         shell_print("  aegisdetect [verify] - Report or run AegisDetect integrity verification\n");
         shell_print("  clear             - Clear terminal screen\n");
         shell_print("  echo <text>       - Display text arguments\n");
@@ -525,6 +529,19 @@ static void execute_command(int argc, char **argv) {
         purple_detect_print_table();
     } else if (strcmp(argv[0], "lspci") == 0 || strcmp(argv[0], "pci") == 0) {
         pci_print_devices();
+    } else if (strcmp(argv[0], "desktop") == 0 || strcmp(argv[0], "gui") == 0) {
+        desktop_render();
+    } else if (strcmp(argv[0], "mouse") == 0) {
+        mouse_state_t ms;
+        mouse_get_state(&ms);
+        kprintf("\n=== PS/2 Mouse Subsystem ===\n");
+        kprintf("  Position: (%d, %d)\n", ms.x, ms.y);
+        kprintf("  Delta:    (dx=%d, dy=%d)\n", ms.dx, ms.dy);
+        kprintf("  Buttons:  [Left=%s Right=%s Middle=%s] (0x%x)\n\n",
+                (ms.buttons & MOUSE_BTN_LEFT) ? "DOWN" : "UP",
+                (ms.buttons & MOUSE_BTN_RIGHT) ? "DOWN" : "UP",
+                (ms.buttons & MOUSE_BTN_MIDDLE) ? "DOWN" : "UP",
+                ms.buttons);
     } else if (strcmp(argv[0], "clear") == 0) {
         if (video_is_available()) {
             video_clear(COLOR_PURPLE_BG);
