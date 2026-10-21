@@ -3,6 +3,7 @@
 #include "string.h"
 #include "serial.h"
 #include "desktop.h"
+#include "video.h"
 #include "task.h"
 
 #ifdef __KERNEL_HOST_TEST__
