@@ -38,7 +38,11 @@ C_SRCS = src/kernel/main.c \
          src/drivers/apic.c \
          src/drivers/pci.c \
          src/drivers/purple_detect.c \
+         src/drivers/dma.c \
+         src/drivers/block_dev.c \
          src/drivers/storage/ata_pio.c \
+         src/drivers/storage/ahci.c \
+         src/drivers/storage/nvme.c \
          src/fs/gpt.c \
          src/fs/partition_dev.c \
          src/fs/purplefs_v2.c \
@@ -73,7 +77,7 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
@@ -87,12 +91,15 @@ test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(
 	./$(BUILD_DIR)/test_apdrv
 	./$(BUILD_DIR)/test_apapp
 	./$(BUILD_DIR)/test_video
+	./$(BUILD_DIR)/test_block_dev
+	./$(BUILD_DIR)/test_ahci
+	./$(BUILD_DIR)/test_nvme
 
 test-asan:
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_purplefs_v2.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c -o $(BUILD_DIR)/test_purplefs_v2_asan
 	./$(BUILD_DIR)/test_purplefs_v2_asan
-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c -o $(BUILD_DIR)/test_storage_gpt_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/drivers/block_dev.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_storage_gpt_asan
 	./$(BUILD_DIR)/test_storage_gpt_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_acpi.c src/kernel/acpi.c src/kernel/cpu.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_acpi_asan
 	./$(BUILD_DIR)/test_acpi_asan
@@ -108,6 +115,24 @@ test-asan:
 	./$(BUILD_DIR)/test_apapp_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_video.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_video_asan
 	./$(BUILD_DIR)/test_video_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_block_dev.c src/drivers/block_dev.c src/drivers/dma.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_block_dev_asan
+	./$(BUILD_DIR)/test_block_dev_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_ahci.c src/drivers/storage/ahci.c src/drivers/block_dev.c src/drivers/dma.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_ahci_asan
+	./$(BUILD_DIR)/test_ahci_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_nvme.c src/drivers/storage/nvme.c src/drivers/block_dev.c src/drivers/dma.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_nvme_asan
+	./$(BUILD_DIR)/test_nvme_asan
+
+$(BUILD_DIR)/test_nvme: tests/test_nvme.c src/drivers/storage/nvme.c src/drivers/block_dev.c src/drivers/dma.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_ahci: tests/test_ahci.c src/drivers/storage/ahci.c src/drivers/block_dev.c src/drivers/dma.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_block_dev: tests/test_block_dev.c src/drivers/block_dev.c src/drivers/dma.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
 $(BUILD_DIR)/test_video: tests/test_video.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
@@ -137,11 +162,11 @@ $(BUILD_DIR)/test_acpi: tests/test_acpi.c src/kernel/acpi.c src/kernel/cpu.c src
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/mkpfs2_disk: host/mkpfs2_disk.c src/drivers/storage/ata_pio.c src/fs/purplefs_v2.c src/fs/gpt.c host/purplefs_v2_host.c src/crypto/sha256.c src/kernel/string.c
+$(BUILD_DIR)/mkpfs2_disk: host/mkpfs2_disk.c src/drivers/storage/ata_pio.c src/drivers/block_dev.c src/fs/purplefs_v2.c src/fs/gpt.c host/purplefs_v2_host.c src/crypto/sha256.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -Wall -Wextra -Iinclude $^ -o $@
 
-$(BUILD_DIR)/test_storage_gpt: tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c
+$(BUILD_DIR)/test_storage_gpt: tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/drivers/block_dev.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -Wall -Wextra -Iinclude $^ -o $@
 
