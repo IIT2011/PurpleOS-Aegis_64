@@ -250,3 +250,103 @@ int ata_read_blocks_4k(ata_device_t *dev, uint32_t block_num, uint32_t block_cou
         return ATA_ERR_UNSUPPORTED;
     }
 }
+
+int ata_flush_cache(ata_device_t *dev) {
+    if (!dev || !dev->is_present || !dev->ops) return ATA_ERR_NO_DEV;
+    if (ata_wait_not_busy(dev) != ATA_OK) return ATA_ERR_TIMEOUT;
+
+    uint8_t drive_head = (uint8_t)(0xE0 | (dev->drive << 4));
+    dev->ops->outb(dev->io_base + 6, drive_head);
+    for (int i = 0; i < 4; i++) dev->ops->io_wait();
+
+    dev->ops->outb(dev->io_base + 7, dev->lba48_supported ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
+
+    if (ata_wait_not_busy(dev) != ATA_OK) {
+        return ATA_ERR_TIMEOUT;
+    }
+    return ATA_OK;
+}
+
+int ata_write_sectors(ata_device_t *dev, uint64_t lba, uint32_t count, const void *buf) {
+    if (!dev || !dev->is_present || !dev->ops) return ATA_ERR_NO_DEV;
+    if (count == 0) return ATA_OK;
+    if (!buf) return ATA_ERR_RANGE;
+
+    // Check overflow and bounds
+    if (lba + count < lba || lba + count > dev->total_sectors) {
+        return ATA_ERR_RANGE;
+    }
+
+    if (lba + count > 0x0FFFFFFF) {
+        return ATA_ERR_RANGE;
+    }
+
+    const uint8_t *byte_buf = (const uint8_t *)buf;
+    uint32_t remaining = count;
+    uint64_t current_lba = lba;
+
+    while (remaining > 0) {
+        uint32_t chunk = (remaining > 256) ? 256 : remaining;
+
+        if (ata_wait_not_busy(dev) != ATA_OK) {
+            return ATA_ERR_TIMEOUT;
+        }
+
+        // Select drive and bits 24..27 of LBA
+        uint8_t drive_head = (uint8_t)(0xE0 | (dev->drive << 4) | ((current_lba >> 24) & 0x0F));
+        dev->ops->outb(dev->io_base + 6, drive_head);
+        for (int i = 0; i < 4; i++) dev->ops->io_wait();
+
+        // Write sector count (0 means 256 sectors in ATA PIO)
+        dev->ops->outb(dev->io_base + 2, (uint8_t)(chunk == 256 ? 0 : chunk));
+        dev->ops->outb(dev->io_base + 3, (uint8_t)(current_lba & 0xFF));
+        dev->ops->outb(dev->io_base + 4, (uint8_t)((current_lba >> 8) & 0xFF));
+        dev->ops->outb(dev->io_base + 5, (uint8_t)((current_lba >> 16) & 0xFF));
+
+        // Issue Write Sectors command
+        dev->ops->outb(dev->io_base + 7, ATA_CMD_WRITE_PIO);
+
+        for (uint32_t s = 0; s < chunk; s++) {
+            if (ata_wait_drq(dev) != ATA_OK) {
+                return ATA_ERR_FAULT;
+            }
+
+            // Transfer 256 words (512 bytes)
+            const uint16_t *word_ptr = (const uint16_t *)byte_buf;
+            for (int w = 0; w < 256; w++) {
+                dev->ops->outw(dev->io_base, word_ptr[w]);
+            }
+            byte_buf += 512;
+        }
+
+        if (ata_wait_not_busy(dev) != ATA_OK) {
+            return ATA_ERR_TIMEOUT;
+        }
+
+        remaining -= chunk;
+        current_lba += chunk;
+    }
+
+    return ata_flush_cache(dev);
+}
+
+int ata_write_blocks_4k(ata_device_t *dev, uint32_t block_num, uint32_t block_count, const void *buf) {
+    if (!dev || !dev->is_present) return ATA_ERR_NO_DEV;
+    if (block_count == 0) return ATA_OK;
+    if (!buf) return ATA_ERR_RANGE;
+
+    if (dev->logical_sector_size == 512) {
+        uint64_t start_lba = (uint64_t)block_num * 8;
+        uint64_t sector_count = (uint64_t)block_count * 8;
+
+        if (start_lba / 8 != block_num || sector_count / 8 != block_count) {
+            return ATA_ERR_RANGE; // Arithmetic overflow
+        }
+
+        return ata_write_sectors(dev, start_lba, (uint32_t)sector_count, buf);
+    } else if (dev->logical_sector_size == 4096) {
+        return ata_write_sectors(dev, block_num, block_count, buf);
+    } else {
+        return ATA_ERR_UNSUPPORTED;
+    }
+}
