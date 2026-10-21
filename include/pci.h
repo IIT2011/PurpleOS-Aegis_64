@@ -54,6 +54,7 @@ void     pci_write_config_word(uint8_t bus, uint8_t dev, uint8_t func, uint8_t o
 
 int  pci_init(void);
 void pci_scan(void);
+int  pci_register_device(const pci_device_t *dev);
 uint32_t pci_get_device_count(void);
 const pci_device_t *pci_get_device(uint32_t index);
 const pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id);

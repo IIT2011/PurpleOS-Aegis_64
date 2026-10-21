@@ -159,6 +159,12 @@ int pci_init(void) {
     return 0;
 }
 
+int pci_register_device(const pci_device_t *dev) {
+    if (!dev || pci_device_count >= PCI_MAX_DEVICES) return -1;
+    pci_devices[pci_device_count++] = *dev;
+    return 0;
+}
+
 uint32_t pci_get_device_count(void) {
     return pci_device_count;
 }
