@@ -10,6 +10,9 @@
 #include "task.h"
 #include "shell.h"
 #include "kernel_storage.h"
+#include "cpu.h"
+#include "acpi.h"
+#include "apic.h"
 #include "io.h"
 
 extern char _kernel_start[];
@@ -54,6 +57,10 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
         video_set_colors(COLOR_WHITE, COLOR_PURPLE_BG);
     }
 
+    /* Step 0: CPU Feature Discovery */
+    cpu_init_bsp();
+    cpu_print_info();
+
     /* Step 1: Physical Memory Manager */
     pmm_init(mbi, (uintptr_t)_kernel_start, (uintptr_t)_kernel_end);
 
@@ -64,6 +71,22 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     idt_init();
     pit_init(100);       // 100 Hz = 10 ms per tick
     keyboard_init();
+
+    /* Step 3.5: ACPI Platform Discovery & Local APIC */
+    int acpi_res = acpi_init();
+    uint64_t lapic_phys = 0;
+    if (acpi_res == ACPI_OK) {
+        const acpi_madt_info_t *madt = acpi_get_madt_info();
+        if (madt && madt->lapic_phys_addr != 0) {
+            lapic_phys = madt->lapic_phys_addr;
+        }
+    }
+
+    if (apic_is_supported()) {
+        if (apic_init(lapic_phys) == 0) {
+            apic_timer_init(100);
+        }
+    }
 
     /* Step 4: AegisSched_64 */
     scheduler_init();
