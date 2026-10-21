@@ -73,7 +73,7 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     keyboard_init();
 
     /* Step 3.5: ACPI Platform Discovery & Local APIC */
-    int acpi_res = acpi_init();
+    int acpi_res = acpi_init(mbi);
     uint64_t lapic_phys = 0;
     if (acpi_res == ACPI_OK) {
         const acpi_madt_info_t *madt = acpi_get_madt_info();

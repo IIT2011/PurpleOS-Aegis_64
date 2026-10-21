@@ -1,4 +1,5 @@
 #include "acpi.h"
+#include "multiboot.h"
 #include "string.h"
 #include "serial.h"
 
@@ -178,8 +179,58 @@ int acpi_init_from_rsdp(const acpi_rsdp_t *rsdp) {
     return ACPI_OK;
 }
 
-int acpi_init(void) {
+const acpi_rsdp_t *acpi_find_rsdp_with_mbi(const struct multiboot_info *mbi) {
     const acpi_rsdp_t *rsdp = acpi_find_rsdp();
+    if (rsdp) return rsdp;
+
+#ifndef __KERNEL_HOST_TEST__
+    /* 2. Scan Multiboot memory map for ACPI Reclaim / NVS regions */
+    if (mbi && (mbi->flags & MULTIBOOT_INFO_MEM_MAP) && mbi->mmap_addr != 0) {
+        uintptr_t mmap_cur = mbi->mmap_addr;
+        uintptr_t mmap_end = mbi->mmap_addr + mbi->mmap_length;
+
+        while (mmap_cur < mmap_end) {
+            const struct multiboot_mmap_entry *entry = (const struct multiboot_mmap_entry *)mmap_cur;
+            if (entry->size == 0) break;
+
+            if (entry->type == MULTIBOOT_MEMORY_ACPI_RECLAIM ||
+                entry->type == MULTIBOOT_MEMORY_NVS ||
+                entry->type == MULTIBOOT_MEMORY_AVAILABLE) {
+                uint64_t start = entry->addr;
+                uint64_t len = entry->len;
+                if (start < 0xFFFFFFFFULL && len > 0 && len <= 32 * 1024 * 1024) {
+                    uint64_t end_scan = start + len;
+                    if (end_scan > 0xFFFFFFF0ULL) end_scan = 0xFFFFFFF0ULL;
+
+                    for (uintptr_t addr = (uintptr_t)start; addr <= (uintptr_t)(end_scan - 20); addr += 16) {
+                        const acpi_rsdp_t *candidate = (const acpi_rsdp_t *)addr;
+                        if (memcmp(candidate->signature, "RSD PTR ", 8) == 0) {
+                            if (acpi_validate_checksum(candidate, 20)) {
+                                if (candidate->revision >= 2) {
+                                    if (candidate->length >= 36 &&
+                                        acpi_validate_checksum(candidate, candidate->length)) {
+                                        return candidate;
+                                    }
+                                } else {
+                                    return candidate;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            mmap_cur += entry->size + sizeof(entry->size);
+        }
+    }
+#else
+    (void)mbi;
+#endif
+
+    return NULL;
+}
+
+int acpi_init(const struct multiboot_info *mbi) {
+    const acpi_rsdp_t *rsdp = acpi_find_rsdp_with_mbi(mbi);
     if (!rsdp) {
         kwarn("ACPI: RSDP table not found in BIOS or EBDA memory");
         return ACPI_ERR_NOT_FOUND;
