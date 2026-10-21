@@ -5,6 +5,7 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "idt.h"
+#include "pic.h"
 #include "pit.h"
 #include "keyboard.h"
 #include "task.h"
@@ -75,6 +76,7 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
 
     /* Step 3: Interrupts and Drivers */
     idt_init();
+    pic_init();
     pit_init(100);       // 100 Hz = 10 ms per tick
     keyboard_init();
     mouse_init();
