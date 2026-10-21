@@ -135,6 +135,58 @@ static inline void invlpg(uint64_t vaddr) {
     __asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
 }
 
+static inline void cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx) {
+    uint32_t a, b, c, d;
+    __asm__ volatile ("cpuid"
+                      : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                      : "a"(leaf), "c"(0));
+    if (eax) *eax = a;
+    if (ebx) *ebx = b;
+    if (ecx) *ecx = c;
+    if (edx) *edx = d;
+}
+
+static inline void cpuid_subleaf(uint32_t leaf, uint32_t subleaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx) {
+    uint32_t a, b, c, d;
+    __asm__ volatile ("cpuid"
+                      : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                      : "a"(leaf), "c"(subleaf));
+    if (eax) *eax = a;
+    if (ebx) *ebx = b;
+    if (ecx) *ecx = c;
+    if (edx) *edx = d;
+}
+
+static inline uint64_t rdmsr(uint32_t msr) {
+    uint32_t low, high;
+    __asm__ volatile ("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+    return ((uint64_t)high << 32) | low;
+}
+
+static inline void wrmsr(uint32_t msr, uint64_t val) {
+    uint32_t low = (uint32_t)(val & 0xFFFFFFFF);
+    uint32_t high = (uint32_t)(val >> 32);
+    __asm__ volatile ("wrmsr" : : "a"(low), "d"(high), "c"(msr));
+}
+
+static inline void pause(void) {
+    __asm__ volatile ("pause");
+}
+
+static inline void mfence(void) {
+    __asm__ volatile ("mfence" ::: "memory");
+}
+
+static inline uint64_t read_rflags(void) {
+    uint64_t rflags;
+    __asm__ volatile ("pushfq; popq %0" : "=r"(rflags) : : "memory");
+    return rflags;
+}
+
+static inline void write_rflags(uint64_t rflags) {
+    __asm__ volatile ("pushq %0; popfq" : : "r"(rflags) : "memory", "cc");
+}
+
 #endif /* __KERNEL_HOST_TEST__ */
 
 #endif /* IO_H */
