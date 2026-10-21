@@ -30,6 +30,7 @@ typedef void (*isr_handler_t)(interrupt_frame_t *frame);
 extern uintptr_t isr_stub_table[256];
 
 void idt_init(void);
+void idt_load_current(void);
 void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags);
 void register_interrupt_handler(uint8_t int_no, isr_handler_t handler);
 

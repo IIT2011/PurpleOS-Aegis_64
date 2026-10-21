@@ -107,3 +107,7 @@ void idt_init(void) {
     idt_load(&idt_ptr);
     kinfo("IDT Initialized: 256 gates loaded");
 }
+
+void idt_load_current(void) {
+    idt_load(&idt_ptr);
+}

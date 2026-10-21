@@ -74,6 +74,7 @@
 /* API */
 int apic_is_supported(void);
 int apic_init(uint64_t phys_base);
+void apic_init_ap(void);
 uint32_t apic_get_id(void);
 uint32_t apic_get_version(void);
 void apic_eoi(void);
