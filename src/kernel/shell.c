@@ -294,6 +294,10 @@ static void execute_command(int argc, char **argv) {
         shell_print("  task test         - Run automated multi-task preemption test\n");
         shell_print("  list files / ls   - List files in root directory of mounted PurpleFS\n");
         shell_print("  peek <name> / cat - Display bounded file content preview\n");
+        shell_print("  touch <name>      - Create empty file on mounted writable PurpleFS\n");
+        shell_print("  write <name> <txt>- Write text to file on mounted writable PurpleFS\n");
+        shell_print("  remount <ro|rw>   - Toggle PurpleFS volume read-only or read-write\n");
+        shell_print("  sync              - Commit journal transactions and flush cache to disk\n");
         shell_print("  disk status       - Report detected ATA storage and GPT partitions\n");
         shell_print("  filesystem status - Report PurpleFS mount state and space metrics\n");
         shell_print("  devices           - Report hardware devices discovered by PurpleDetect\n");
@@ -454,6 +458,56 @@ static void execute_command(int argc, char **argv) {
             shell_print("Usage: peek <filename>\n");
         } else {
             cmd_peek_file(argv[1]);
+        }
+    } else if (strcmp(argv[0], "touch") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: touch <filename>\n");
+        } else {
+            cmd_touch(argv[1]);
+        }
+    } else if (strcmp(argv[0], "write") == 0) {
+        if (argc < 3) {
+            shell_print("Usage: write <filename> <text...>\n");
+        } else {
+            char text_buf[256];
+            text_buf[0] = '\0';
+            size_t off = 0;
+            for (int i = 2; i < argc && off < sizeof(text_buf) - 2; i++) {
+                size_t wlen = strlen(argv[i]);
+                if (off + wlen + 2 < sizeof(text_buf)) {
+                    memcpy(text_buf + off, argv[i], wlen);
+                    off += wlen;
+                    if (i + 1 < argc) text_buf[off++] = ' ';
+                }
+            }
+            text_buf[off++] = '\n';
+            text_buf[off] = '\0';
+            cmd_write_file(argv[1], text_buf);
+        }
+    } else if (strcmp(argv[0], "remount") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: remount <ro|rw>\n");
+        } else if (strcmp(argv[1], "rw") == 0) {
+            if (storage_set_writable(1) == 0) {
+                shell_print("PurpleFS volume remounted READ-WRITE.\n");
+            } else {
+                shell_print("Error: No mounted filesystem to remount.\n");
+            }
+        } else if (strcmp(argv[1], "ro") == 0) {
+            if (storage_set_writable(0) == 0) {
+                shell_print("PurpleFS volume remounted READ-ONLY.\n");
+            } else {
+                shell_print("Error: No mounted filesystem to remount.\n");
+            }
+        } else {
+            shell_print("Usage: remount <ro|rw>\n");
+        }
+    } else if (strcmp(argv[0], "sync") == 0) {
+        if (storage_is_fs_mounted()) {
+            pfs2_sync(storage_get_fs());
+            shell_print("Filesystem transactions committed and cache flushed to disk.\n");
+        } else {
+            shell_print("No mounted filesystem to sync.\n");
         }
     } else if ((strcmp(argv[0], "disk") == 0 && argc >= 2 && strcmp(argv[1], "status") == 0) ||
                strcmp(argv[0], "disks") == 0) {
