@@ -565,6 +565,94 @@ static void execute_command(int argc, char **argv) {
                 (ms.buttons & MOUSE_BTN_RIGHT) ? "DOWN" : "UP",
                 (ms.buttons & MOUSE_BTN_MIDDLE) ? "DOWN" : "UP",
                 ms.buttons);
+    } else if (strcmp(argv[0], "ksym") == 0) {
+        ksym_dump((argc > 1) ? argv[1] : NULL);
+    } else if (strcmp(argv[0], "insmod") == 0 || strcmp(argv[0], "drvload") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: insmod <path_to_apdrv>\n");
+        } else {
+            int rc = apdrv_load_from_storage(argv[1]);
+            if (rc == 0) {
+                shell_print("Successfully loaded driver module.\n");
+            } else {
+                kprintf("Error: Failed to load driver '%s' (code %d).\n", argv[1], rc);
+            }
+        }
+    } else if (strcmp(argv[0], "lsmod") == 0 || strcmp(argv[0], "drivers") == 0) {
+        apdrv_dump_modules();
+    } else if (strcmp(argv[0], "rmmod") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: rmmod <module_name>\n");
+        } else {
+            int rc = apdrv_unload(argv[1]);
+            if (rc == 0) {
+                shell_print("Driver module unloaded.\n");
+            } else {
+                kprintf("Error: Failed to unload module '%s' (code %d).\n", argv[1], rc);
+            }
+        }
+    } else if (strcmp(argv[0], "ifconfig") == 0 || strcmp(argv[0], "net") == 0) {
+        netdev_dump();
+    } else if (strcmp(argv[0], "apps") == 0 || (strcmp(argv[0], "app") == 0 && (argc == 1 || strcmp(argv[1], "list") == 0))) {
+        apapp_dump();
+    } else if (strcmp(argv[0], "app") == 0 && argc > 1 && strcmp(argv[1], "run") == 0) {
+        if (argc < 3) {
+            shell_print("Usage: app run <bundle_path>\n");
+        } else {
+            int rc = apapp_launch_from_storage(argv[2], generic_app_task);
+            if (rc == APAPP_OK) {
+                shell_print("Application bundle launched successfully.\n");
+            } else {
+                kprintf("Error: Failed to launch application bundle (code %d).\n", rc);
+            }
+        }
+    } else if (strcmp(argv[0], "exec") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: exec <bundle_path>\n");
+        } else {
+            int rc = apapp_launch_from_storage(argv[1], generic_app_task);
+            if (rc == APAPP_OK) {
+                shell_print("Application bundle launched successfully.\n");
+            } else {
+                kprintf("Error: Failed to execute application (code %d).\n", rc);
+            }
+        }
+    } else if (strcmp(argv[0], "app") == 0 && argc > 1 && (strcmp(argv[1], "kill") == 0 || strcmp(argv[1], "terminate") == 0)) {
+        if (argc < 3) {
+            shell_print("Usage: app kill <app_id>\n");
+        } else {
+            int rc = apapp_terminate(argv[2]);
+            if (rc == APAPP_OK) {
+                shell_print("Application terminated.\n");
+            } else {
+                kprintf("Error: Failed to terminate application '%s' (code %d).\n", argv[2], rc);
+            }
+        }
+    } else if (strcmp(argv[0], "video") == 0 || strcmp(argv[0], "setmode") == 0) {
+        if (argc >= 3) {
+            uint32_t w = 0, h = 0;
+            const char *sw = (strcmp(argv[0], "video") == 0 && strcmp(argv[1], "mode") == 0 && argc >= 4) ? argv[2] : argv[1];
+            const char *sh = (strcmp(argv[0], "video") == 0 && strcmp(argv[1], "mode") == 0 && argc >= 4) ? argv[3] : argv[2];
+            for (const char *c = sw; *c >= '0' && *c <= '9'; c++) w = w * 10 + (*c - '0');
+            for (const char *c = sh; *c >= '0' && *c <= '9'; c++) h = h * 10 + (*c - '0');
+            if (w >= 320 && h >= 200) {
+                int vrc = video_set_mode(w, h, 32);
+                if (vrc == 0) {
+                    kprintf("Video mode switched to %ux%u@32bpp.\n", w, h);
+                } else {
+                    kprintf("Error: Mode switch failed (code %d).\n", vrc);
+                }
+            } else {
+                shell_print("Error: Invalid resolution dimensions.\n");
+            }
+        } else {
+            kprintf("\n=== Video Display Configuration ===\n");
+            kprintf("  Available:  %s\n", video_is_available() ? "YES" : "NO (Headless/Serial Console Fallback)");
+            if (video_is_available()) {
+                kprintf("  Resolution: %ux%u@32bpp\n", video_get_width(), video_get_height());
+            }
+            kprintf("  Bochs VBE:  Supported (Ports 0x1CE/0x1CF, PCI 1234:1111)\n\n");
+        }
     } else if (strcmp(argv[0], "clear") == 0) {
         if (video_is_available()) {
             video_clear(COLOR_PURPLE_BG);
