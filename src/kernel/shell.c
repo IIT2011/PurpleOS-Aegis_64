@@ -557,20 +557,52 @@ static void execute_command(int argc, char **argv) {
     } else if (strcmp(argv[0], "desktop") == 0 || strcmp(argv[0], "gui") == 0) {
         if (argc > 1 && strcmp(argv[1], "preview") == 0) {
             desktop_render_preview();
+        } else if (argc > 1 && (strcmp(argv[1], "session") == 0 || strcmp(argv[1], "run") == 0 || strcmp(argv[1], "interactive") == 0)) {
+            desktop_run_session();
+        } else if (argc > 2 && strcmp(argv[1], "close") == 0) {
+            uint32_t wid = (uint32_t)simple_atoi(argv[2]);
+            desktop_close_window(wid);
+            desktop_render();
+        } else if (argc > 2 && strcmp(argv[1], "focus") == 0) {
+            uint32_t wid = (uint32_t)simple_atoi(argv[2]);
+            desktop_focus_window(wid);
+            desktop_render();
+        } else if (argc > 2 && strcmp(argv[1], "toggle") == 0) {
+            uint32_t wid = (uint32_t)simple_atoi(argv[2]);
+            desktop_toggle_window(wid);
+            desktop_render();
         } else {
             desktop_render();
         }
     } else if (strcmp(argv[0], "mouse") == 0) {
-        mouse_state_t ms;
-        mouse_get_state(&ms);
-        kprintf("\n=== PS/2 Mouse Subsystem ===\n");
-        kprintf("  Position: (%d, %d)\n", ms.x, ms.y);
-        kprintf("  Delta:    (dx=%d, dy=%d)\n", ms.dx, ms.dy);
-        kprintf("  Buttons:  [Left=%s Right=%s Middle=%s] (0x%x)\n\n",
-                (ms.buttons & MOUSE_BTN_LEFT) ? "DOWN" : "UP",
-                (ms.buttons & MOUSE_BTN_RIGHT) ? "DOWN" : "UP",
-                (ms.buttons & MOUSE_BTN_MIDDLE) ? "DOWN" : "UP",
-                ms.buttons);
+        if (argc >= 4 && strcmp(argv[1], "set") == 0) {
+            int32_t sx = (int32_t)simple_atoi(argv[2]);
+            int32_t sy = (int32_t)simple_atoi(argv[3]);
+            mouse_set_position(sx, sy);
+            kprintf("Mouse pointer set to (%d, %d)\n", sx, sy);
+        } else if (argc >= 2 && strcmp(argv[1], "click") == 0) {
+            uint8_t btn = MOUSE_BTN_LEFT;
+            if (argc >= 3 && strcmp(argv[2], "right") == 0) {
+                btn = MOUSE_BTN_RIGHT;
+            }
+            int32_t cx = mouse_get_x();
+            int32_t cy = mouse_get_y();
+            desktop_handle_mouse(cx, cy, btn);
+            desktop_handle_mouse(cx, cy, 0);
+            kprintf("Simulated mouse click [%s] at (%d, %d)\n",
+                    (btn == MOUSE_BTN_LEFT) ? "LEFT" : "RIGHT", cx, cy);
+        } else {
+            mouse_state_t ms;
+            mouse_get_state(&ms);
+            kprintf("\n=== PS/2 Mouse Subsystem ===\n");
+            kprintf("  Position: (%d, %d)\n", ms.x, ms.y);
+            kprintf("  Delta:    (dx=%d, dy=%d)\n", ms.dx, ms.dy);
+            kprintf("  Buttons:  [Left=%s Right=%s Middle=%s] (0x%x)\n\n",
+                    (ms.buttons & MOUSE_BTN_LEFT) ? "DOWN" : "UP",
+                    (ms.buttons & MOUSE_BTN_RIGHT) ? "DOWN" : "UP",
+                    (ms.buttons & MOUSE_BTN_MIDDLE) ? "DOWN" : "UP",
+                    ms.buttons);
+        }
     } else if (strcmp(argv[0], "ksym") == 0) {
         ksym_dump((argc > 1) ? argv[1] : NULL);
     } else if (strcmp(argv[0], "insmod") == 0 || strcmp(argv[0], "drvload") == 0) {
