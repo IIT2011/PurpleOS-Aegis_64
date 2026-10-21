@@ -114,6 +114,48 @@ int aegis_detect_load_manifest(const aegis_manifest_t *m) {
     return 0;
 }
 
+static void hex_to_bytes(const char *hex, uint8_t *bytes, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        char c1 = hex[i * 2 + 0];
+        char c2 = hex[i * 2 + 1];
+        uint8_t b1 = (c1 >= 'a') ? (c1 - 'a' + 10) : (c1 >= 'A') ? (c1 - 'A' + 10) : (c1 - '0');
+        uint8_t b2 = (c2 >= 'a') ? (c2 - 'a' + 10) : (c2 >= 'A') ? (c2 - 'A' + 10) : (c2 - '0');
+        bytes[i] = (b1 << 4) | b2;
+    }
+}
+
+int aegis_detect_load_default_manifest(void) {
+    aegis_manifest_t m;
+    memset(&m, 0, sizeof(m));
+    m.magic = AEGIS_MANIFEST_MAGIC;
+    m.version = AEGIS_MANIFEST_VERSION;
+    m.entry_count = 3;
+
+    /* Entry 0: welcome.txt (SYSTEM) */
+    strncpy(m.entries[0].name, "welcome.txt", AEGIS_MAX_NAME_LEN - 1);
+    m.entries[0].flags = AEGIS_FLAG_SYSTEM;
+    m.entries[0].expected_size = 132;
+    hex_to_bytes("7b53db00c70da148c6dcb721bfbe5852696fc6b520a8e52a27c735d0a179ede8", m.entries[0].sha256, 32);
+
+    /* Entry 1: version.txt (CRITICAL) */
+    strncpy(m.entries[1].name, "version.txt", AEGIS_MAX_NAME_LEN - 1);
+    m.entries[1].flags = AEGIS_FLAG_CRITICAL;
+    m.entries[1].expected_size = 65;
+    hex_to_bytes("3984cda5cd3252ffe96aac635fad3e4f553c4d361cdae541cff0ee0b5a920fd0", m.entries[1].sha256, 32);
+
+    /* Entry 2: motd (OPTIONAL) */
+    strncpy(m.entries[2].name, "motd", AEGIS_MAX_NAME_LEN - 1);
+    m.entries[2].flags = AEGIS_FLAG_OPTIONAL;
+    m.entries[2].expected_size = 59;
+    hex_to_bytes("0ff24670f2d63375182e7d65341ce0a1b0f40cfd164cd1897c4f269b6ac92fa6", m.entries[2].sha256, 32);
+
+    /* Sign manifest using active trust anchor */
+    aegis_manifest_sign(&m, active_auth_key, active_key_len);
+
+    /* Load and authenticate */
+    return aegis_detect_load_manifest(&m);
+}
+
 int aegis_detect_verify_component(const char *name, const void *data, size_t size) {
     if (!manifest_loaded || !name) return -1;
 
@@ -183,6 +225,49 @@ int aegis_detect_verify_all(void) {
     kinfo("AegisDetect: Verification summary: %u/%u components verified (%u trusted, %u tampered/missing)",
           trusted + tampered, current_manifest.entry_count, trusted, tampered);
     return (tampered == 0) ? 0 : 1;
+}
+
+int aegis_detect_verify_storage(void) {
+#ifdef __KERNEL_HOST_TEST__
+    return 0;
+#else
+    if (!manifest_loaded) {
+        kwarn("AegisDetect: Cannot verify storage - no manifest loaded");
+        return -1;
+    }
+    if (!storage_is_fs_mounted()) {
+        kwarn("AegisDetect: No PurpleFS volume mounted to verify");
+        return -2;
+    }
+
+    pfs2_fs_t *fs = storage_get_fs();
+    kinfo("AegisDetect: Starting storage file integrity verification...");
+
+    for (uint32_t i = 0; i < current_manifest.entry_count; i++) {
+        const char *fname = current_manifest.entries[i].name;
+        uint32_t ino = 0;
+        if (pfs2_lookup(fs, fname, &ino) != PFS2_OK) {
+            aegis_detect_verify_component(fname, NULL, 0); // Missing
+            continue;
+        }
+
+        pfs2_inode_t node;
+        if (pfs2_read_inode(fs, ino, &node) != PFS2_OK) {
+            continue;
+        }
+
+        uint8_t buf[4096];
+        size_t read_bytes = 0;
+        size_t count = (size_t)node.size_bytes;
+        if (count > sizeof(buf)) count = sizeof(buf);
+
+        if (pfs2_read_file(fs, ino, buf, count, 0, &read_bytes) == PFS2_OK) {
+            aegis_detect_verify_component(fname, buf, read_bytes);
+        }
+    }
+
+    return aegis_detect_verify_all();
+#endif
 }
 
 uint32_t aegis_detect_get_total_count(void) {
