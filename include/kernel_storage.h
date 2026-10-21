@@ -25,5 +25,7 @@ extern kernel_storage_t g_kernel_storage;
 void storage_init(void);
 int storage_is_fs_mounted(void);
 pfs2_fs_t *storage_get_fs(void);
+int storage_is_writable(void);
+int storage_set_writable(int writable);
 
 #endif /* KERNEL_STORAGE_H */
