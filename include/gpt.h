@@ -2,6 +2,7 @@
 #define GPT_H
 
 #include "types.h"
+#include "block_dev.h"
 #include "ata_pio.h"
 
 #define GPT_SIGNATURE              0x5452415020494645ULL /* "EFI PART" */
@@ -115,6 +116,7 @@ typedef struct gpt_info {
 /* Public API */
 int gpt_guid_equal(const gpt_guid_t *a, const gpt_guid_t *b);
 void gpt_guid_to_str(const gpt_guid_t *guid, char *out_str);
+int gpt_parse_block_dev(block_device_t *bdev, gpt_info_t *out_info);
 int gpt_parse(ata_device_t *dev, gpt_info_t *out_info);
 
 #endif /* GPT_H */

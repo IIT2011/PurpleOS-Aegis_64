@@ -1,4 +1,5 @@
 #include "ata_pio.h"
+#include "block_dev.h"
 #include "io.h"
 #include "string.h"
 
@@ -349,4 +350,44 @@ int ata_write_blocks_4k(ata_device_t *dev, uint32_t block_num, uint32_t block_co
     } else {
         return ATA_ERR_UNSUPPORTED;
     }
+}
+
+static int ata_bdev_read(block_device_t *bdev, uint64_t lba, uint32_t count, void *buf) {
+    ata_device_t *dev = (ata_device_t *)bdev->priv;
+    int rc = ata_read_sectors(dev, lba, count, buf);
+    return (rc == ATA_OK) ? BLOCK_DEV_OK : BLOCK_DEV_ERR_IO;
+}
+
+static int ata_bdev_write(block_device_t *bdev, uint64_t lba, uint32_t count, const void *buf) {
+    ata_device_t *dev = (ata_device_t *)bdev->priv;
+    int rc = ata_write_sectors(dev, lba, count, buf);
+    return (rc == ATA_OK) ? BLOCK_DEV_OK : BLOCK_DEV_ERR_IO;
+}
+
+static int ata_bdev_flush(block_device_t *bdev) {
+    ata_device_t *dev = (ata_device_t *)bdev->priv;
+    int rc = ata_flush_cache(dev);
+    return (rc == ATA_OK) ? BLOCK_DEV_OK : BLOCK_DEV_ERR_IO;
+}
+
+static const block_device_ops_t ata_bdev_ops = {
+    .read_blocks = ata_bdev_read,
+    .write_blocks = ata_bdev_write,
+    .flush = ata_bdev_flush,
+};
+
+int ata_bind_block_dev(ata_device_t *ata, block_device_t *out_bdev, const char *name) {
+    if (!ata || !out_bdev) return -1;
+    memset(out_bdev, 0, sizeof(*out_bdev));
+    if (name) {
+        strncpy(out_bdev->name, name, sizeof(out_bdev->name) - 1);
+    }
+    strncpy(out_bdev->model, ata->model, sizeof(out_bdev->model) - 1);
+    strncpy(out_bdev->serial, ata->serial, sizeof(out_bdev->serial) - 1);
+    out_bdev->type = BLOCK_DEV_TYPE_ATA;
+    out_bdev->block_size = (ata->logical_sector_size > 0) ? ata->logical_sector_size : 512;
+    out_bdev->total_blocks = ata->total_sectors;
+    out_bdev->ops = &ata_bdev_ops;
+    out_bdev->priv = ata;
+    return 0;
 }
