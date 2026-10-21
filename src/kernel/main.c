@@ -24,6 +24,10 @@
 #include "netdev.h"
 #include "apdrv.h"
 #include "apapp.h"
+#include "rtc.h"
+#include "usb.h"
+#include "e1000.h"
+#include "audio.h"
 #include "io.h"
 
 extern char _kernel_start[];
@@ -84,6 +88,7 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     pit_init(100);       // 100 Hz = 10 ms per tick
     keyboard_init();
     mouse_init();
+    rtc_init();
 
     /* Step 3.5: ACPI Platform Discovery & Local APIC */
     int acpi_res = acpi_init(mbi);
@@ -128,6 +133,9 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     /* Step 5.6.5: Kernel Symbols, Native Drivers & App Bundles */
     ksym_init();
     netdev_init();
+    usb_init();
+    e1000_init();
+    audio_init();
     apdrv_subsystem_init();
     apapp_subsystem_init();
 
