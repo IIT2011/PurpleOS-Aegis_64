@@ -1,0 +1,6 @@
+Purple OS / Aegis64 Checkpoint: 20261022-desktop-keyboard-gpu
+Timestamp: 2026-10-22T21:18:00+05:30
+Branch: Aegis_Purple
+HEAD: 1beceb2
+Task: Locked Desktop Design + Direct Keyboard Input Fix + Intel/AMD GPU Acceleration
+Baseline State: Clean working tree, all previous tests and tools preserved.
