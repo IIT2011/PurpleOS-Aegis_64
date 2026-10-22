@@ -1,0 +1,10 @@
+# Phase 0 checkpoint manifest
+
+- Repository: `IIT2011/PurpleOS-Aegis_64`
+- Branch: `Aegis_Purple`
+- Base commit: `409c0cd00a7a074d50f2b8e0838aff466145e017`
+- Creation date: `2026-10-22`
+- Scope: repository forensics, architecture audit, Phase 0 specification gate
+- Pre-change files preserved as source references: `Makefile`, `README.md`, `docs/PURPLEFS_DESIGN.md`, `src/kernel/main.c`, `src/fs/purplefs_v2.c`, `src/drivers/apdrv.c`, `src/security/aegis_detect.c`
+- Verification plan: inspect branch metadata, confirm repo structure, validate source files, document missing v3 boot docs, create status matrix and roadmap
+- Result: Phase 0 findings captured; specification blockers documented; no code changes beyond status/roadmap documents were made because the v3 and boot specification gate remains unresolved
