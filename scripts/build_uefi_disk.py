@@ -319,7 +319,6 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
             "Welcome to Purple OS / Aegis64 Native Filesystem!\n"
             "Architecture: x86-64 | Kernel: Aegis64\n"
             "Filesystem: PurpleFS v2 Persistent Storage\n"
-            "Motto: DREAM \xe2\x80\xa2 BUILD \xe2\x80\xa2 EXPLORE\n"
         ),
         "version.txt": "Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)\n",
         "motd": "Purple OS: Correctness, Memory Safety, and Recoverability.\n",
