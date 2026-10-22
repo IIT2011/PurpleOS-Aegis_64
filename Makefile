@@ -50,6 +50,7 @@ C_SRCS = src/kernel/main.c \
          src/fs/gpt.c \
          src/fs/partition_dev.c \
          src/fs/purplefs_v2.c \
+         src/fs/purplefs_v3.c \
          src/crypto/sha256.c \
          src/security/aegis_detect.c \
          src/mm/pmm.c \
@@ -61,7 +62,7 @@ OBJS = $(patsubst src/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS)) \
 KERNEL64_ELF = $(BUILD_DIR)/kernel64.elf
 KERNEL32_ELF = $(BUILD_DIR)/kernel.elf
 
-.PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu check-smp-qemu check-graphics-qemu check-desktop-qemu run-qemu run-uefi
+.PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu check-writable-storage-qemu check-persistence-qemu check-smp-qemu check-modern-storage-qemu check-graphics-qemu check-desktop-qemu run-qemu run-uefi
 
 all: $(KERNEL32_ELF) $(KERNEL64_ELF)
 
@@ -81,18 +82,20 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
 	./$(BUILD_DIR)/test_scheduler
 	./$(BUILD_DIR)/test_purplefs_v2
+	./$(BUILD_DIR)/test_purplefs_v3
 	./$(BUILD_DIR)/test_storage_gpt
 	./$(BUILD_DIR)/test_acpi
 	./$(BUILD_DIR)/test_aegis_detect
 	./$(BUILD_DIR)/test_purple_detect
 	./$(BUILD_DIR)/test_desktop
 	./$(BUILD_DIR)/test_apdrv
+	@$(PYTHON) scripts/build_apapp.py build/apps
 	./$(BUILD_DIR)/test_apapp
 	./$(BUILD_DIR)/test_video
 	./$(BUILD_DIR)/test_block_dev
@@ -100,11 +103,14 @@ test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(
 	./$(BUILD_DIR)/test_nvme
 	@$(PYTHON) scripts/build_apdrv.py build/drivers_apdrv
 	./$(BUILD_DIR)/test_drivers
+	./$(BUILD_DIR)/test_shell_path
 
 test-asan:
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_purplefs_v2.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c -o $(BUILD_DIR)/test_purplefs_v2_asan
 	./$(BUILD_DIR)/test_purplefs_v2_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_purplefs_v3.c src/fs/purplefs_v3.c src/drivers/block_dev.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_purplefs_v3_asan
+	./$(BUILD_DIR)/test_purplefs_v3_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/drivers/block_dev.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_storage_gpt_asan
 	./$(BUILD_DIR)/test_storage_gpt_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_acpi.c src/kernel/acpi.c src/kernel/cpu.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_acpi_asan
@@ -117,6 +123,7 @@ test-asan:
 	./$(BUILD_DIR)/test_desktop_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
 	./$(BUILD_DIR)/test_apdrv_asan
+	@$(PYTHON) scripts/build_apapp.py build/apps
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apapp_asan
 	./$(BUILD_DIR)/test_apapp_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_video.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_video_asan
@@ -130,6 +137,12 @@ test-asan:
 	@$(PYTHON) scripts/build_apdrv.py build/drivers_apdrv
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_drivers_asan
 	./$(BUILD_DIR)/test_drivers_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -ffunction-sections -D__KERNEL_HOST_TEST__ -Iinclude tests/test_shell_path.c src/kernel/shell.c src/kernel/string.c -Wl,--gc-sections -o $(BUILD_DIR)/test_shell_path_asan
+	./$(BUILD_DIR)/test_shell_path_asan
+
+$(BUILD_DIR)/test_shell_path: tests/test_shell_path.c src/kernel/shell.c src/kernel/string.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -ffunction-sections -D__KERNEL_HOST_TEST__ -Iinclude $^ -Wl,--gc-sections -o $@
 
 $(BUILD_DIR)/test_drivers: tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
@@ -187,6 +200,10 @@ $(BUILD_DIR)/test_purplefs_v2: tests/test_purplefs_v2.c src/fs/purplefs_v2.c hos
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -Wall -Wextra -Iinclude $^ -o $@
 
+$(BUILD_DIR)/test_purplefs_v3: tests/test_purplefs_v3.c src/fs/purplefs_v3.c src/drivers/block_dev.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
 $(BUILD_DIR)/test_pmm: tests/test_pmm.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
@@ -212,6 +229,9 @@ check-storage-qemu: all $(BUILD_DIR)/mkpfs2_disk
 
 check-writable-storage-qemu: all $(BUILD_DIR)/mkpfs2_disk
 	@$(PYTHON) scripts/test_qemu_writable_storage.py
+
+check-persistence-qemu: all $(BUILD_DIR)/mkpfs2_disk
+	@$(PYTHON) scripts/test_qemu_persistence.py
 
 check-smp-qemu: all
 	@$(PYTHON) scripts/test_qemu_smp.py

@@ -164,6 +164,40 @@ static void test_apapp_launch_gui_and_lifecycle(void) {
     printf("PASSED\n");
 }
 
+static void test_apapp_disk_bundles_validation(void) {
+    printf("[TEST  6] Running test_apapp_disk_bundles_validation       ... ");
+    FILE *f = fopen("build/apps/terminal.apapplication", "rb");
+    if (!f) {
+        printf("SKIPPED (no bundle file)\n");
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    assert(sz >= (long)sizeof(apapp_manifest_t));
+    uint8_t *buf = (uint8_t *)malloc(sz);
+    assert(fread(buf, 1, sz, f) == (size_t)sz);
+    fclose(f);
+
+    apapp_manifest_t manifest;
+    assert(apapp_parse_manifest(buf, sz, &manifest) == APAPP_OK);
+    assert(strcmp(manifest.app_id, "terminal.apapplications") == 0);
+
+    const void *payload = buf + manifest.exec_offset;
+    assert(apapp_verify_security(&manifest, payload, manifest.exec_size) == APAPP_OK);
+
+    apapp_instance_t *inst = NULL;
+    assert(apapp_launch(&manifest, payload, manifest.exec_size, NULL, &inst) == APAPP_OK);
+    assert(inst != NULL);
+    assert(apapp_get_count() == 1);
+    assert(apapp_terminate("terminal.apapplications") == APAPP_OK);
+
+    free(buf);
+    printf("PASSED\n");
+}
+
 int main(void) {
     printf("=====================================================\n");
     printf(" Running .apapplications Application Bundle Tests    \n");
@@ -174,9 +208,10 @@ int main(void) {
     test_apapp_security_verification_valid();
     test_apapp_security_verification_tampered();
     test_apapp_launch_gui_and_lifecycle();
+    test_apapp_disk_bundles_validation();
 
     printf("=====================================================\n");
-    printf(" .apapplications Tests: 5/5 passed                   \n");
+    printf(" .apapplications Tests: 6/6 passed                   \n");
     printf("=====================================================\n");
     return 0;
 }

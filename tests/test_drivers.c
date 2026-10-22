@@ -125,6 +125,56 @@ static void test_e1000_ethernet_operations(void) {
     int rx_bytes = e1000_receive(net, rx_buf, sizeof(rx_buf));
     assert(rx_bytes == 0); // No hardware frame received
 
+    /* Test ARP Request handling */
+    uint8_t arp_req[sizeof(eth_header_t) + sizeof(arp_packet_t)];
+    eth_header_t *a_eth = (eth_header_t *)arp_req;
+    arp_packet_t *a_arp = (arp_packet_t *)(arp_req + sizeof(eth_header_t));
+    memset(a_eth->dest_mac, 0xFF, ETH_ALEN);
+    memset(a_eth->src_mac, 0x11, ETH_ALEN);
+    a_eth->ethertype = net_htons(ETHERTYPE_ARP);
+    a_arp->hw_type = net_htons(1);
+    a_arp->proto_type = net_htons(ETHERTYPE_IPV4);
+    a_arp->hw_len = ETH_ALEN;
+    a_arp->proto_len = 4;
+    a_arp->opcode = net_htons(ARP_OP_REQUEST);
+    memset(a_arp->sender_mac, 0x11, ETH_ALEN);
+    a_arp->sender_ip[0] = 10; a_arp->sender_ip[1] = 0; a_arp->sender_ip[2] = 2; a_arp->sender_ip[3] = 2;
+    memset(a_arp->target_mac, 0x00, ETH_ALEN);
+    memcpy(a_arp->target_ip, net->ip_addr, 4);
+
+    uint32_t prev_tx = net->tx_packets;
+    int arp_res = netdev_process_rx_packet(net, arp_req, sizeof(arp_req));
+    assert(arp_res == 1); // Handled ARP
+    assert(net->tx_packets == prev_tx + 1); // ARP reply transmitted
+
+    /* Test ICMP Ping Request handling */
+    uint8_t icmp_req[sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(icmp_header_t) + 32];
+    eth_header_t *i_eth = (eth_header_t *)icmp_req;
+    ipv4_header_t *i_ip = (ipv4_header_t *)(icmp_req + sizeof(eth_header_t));
+    icmp_header_t *i_icmp = (icmp_header_t *)(icmp_req + sizeof(eth_header_t) + sizeof(ipv4_header_t));
+    uint8_t *i_data = icmp_req + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(icmp_header_t);
+
+    memcpy(i_eth->dest_mac, net->mac_addr, ETH_ALEN);
+    memset(i_eth->src_mac, 0x22, ETH_ALEN);
+    i_eth->ethertype = net_htons(ETHERTYPE_IPV4);
+
+    i_ip->version_ihl = 0x45;
+    i_ip->total_length = net_htons(sizeof(ipv4_header_t) + sizeof(icmp_header_t) + 32);
+    i_ip->protocol = IPV4_PROTO_ICMP;
+    memcpy(i_ip->dst_ip, net->ip_addr, 4);
+    i_ip->src_ip[0] = 10; i_ip->src_ip[1] = 0; i_ip->src_ip[2] = 2; i_ip->src_ip[3] = 2;
+
+    i_icmp->type = ICMP_TYPE_ECHO_REQUEST;
+    i_icmp->code = 0;
+    i_icmp->checksum = 0;
+    memset(i_data, 0x55, 32);
+    i_icmp->checksum = net_checksum(i_icmp, sizeof(icmp_header_t) + 32);
+
+    prev_tx = net->tx_packets;
+    int icmp_res = netdev_process_rx_packet(net, icmp_req, sizeof(icmp_req));
+    assert(icmp_res == 2); // Handled Ping
+    assert(net->tx_packets == prev_tx + 1); // Echo reply transmitted
+
     printf("PASSED\n");
 }
 
