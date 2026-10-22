@@ -139,9 +139,9 @@ int mouse_init(void) {
     outb(0x64, 0x20);
     uint8_t comp_status = mouse_read();
 
-    // Enable IRQ 12 and clear clock disable
-    comp_status |= 0x02;
-    comp_status &= ~0x20;
+    // Enable both IRQ 1 (Keyboard) and IRQ 12 (Mouse), and clear both clock disables
+    comp_status |= 0x03;
+    comp_status &= ~0x30;
 
     mouse_wait_write();
     outb(0x64, 0x60);
