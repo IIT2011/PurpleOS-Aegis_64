@@ -1,0 +1,6 @@
+CHECKPOINT MANIFEST: 20261022-desktop-keyboard-gpu
+Branch: Aegis_Purple
+HEAD: 15e923f
+Objective: Locked Desktop Design + Direct Keyboard Input Repair + Intel/AMD GPU Acceleration Architecture
+Timestamp: 2026-10-22
+Baseline: 18/18 test suites passing, clean working directory.
