@@ -1,4 +1,4 @@
-# Purple OS / Aegis64
+# Purple OS / Aegis64  (Warning!!!- This project is still in development)
 
 **Purple OS** is an independent, native-first 64-bit operating system designed from scratch.
 Its kernel is named **Aegis64**, its scheduler is **AegisSched_64 / PurpleSched**, its native filesystem is **PurpleFS v2**, its native driver package architecture is **APDRV v3**, its application bundle format is **`.apapplications`**, its hardware discovery engine is **PurpleDetect**, and its hardware trust mechanism is **AegisDetect**.
