@@ -160,6 +160,125 @@ def crc32_gpt(data):
     import zlib
     return zlib.crc32(data) & 0xFFFFFFFF
 
+def format_purplefs_v2(total_blocks, label, files):
+    import struct, zlib
+    data = bytearray(total_blocks * 4096)
+
+    # 1. Superblock at block 0
+    sb = bytearray(4096)
+    sig = b"PURPLEFS\x00PFS2\x00\x00\x00"
+    sb[0:16] = sig
+
+    journal_start = total_blocks - 8
+    struct.pack_into("<IIIIIIIIIIII", sb, 16,
+        2,              # version = 2
+        4096,           # block_size = 4096
+        total_blocks,   # total_blocks
+        total_blocks,   # free_blocks placeholder
+        256,            # total_inodes
+        256,            # free_inodes placeholder
+        1,              # bitmap_start_block
+        1,              # bitmap_block_count
+        2,              # inode_start_block
+        8,              # inode_block_count
+        10,             # data_start_block
+        journal_start   # journal_start_block
+    )
+    struct.pack_into("<II", sb, 16 + 48, 8, 1) # journal_block_count=8, feature_flags=1
+    struct.pack_into("<QQII", sb, 16 + 56, 0, 0, 0, 1) # clean_unmount=1
+    sb[0x60:0x70] = b"\x11\x22\x33\x44" * 4
+    lbl_b = label.encode("ascii")[:15]
+    sb[0x70:0x70+len(lbl_b)] = lbl_b
+
+    # Allocation bitmap
+    bitmap = bytearray(4096)
+    def set_bit(b):
+        bitmap[b // 8] |= (1 << (b % 8))
+
+    for b in range(11): set_bit(b)
+    for b in range(journal_start, total_blocks): set_bit(b)
+    for b in range(total_blocks, 32768): set_bit(b)
+
+    # Inode table
+    inodes = bytearray(8 * 4096)
+
+    # Root dir dirents block
+    dir_block = bytearray(4096)
+    def pack_dirent(offset, ino, name, ftype):
+        name_b = name.encode("ascii")[:23]
+        struct.pack_into("<IHBB", dir_block, offset, ino, 32, len(name_b), ftype)
+        dir_block[offset+8:offset+8+len(name_b)] = name_b
+
+    pack_dirent(0, 1, ".", 2)
+    pack_dirent(32, 1, "..", 2)
+    dirent_offset = 64
+
+    allocated_blocks = 11
+    allocated_inodes = 1 + len(files)
+    cur_data_block = 11
+    file_ino = 2
+
+    for fname, fcontent in files.items():
+        if isinstance(fcontent, str):
+            fcontent = fcontent.encode("utf-8")
+        fsize = len(fcontent)
+        nblocks = (fsize + 4095) // 4096 if fsize > 0 else 0
+        file_blocks = []
+        for _ in range(nblocks):
+            file_blocks.append(cur_data_block)
+            set_bit(cur_data_block)
+            cur_data_block += 1
+            allocated_blocks += 1
+
+        for i, blk in enumerate(file_blocks):
+            chunk = fcontent[i*4096 : (i+1)*4096]
+            data[blk*4096 : blk*4096 + len(chunk)] = chunk
+
+        ino_offset = file_ino * 128
+        struct.pack_into("<HHHHQQQ", inodes, ino_offset,
+            0x81A4, # S_IFREG | 0644
+            0, 0, 1, # uid, gid, links_count
+            fsize, 0, 0 # size, atime, mtime
+        )
+        for i, blk in enumerate(file_blocks[:12]):
+            struct.pack_into("<I", inodes, ino_offset + 0x2C + i*4, blk)
+
+        icrc = zlib.crc32(inodes[ino_offset : ino_offset + 0x7C]) & 0xFFFFFFFF
+        struct.pack_into("<I", inodes, ino_offset + 0x7C, icrc)
+
+        pack_dirent(dirent_offset, file_ino, fname, 1)
+        dirent_offset += 32
+        file_ino += 1
+
+    # Root dir inode (Inode 1)
+    struct.pack_into("<HHHHQQQ", inodes, 128,
+        0x41ED, # S_IFDIR | 0755
+        0, 0, 2, # links
+        4096, 0, 0
+    )
+    struct.pack_into("<I", inodes, 128 + 0x2C, 10)
+    root_icrc = zlib.crc32(inodes[128 : 128 + 0x7C]) & 0xFFFFFFFF
+    struct.pack_into("<I", inodes, 128 + 0x7C, root_icrc)
+
+    # Free blocks/inodes in superblock
+    struct.pack_into("<II", sb, 16 + 8, total_blocks - allocated_blocks - 8, 256 - allocated_inodes)
+    sbcrc = zlib.crc32(sb[:0x80]) & 0xFFFFFFFF
+    struct.pack_into("<I", sb, 0x80, sbcrc)
+
+    # Journal header
+    jhdr = bytearray(4096)
+    struct.pack_into("<IIQI", jhdr, 0, 0x5046534A, 0, 1, 0)
+    jcrc = zlib.crc32(jhdr[:4+4+8+4+24+24]) & 0xFFFFFFFF
+    struct.pack_into("<I", jhdr, 4+4+8+4+24+24, jcrc)
+
+    data[0:4096] = sb
+    data[4096:8192] = bitmap
+    data[2*4096 : 10*4096] = inodes
+    data[10*4096 : 11*4096] = dir_block
+    data[journal_start*4096 : (journal_start+1)*4096] = jhdr
+
+    return data
+
 def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 MiB total disk
     """
     Builds a GPT partitioned disk with:
@@ -188,9 +307,33 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     # Partition 2: PurpleFS (remaining disk space)
     p2_start = p1_end + 1
     p2_end = total_disk_sectors - 34
+    p2_sectors = p2_end - p2_start + 1
+    p2_blocks = min(p2_sectors // 8, 32768)
 
     # Copy ESP filesystem into disk at p1_start
     disk[p1_start * 512 : (p1_start + esp_sectors) * 512] = esp_data
+
+    # Format and copy PurpleFS v2 filesystem into Partition 2
+    pfs2_files = {
+        "welcome.txt": (
+            "Welcome to Purple OS / Aegis64 Native Filesystem!\n"
+            "Architecture: x86-64 | Kernel: Aegis64\n"
+            "Filesystem: PurpleFS v2 Persistent Storage\n"
+            "Motto: DREAM \xe2\x80\xa2 BUILD \xe2\x80\xa2 EXPLORE\n"
+        ),
+        "version.txt": "Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)\n",
+        "motd": "Purple OS: Correctness, Memory Safety, and Recoverability.\n",
+        "desktop.cfg": "resolution=1024x768\nwallpaper=cosmic_purple\ntheme=violet_dark\n",
+    }
+    # If built .apapplication packages exist, copy them into the root filesystem
+    for app_name in ["terminal", "sysmon", "files", "calculator"]:
+        app_path = f"build/{app_name}.apapplication"
+        if os.path.exists(app_path):
+            with open(app_path, "rb") as af:
+                pfs2_files[f"{app_name}.apapplication"] = af.read()
+
+    pfs2_data = format_purplefs_v2(p2_blocks, "PurpleSystem", pfs2_files)
+    disk[p2_start * 512 : p2_start * 512 + len(pfs2_data)] = pfs2_data
 
     # Generate Partition Entries
     entries = bytearray(128 * 128) # 128 entries of 128 bytes each
