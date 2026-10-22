@@ -1,0 +1,31 @@
+Checkpoint Timestamp: 2026-10-22T17:09:05+05:30
+Current Commit: 409c0cd00a7a074d50f2b8e0838aff466145e017
+Current Branch: Aegis_Purple
+
+Initial Git Status (--short --branch):
+## Aegis_Purple...origin/Aegis_Purple
+ M Makefile
+ M include/shell.h
+ M scripts/test_qemu_storage.py
+ M src/kernel/shell.c
+ M tests/test_purplefs_v2.c
+?? checkpoints/
+?? docs/CHECKPOINT_20261022_PURPLEFS_AUDIT.md
+?? docs/PURPLEFS_V3_64BIT_ADDRESSING_REVIEW.md
+?? docs/PURPLEFS_VERIFICATION_AUDIT_REPORT.md
+?? docs/PURPLE_OS_BOOTABLE_IMAGE_ARCHITECTURE_PLAN.md
+?? scripts/test_qemu_persistence.py
+?? tests/test_shell_path.c
+
+Objective:
+Perform final documentation-only correctness review of Purple OS / Aegis64 architecture:
+- Explicitly mark independent recovery boot as PROPOSED / NOT YET VERIFIED.
+- Specify directory entry name encoding, length semantics, null termination, and invalid name handling.
+- Detail exact PFS3 metadata block ranges, calculations, and reserved block totals.
+- Recheck theoretical addressing capacity vs supported limits with overflow-safe block-to-sector math.
+- Ensure consistent 64-bit pointer design across all structures and proposed APIs.
+- Strictly distinguish verified repository truth from proposed future behavior.
+
+Preserved Document Copies:
+- checkpoints/20261022-architecture-final-review/PURPLE_OS_BOOTABLE_IMAGE_ARCHITECTURE_PLAN.pre-final.md
+- checkpoints/20261022-architecture-final-review/PURPLEFS_V3_64BIT_ADDRESSING_REVIEW.pre-final.md

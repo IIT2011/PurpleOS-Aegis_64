@@ -1,0 +1,30 @@
+Checkpoint Timestamp: 2026-10-22T17:14:20+05:30
+Current Commit: 409c0cd00a7a074d50f2b8e0838aff466145e017
+Current Branch: Aegis_Purple
+
+Initial Git Status (--short --branch):
+## Aegis_Purple...origin/Aegis_Purple
+ M Makefile
+ M include/shell.h
+ M scripts/test_qemu_storage.py
+ M src/kernel/shell.c
+ M tests/test_purplefs_v2.c
+?? checkpoints/
+?? docs/CHECKPOINT_20261022_PURPLEFS_AUDIT.md
+?? docs/PURPLEFS_V3_64BIT_ADDRESSING_REVIEW.md
+?? docs/PURPLEFS_VERIFICATION_AUDIT_REPORT.md
+?? docs/PURPLE_OS_BOOTABLE_IMAGE_ARCHITECTURE_PLAN.md
+?? scripts/test_qemu_persistence.py
+?? tests/test_shell_path.c
+
+Objective:
+Final documentation-only correction pass for Purple OS / Aegis64 and PurpleFS v3:
+- Define overflow-safe partition validation with subtraction-based bounds checks and checked preconditions.
+- Formalize Block 0 semantics: strict distinction between reserved metadata block access and data-block allocation; Block 0 never allocated as data or sparse pointer; metadata access only through authorized paths.
+- Reclassify usable_data_blocks * 4096 as an upper bound rather than a guaranteed realizable file size, accounting for indirect pointer blocks and filesystem metadata.
+- Retain compile-time static assertions and future test gate requirements.
+- Maintain explicit [PROPOSED / NOT YET IMPLEMENTED OR VERIFIED] labeling.
+
+Preserved Files:
+- checkpoints/20261022-final-specification-pass/PURPLE_OS_BOOTABLE_IMAGE_ARCHITECTURE_PLAN.pre-pass.md
+- checkpoints/20261022-final-specification-pass/PURPLEFS_V3_64BIT_ADDRESSING_REVIEW.pre-pass.md

@@ -1,0 +1,23 @@
+Checkpoint Timestamp: 2026-10-22T16:11:00+05:30
+Current Commit: 409c0cd00a7a074d50f2b8e0838aff466145e017
+Current Branch: Aegis_Purple
+
+Initial Git Status (--short --branch):
+## Aegis_Purple...origin/Aegis_Purple
+ M Makefile
+ M tests/test_purplefs_v2.c
+?? docs/CHECKPOINT_20261022_PURPLEFS_AUDIT.md
+?? docs/PURPLEFS_VERIFICATION_AUDIT_REPORT.md
+?? scripts/test_qemu_persistence.py
+
+Intended Change:
+Implement only shell-side path normalization in src/kernel/shell.c based on the existing PurpleFS v2 API and PurpleFS Verification Audit.
+Normalize leading './', leading '/', and repeated leading './' for root-level files so commands like 'peek', 'touch', and 'write' handle 'welcome.txt', './welcome.txt', and '/welcome.txt' identically.
+Reject empty paths, '/', nested paths, and paths exceeding 23 characters without truncating or modifying core PurpleFS code.
+
+Saved Files:
+- shell.c
+- shell.h
+- Makefile
+- test_qemu_storage.py
+- test_qemu_writable_storage.py
