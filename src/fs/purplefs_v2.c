@@ -539,6 +539,152 @@ int pfs2_create_file(pfs2_fs_t *fs, const char *name, uint16_t mode, uint32_t *o
     return PFS2_OK;
 }
 
+int pfs2_unlink(pfs2_fs_t *fs, const char *name) {
+    if (!fs || !fs->is_mounted || !name) return PFS2_ERR_INVALID;
+    if (fs->read_only) return PFS2_ERR_ROFS;
+
+    pfs2_inode_t root_ino;
+    int err = pfs2_read_inode(fs, PFS2_ROOT_INODE, &root_ino);
+    if (err != PFS2_OK) return err;
+
+    uint8_t dir_buf[PFS2_BLOCK_SIZE];
+    uint32_t dir_block = root_ino.direct_blocks[0];
+    if (fs->dev->read_block(fs->dev, dir_block, dir_buf) != 0) return PFS2_ERR_IO;
+
+    size_t name_len = strlen(name);
+    int slot_found = -1;
+    uint32_t target_inode = 0;
+
+    for (uint32_t offset = 0; offset < PFS2_BLOCK_SIZE; offset += 32) {
+        pfs2_dir_entry_t *de = (pfs2_dir_entry_t *)(dir_buf + offset);
+        if (de->inode != 0 && de->name_len == name_len) {
+            if (strncmp(de->name, name, name_len) == 0) {
+                slot_found = (int)offset;
+                target_inode = de->inode;
+                break;
+            }
+        }
+    }
+    if (slot_found < 0 || target_inode == 0) return PFS2_ERR_NOT_FOUND;
+
+    // Read target inode to free allocated blocks
+    pfs2_inode_t file_ino;
+    if (pfs2_read_inode(fs, target_inode, &file_ino) == PFS2_OK) {
+        for (int b = 0; b < 12; b++) {
+            if (file_ino.direct_blocks[b] != 0) {
+                free_block(fs, file_ino.direct_blocks[b]);
+            }
+        }
+        if (file_ino.indirect_block != 0) {
+            uint32_t ind_buf[1024];
+            if (fs->dev->read_block(fs->dev, file_ino.indirect_block, ind_buf) == 0) {
+                for (int b = 0; b < 1024; b++) {
+                    if (ind_buf[b] != 0) free_block(fs, ind_buf[b]);
+                }
+            }
+            free_block(fs, file_ino.indirect_block);
+        }
+    }
+
+    // Clear directory entry
+    pfs2_dir_entry_t *de = (pfs2_dir_entry_t *)(dir_buf + slot_found);
+    memset(de, 0, sizeof(pfs2_dir_entry_t));
+
+    // Zero out inode in inode table
+    pfs2_inode_t zero_ino;
+    memset(&zero_ino, 0, sizeof(zero_ino));
+
+    journal_slot_t slots[4];
+    uint32_t ino_block_num = 0;
+    write_inode(fs, target_inode, &zero_ino, slots[0].data, &ino_block_num);
+    slots[0].target_block = ino_block_num;
+
+    slots[1].target_block = dir_block;
+    memcpy(slots[1].data, dir_buf, PFS2_BLOCK_SIZE);
+
+    slots[2].target_block = fs->sb.bitmap_start_block;
+    memcpy(slots[2].data, fs->bitmap, PFS2_BLOCK_SIZE);
+
+    fs->sb.free_inodes++;
+    fs->sb.checksum = pfs2_crc32(&fs->sb, 0x80);
+    slots[3].target_block = 0;
+    memset(slots[3].data, 0, PFS2_BLOCK_SIZE);
+    memcpy(slots[3].data, &fs->sb, sizeof(fs->sb));
+
+    return journal_commit_transaction(fs, slots, 4);
+}
+
+int pfs2_readdir(pfs2_fs_t *fs, uint32_t index, pfs2_dir_entry_t *out_entry, pfs2_inode_t *out_inode) {
+    if (!fs || !fs->is_mounted || !out_entry) return PFS2_ERR_INVALID;
+
+    pfs2_inode_t root_ino;
+    int err = pfs2_read_inode(fs, PFS2_ROOT_INODE, &root_ino);
+    if (err != PFS2_OK) return err;
+
+    uint8_t dir_buf[PFS2_BLOCK_SIZE];
+    uint32_t dir_block = root_ino.direct_blocks[0];
+    if (fs->dev->read_block(fs->dev, dir_block, dir_buf) != 0) return PFS2_ERR_IO;
+
+    uint32_t cur = 0;
+    for (uint32_t offset = 0; offset < PFS2_BLOCK_SIZE; offset += 32) {
+        pfs2_dir_entry_t *de = (pfs2_dir_entry_t *)(dir_buf + offset);
+        if (de->inode != 0) {
+            if (cur == index) {
+                memcpy(out_entry, de, sizeof(pfs2_dir_entry_t));
+                if (out_inode) {
+                    pfs2_read_inode(fs, de->inode, out_inode);
+                }
+                return PFS2_OK;
+            }
+            cur++;
+        }
+    }
+    return PFS2_ERR_NOT_FOUND;
+}
+
+int pfs2_rename(pfs2_fs_t *fs, const char *old_name, const char *new_name) {
+    if (!fs || !fs->is_mounted || !old_name || !new_name) return PFS2_ERR_INVALID;
+    if (fs->read_only) return PFS2_ERR_ROFS;
+    size_t new_len = strlen(new_name);
+    if (new_len == 0 || new_len >= 24) return PFS2_ERR_INVALID;
+
+    uint32_t existing = 0;
+    if (pfs2_lookup(fs, new_name, &existing) == PFS2_OK) {
+        return PFS2_ERR_EXISTS;
+    }
+
+    pfs2_inode_t root_ino;
+    int err = pfs2_read_inode(fs, PFS2_ROOT_INODE, &root_ino);
+    if (err != PFS2_OK) return err;
+
+    uint8_t dir_buf[PFS2_BLOCK_SIZE];
+    uint32_t dir_block = root_ino.direct_blocks[0];
+    if (fs->dev->read_block(fs->dev, dir_block, dir_buf) != 0) return PFS2_ERR_IO;
+
+    size_t old_len = strlen(old_name);
+    int slot_found = -1;
+    for (uint32_t offset = 0; offset < PFS2_BLOCK_SIZE; offset += 32) {
+        pfs2_dir_entry_t *de = (pfs2_dir_entry_t *)(dir_buf + offset);
+        if (de->inode != 0 && de->name_len == old_len) {
+            if (strncmp(de->name, old_name, old_len) == 0) {
+                slot_found = (int)offset;
+                break;
+            }
+        }
+    }
+    if (slot_found < 0) return PFS2_ERR_NOT_FOUND;
+
+    pfs2_dir_entry_t *de = (pfs2_dir_entry_t *)(dir_buf + slot_found);
+    de->name_len = (uint8_t)new_len;
+    memset(de->name, 0, sizeof(de->name));
+    strncpy(de->name, new_name, sizeof(de->name) - 1);
+
+    journal_slot_t slots[1];
+    slots[0].target_block = dir_block;
+    memcpy(slots[0].data, dir_buf, PFS2_BLOCK_SIZE);
+    return journal_commit_transaction(fs, slots, 1);
+}
+
 int pfs2_read_file(pfs2_fs_t *fs, uint32_t inode_num, void *buf, size_t count, uint64_t offset, size_t *out_bytes_read) {
     if (!fs || !fs->is_mounted || !buf) return PFS2_ERR_INVALID;
 

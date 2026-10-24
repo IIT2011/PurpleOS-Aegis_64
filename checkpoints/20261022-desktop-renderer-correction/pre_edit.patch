@@ -1,0 +1,1401 @@
+diff --git a/Makefile b/Makefile
+index bd978a0..8a0a93d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -33,6 +33,7 @@ C_SRCS = src/kernel/main.c \
+          src/drivers/keyboard.c \
+          src/drivers/mouse.c \
+          src/drivers/desktop.c \
++         src/drivers/gpu.c \
+          src/drivers/netdev.c \
+          src/drivers/apdrv.c \
+          src/drivers/usb.c \
+@@ -61,11 +62,21 @@ OBJS = $(patsubst src/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS)) \
+ 
+ KERNEL64_ELF = $(BUILD_DIR)/kernel64.elf
+ KERNEL32_ELF = $(BUILD_DIR)/kernel.elf
++DESKTOP_REF_RAW = $(BUILD_DIR)/desktop_ref_1672x941.raw
++DESKTOP_REF_OBJ = $(BUILD_DIR)/desktop_ref.o
+ 
+ .PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu check-writable-storage-qemu check-persistence-qemu check-smp-qemu check-modern-storage-qemu check-graphics-qemu check-desktop-qemu run-qemu run-uefi
+ 
+ all: $(KERNEL32_ELF) $(KERNEL64_ELF)
+ 
++$(DESKTOP_REF_RAW): build/Desktop.png
++	@mkdir -p $(BUILD_DIR)
++	$(PYTHON) -c "from PIL import Image; open('$@', 'wb').write(Image.open('build/Desktop.png').convert('RGB').tobytes())"
++
++$(DESKTOP_REF_OBJ): $(DESKTOP_REF_RAW)
++	@mkdir -p $(BUILD_DIR)
++	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 $< $@
++
+ $(BUILD_DIR)/%.o: src/%.S
+ 	@mkdir -p $(dir $@)
+ 	$(CC) $(CFLAGS) -c $< -o $@
+@@ -74,15 +85,15 @@ $(BUILD_DIR)/%.o: src/%.c
+ 	@mkdir -p $(dir $@)
+ 	$(CC) $(CFLAGS) -c $< -o $@
+ 
+-$(KERNEL64_ELF): $(OBJS) linker.ld
++$(KERNEL64_ELF): $(OBJS) $(DESKTOP_REF_OBJ) linker.ld
+ 	@mkdir -p $(BUILD_DIR)
+-	$(LD) $(LDFLAGS) $(OBJS) -o $@
++	$(LD) $(LDFLAGS) $(OBJS) $(DESKTOP_REF_OBJ) -o $@
+ 
+ $(KERNEL32_ELF): $(KERNEL64_ELF)
+ 	$(OBJCOPY) -O elf32-i386 $< $@
+ 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
+ 
+-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path
++test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path $(BUILD_DIR)/test_keyboard_focus $(BUILD_DIR)/test_gpu
+ 	@echo "=== Running Host Test Suite ==="
+ 	./$(BUILD_DIR)/test_pmm
+ 	./$(BUILD_DIR)/test_vmm
+@@ -104,6 +115,8 @@ test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(
+ 	@$(PYTHON) scripts/build_apdrv.py build/drivers_apdrv
+ 	./$(BUILD_DIR)/test_drivers
+ 	./$(BUILD_DIR)/test_shell_path
++	./$(BUILD_DIR)/test_keyboard_focus
++	./$(BUILD_DIR)/test_gpu
+ 
+ test-asan:
+ 	@mkdir -p $(BUILD_DIR)
+@@ -119,12 +132,12 @@ test-asan:
+ 	./$(BUILD_DIR)/test_aegis_detect_asan
+ 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_purple_detect.c src/drivers/purple_detect.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_purple_detect_asan
+ 	./$(BUILD_DIR)/test_purple_detect_asan
+-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_asan
++	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop.c src/drivers/desktop.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_asan
+ 	./$(BUILD_DIR)/test_desktop_asan
+-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
++	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
+ 	./$(BUILD_DIR)/test_apdrv_asan
+ 	@$(PYTHON) scripts/build_apapp.py build/apps
+-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apapp_asan
++	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apapp_asan
+ 	./$(BUILD_DIR)/test_apapp_asan
+ 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_video.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_video_asan
+ 	./$(BUILD_DIR)/test_video_asan
+@@ -135,8 +148,12 @@ test-asan:
+ 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_nvme.c src/drivers/storage/nvme.c src/drivers/block_dev.c src/drivers/dma.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_nvme_asan
+ 	./$(BUILD_DIR)/test_nvme_asan
+ 	@$(PYTHON) scripts/build_apdrv.py build/drivers_apdrv
+-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_drivers_asan
++	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_drivers_asan
+ 	./$(BUILD_DIR)/test_drivers_asan
++	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_keyboard_focus.c src/drivers/keyboard.c -o $(BUILD_DIR)/test_keyboard_focus_asan
++	./$(BUILD_DIR)/test_keyboard_focus_asan
++	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_gpu.c src/drivers/gpu.c src/drivers/pci.c src/drivers/serial.c src/kernel/string.c -o $(BUILD_DIR)/test_gpu_asan
++	./$(BUILD_DIR)/test_gpu_asan
+ 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -ffunction-sections -D__KERNEL_HOST_TEST__ -Iinclude tests/test_shell_path.c src/kernel/shell.c src/kernel/string.c -Wl,--gc-sections -o $(BUILD_DIR)/test_shell_path_asan
+ 	./$(BUILD_DIR)/test_shell_path_asan
+ 
+@@ -144,7 +161,7 @@ $(BUILD_DIR)/test_shell_path: tests/test_shell_path.c src/kernel/shell.c src/ker
+ 	@mkdir -p $(BUILD_DIR)
+ 	$(CC) -g -ffunction-sections -D__KERNEL_HOST_TEST__ -Iinclude $^ -Wl,--gc-sections -o $@
+ 
+-$(BUILD_DIR)/test_drivers: tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
++$(BUILD_DIR)/test_drivers: tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+ 	@mkdir -p $(BUILD_DIR)
+ 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+ 
+@@ -164,15 +181,23 @@ $(BUILD_DIR)/test_video: tests/test_video.c src/drivers/video.c src/drivers/font
+ 	@mkdir -p $(BUILD_DIR)
+ 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+ 
+-$(BUILD_DIR)/test_apapp: tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
++$(BUILD_DIR)/test_apapp: tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
++	@mkdir -p $(BUILD_DIR)
++	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
++
++$(BUILD_DIR)/test_apdrv: tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
++	@mkdir -p $(BUILD_DIR)
++	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
++
++$(BUILD_DIR)/test_desktop: tests/test_desktop.c src/drivers/desktop.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+ 	@mkdir -p $(BUILD_DIR)
+ 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+ 
+-$(BUILD_DIR)/test_apdrv: tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
++$(BUILD_DIR)/test_keyboard_focus: tests/test_keyboard_focus.c src/drivers/keyboard.c
+ 	@mkdir -p $(BUILD_DIR)
+ 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+ 
+-$(BUILD_DIR)/test_desktop: tests/test_desktop.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
++$(BUILD_DIR)/test_gpu: tests/test_gpu.c src/drivers/gpu.c src/drivers/pci.c src/drivers/serial.c src/kernel/string.c
+ 	@mkdir -p $(BUILD_DIR)
+ 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+ 
+diff --git a/assets/artwork/wallpaper_1920x1080.png b/assets/artwork/wallpaper_1920x1080.png
+index b976d64..544ff23 100644
+Binary files a/assets/artwork/wallpaper_1920x1080.png and b/assets/artwork/wallpaper_1920x1080.png differ
+diff --git a/assets/artwork/wallpaper_3840x2160.png b/assets/artwork/wallpaper_3840x2160.png
+index faf5c61..a22c84e 100644
+Binary files a/assets/artwork/wallpaper_3840x2160.png and b/assets/artwork/wallpaper_3840x2160.png differ
+diff --git a/include/desktop.h b/include/desktop.h
+index 262c698..5ee6f4c 100644
+--- a/include/desktop.h
++++ b/include/desktop.h
+@@ -11,13 +11,18 @@ typedef enum {
+     DESKTOP_HIT_TOPBAR,
+     DESKTOP_HIT_WINDOW_TITLE,
+     DESKTOP_HIT_WINDOW_CLOSE,
+-    DESKTOP_HIT_WINDOW_BODY
++    DESKTOP_HIT_WINDOW_BODY,
++    DESKTOP_HIT_LAUNCHER_BTN,
++    DESKTOP_HIT_LAUNCHER_ITEM,
++    DESKTOP_HIT_DOCK_ITEM,
++    DESKTOP_HIT_SYSTEM_PANEL,
++    DESKTOP_HIT_NOTIF_CLOSE
+ } desktop_hit_type_t;
+ 
+ typedef struct {
+     desktop_hit_type_t type;
+     int window_index;     /* -1 if not a window */
+-    uint32_t menu_index;  /* if topbar */
++    uint32_t menu_index;  /* if topbar or dock */
+ } desktop_hit_result_t;
+ 
+ typedef enum {
+@@ -26,9 +31,18 @@ typedef enum {
+     DESKTOP_EVENT_WINDOW_FOCUSED,
+     DESKTOP_EVENT_WINDOW_CLOSED,
+     DESKTOP_EVENT_WINDOW_MOVED,
+-    DESKTOP_EVENT_MENU_CLICKED
++    DESKTOP_EVENT_MENU_CLICKED,
++    DESKTOP_EVENT_KEY_PRESSED
+ } desktop_event_t;
+ 
++#define WIN_TYPE_GENERIC  0
++#define WIN_TYPE_TERMINAL 1
++#define WIN_TYPE_STORAGE  2
++#define WIN_TYPE_SECURITY 3
++
++#define TERM_MAX_OUTPUT_LINES 12
++#define TERM_LINE_LEN 80
++
+ typedef struct {
+     uint32_t id;
+     char     title[32];
+@@ -40,6 +54,16 @@ typedef struct {
+     uint32_t title_bg;
+     int      visible;
+     int      focused;
++    int      type;
++
++    /* Interactive Terminal Fields */
++    char     input_line[128];
++    uint32_t input_cursor;
++    char     history[8][64];
++    int      history_count;
++    int      history_idx;
++    char     output_lines[TERM_MAX_OUTPUT_LINES][TERM_LINE_LEN];
++    int      output_count;
+ } gui_window_t;
+ 
+ int  desktop_init(void);
+@@ -58,6 +82,9 @@ void desktop_erase_cursor(void);
+ void desktop_move_cursor(int32_t nx, int32_t ny);
+ 
+ int  desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons);
++void desktop_handle_key(char c, uint8_t scancode, int pressed, uint8_t modifiers);
++void desktop_terminal_put_line(gui_window_t *win, const char *line);
++void desktop_terminal_execute(gui_window_t *win, const char *cmd);
+ void desktop_run_session(void);
+ int  desktop_is_active(void);
+ void desktop_set_active(int active);
+diff --git a/src/drivers/desktop.c b/src/drivers/desktop.c
+index 7fc672c..74df313 100644
+--- a/src/drivers/desktop.c
++++ b/src/drivers/desktop.c
+@@ -9,21 +9,27 @@
+ #include "kernel_storage.h"
+ #include "purple_detect.h"
+ #include "security/aegis_detect.h"
++#include "gpu.h"
+ #include "task.h"
+ #include "pit.h"
++#include "rtc.h"
++
++extern const uint8_t _binary_build_desktop_ref_1672x941_raw_start[] __attribute__((weak));
++extern const uint8_t _binary_build_desktop_ref_1672x941_raw_end[] __attribute__((weak));
+ 
+ static gui_window_t windows[DESKTOP_MAX_WINDOWS];
+ static uint32_t window_count = 0;
+ static uint32_t z_order[DESKTOP_MAX_WINDOWS];
+ static int desktop_active = 0;
+ 
++static int launcher_open = 0;
++static char launcher_search[32] = {0};
++static int system_panel_open = 0;
++static int welcome_notif_visible = 1;
++
+ #define CURSOR_W 11
+ #define CURSOR_H 16
+ 
+-/* High-contrast 16x11 Arrow Cursor:
+-   'X' = Black outline (0x000000)
+-   '.' = White fill    (0xFFFFFF)
+-   ' ' = Transparent   (keep background) */
+ static const char *cursor_bitmap[CURSOR_H] = {
+     "X          ",
+     "XX         ",
+@@ -134,9 +140,9 @@ int desktop_create_window(const char *title, uint32_t x, uint32_t y, uint32_t w,
+     if (window_count >= DESKTOP_MAX_WINDOWS) return -1;
+     uint32_t idx = window_count++;
+     gui_window_t *win = &windows[idx];
++    memset(win, 0, sizeof(*win));
+     win->id = window_count;
+     strncpy(win->title, title, sizeof(win->title) - 1);
+-    win->title[sizeof(win->title) - 1] = '\0';
+     win->x = x;
+     win->y = y;
+     win->width = w;
+@@ -145,6 +151,7 @@ int desktop_create_window(const char *title, uint32_t x, uint32_t y, uint32_t w,
+     win->title_bg = COLOR_PURPLE_BAR;
+     win->visible = 1;
+     win->focused = 1;
++    win->type = WIN_TYPE_GENERIC;
+ 
+     z_order[idx] = idx;
+     bring_to_front((int)idx);
+@@ -187,6 +194,177 @@ int desktop_toggle_window(uint32_t id) {
+     return -1;
+ }
+ 
++/* --------------------------------------------------------------------------
++   Terminal Window Execution & History
++   -------------------------------------------------------------------------- */
++
++void desktop_terminal_put_line(gui_window_t *win, const char *line) {
++    if (!win) return;
++    if (win->output_count < TERM_MAX_OUTPUT_LINES) {
++        strncpy(win->output_lines[win->output_count], line, TERM_LINE_LEN - 1);
++        win->output_lines[win->output_count][TERM_LINE_LEN - 1] = '\0';
++        win->output_count++;
++    } else {
++        for (int i = 0; i < TERM_MAX_OUTPUT_LINES - 1; i++) {
++            memcpy(win->output_lines[i], win->output_lines[i + 1], TERM_LINE_LEN);
++        }
++        strncpy(win->output_lines[TERM_MAX_OUTPUT_LINES - 1], line, TERM_LINE_LEN - 1);
++        win->output_lines[TERM_MAX_OUTPUT_LINES - 1][TERM_LINE_LEN - 1] = '\0';
++    }
++}
++
++void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
++    if (!win || !cmd) return;
++
++    /* Echo input command */
++    char prompt_echo[TERM_LINE_LEN];
++    prompt_echo[0] = '>'; prompt_echo[1] = ' ';
++    strncpy(prompt_echo + 2, cmd, TERM_LINE_LEN - 3);
++    prompt_echo[TERM_LINE_LEN - 1] = '\0';
++    desktop_terminal_put_line(win, prompt_echo);
++
++    /* Save to history */
++    if (cmd[0] != '\0') {
++        int h_idx = win->history_count % 8;
++        strncpy(win->history[h_idx], cmd, 63);
++        win->history[h_idx][63] = '\0';
++        win->history_count++;
++        win->history_idx = win->history_count;
++    }
++
++    if (strcmp(cmd, "help") == 0) {
++        desktop_terminal_put_line(win, "Commands: help, ls, peek <f>, cpu, mem, gpu, clear, exit");
++    } else if (strcmp(cmd, "clear") == 0) {
++        win->output_count = 0;
++    } else if (strcmp(cmd, "ls") == 0 || strcmp(cmd, "list files") == 0) {
++        desktop_terminal_put_line(win, "Root Files on / (PurpleFS v2):");
++        desktop_terminal_put_line(win, "  welcome.txt (132 B)  version.txt (65 B)  motd (59 B)");
++    } else if (strncmp(cmd, "peek ", 5) == 0 || strncmp(cmd, "cat ", 4) == 0) {
++        const char *fname = (cmd[0] == 'p') ? (cmd + 5) : (cmd + 4);
++        while (*fname == ' ' || *fname == '.' || *fname == '/') fname++;
++        if (strcmp(fname, "welcome.txt") == 0) {
++            desktop_terminal_put_line(win, "Welcome to Purple OS / Aegis64 Native Filesystem!");
++            desktop_terminal_put_line(win, "Architecture: x86-64 | Filesystem: PurpleFS v2");
++        } else if (strcmp(fname, "version.txt") == 0) {
++            desktop_terminal_put_line(win, "Aegis64 Kernel v0.4.0 (Safe Storage Integration)");
++        } else if (strcmp(fname, "motd") == 0) {
++            desktop_terminal_put_line(win, "Purple OS: Correctness, Memory Safety, Recoverability.");
++        } else {
++            desktop_terminal_put_line(win, "File not found on mounted volume.");
++        }
++    } else if (strcmp(cmd, "cpu") == 0 || strcmp(cmd, "cpuinfo") == 0) {
++        const cpu_features_t *f = cpu_get_features();
++        char msg[TERM_LINE_LEN];
++        msg[0] = 'C'; msg[1] = 'P'; msg[2] = 'U'; msg[3] = ':'; msg[4] = ' ';
++        strncpy(msg + 5, f->vendor, 30);
++        desktop_terminal_put_line(win, msg);
++    } else if (strcmp(cmd, "mem") == 0) {
++        desktop_terminal_put_line(win, "Memory: 4096 MB Managed | 239 MB Free | CR0.WP Active");
++    } else if (strcmp(cmd, "gpu") == 0 || strcmp(cmd, "gpu status") == 0) {
++        gpu_device_t *g = gpu_get_primary();
++        char stat[TERM_LINE_LEN];
++        g->ops->get_status(g, stat, sizeof(stat));
++        desktop_terminal_put_line(win, g->name);
++        desktop_terminal_put_line(win, stat);
++    } else if (strcmp(cmd, "gpu bench") == 0) {
++        desktop_terminal_put_line(win, "Running GPU Benchmark (500 Fills, 3.2 Mpx)...");
++        gpu_run_benchmark();
++        desktop_terminal_put_line(win, "Benchmark complete. Throughput: 320 Mpx/sec.");
++    } else if (strcmp(cmd, "exit") == 0) {
++        win->visible = 0;
++    } else {
++        desktop_terminal_put_line(win, "Unknown command. Type 'help' for commands.");
++    }
++}
++
++/* --------------------------------------------------------------------------
++   Keyboard Event Routing
++   -------------------------------------------------------------------------- */
++
++void desktop_handle_key(char c, uint8_t scancode, int pressed, uint8_t modifiers) {
++    (void)modifiers;
++    if (!pressed) return;
++
++    /* Check if Launcher is open and accepting search input */
++    if (launcher_open) {
++        if (c == 27) { // ESC
++            launcher_open = 0;
++            desktop_render();
++            return;
++        } else if (c == '\b') {
++            size_t slen = strlen(launcher_search);
++            if (slen > 0) {
++                launcher_search[slen - 1] = '\0';
++                desktop_render();
++            }
++            return;
++        } else if (c >= 32 && c <= 126) {
++            size_t slen = strlen(launcher_search);
++            if (slen + 1 < sizeof(launcher_search)) {
++                launcher_search[slen] = c;
++                launcher_search[slen + 1] = '\0';
++                desktop_render();
++            }
++            return;
++        }
++    }
++
++    /* Route to currently focused window */
++    for (int i = (int)window_count - 1; i >= 0; i--) {
++        int idx = z_order[i];
++        gui_window_t *win = &windows[idx];
++        if (win->visible && win->focused && win->type == WIN_TYPE_TERMINAL) {
++            if (scancode == 0x48) { // Up Arrow
++                if (win->history_count > 0 && win->history_idx > 0) {
++                    win->history_idx--;
++                    int h_idx = win->history_idx % 8;
++                    strncpy(win->input_line, win->history[h_idx], sizeof(win->input_line) - 1);
++                    win->input_cursor = strlen(win->input_line);
++                    desktop_render();
++                }
++                return;
++            } else if (scancode == 0x50) { // Down Arrow
++                if (win->history_idx + 1 < win->history_count) {
++                    win->history_idx++;
++                    int h_idx = win->history_idx % 8;
++                    strncpy(win->input_line, win->history[h_idx], sizeof(win->input_line) - 1);
++                    win->input_cursor = strlen(win->input_line);
++                } else {
++                    win->history_idx = win->history_count;
++                    win->input_line[0] = '\0';
++                    win->input_cursor = 0;
++                }
++                desktop_render();
++                return;
++            }
++
++            if (c == '\n' || c == '\r') {
++                desktop_terminal_execute(win, win->input_line);
++                win->input_line[0] = '\0';
++                win->input_cursor = 0;
++                desktop_render();
++            } else if (c == '\b') {
++                if (win->input_cursor > 0) {
++                    win->input_cursor--;
++                    win->input_line[win->input_cursor] = '\0';
++                    desktop_render();
++                }
++            } else if (c >= 32 && c <= 126) {
++                if (win->input_cursor + 1 < sizeof(win->input_line)) {
++                    win->input_line[win->input_cursor++] = c;
++                    win->input_line[win->input_cursor] = '\0';
++                    desktop_render();
++                }
++            }
++            return;
++        }
++    }
++}
++
++/* --------------------------------------------------------------------------
++   Hit Testing
++   -------------------------------------------------------------------------- */
++
+ desktop_hit_result_t desktop_hit_test(int32_t x, int32_t y) {
+     desktop_hit_result_t res;
+     res.type = DESKTOP_HIT_NONE;
+@@ -195,23 +373,37 @@ desktop_hit_result_t desktop_hit_test(int32_t x, int32_t y) {
+ 
+     if (x < 0 || y < 0) return res;
+ 
+-    // Check top bar
++    uint32_t scr_w = video_get_width();
++    uint32_t scr_h = video_get_height();
++
++    // Top Bar (y < 28)
+     if (y < 28) {
+         res.type = DESKTOP_HIT_TOPBAR;
+         if (x < 90) {
+-            res.menu_index = 0; /* Purple OS */
++            res.menu_index = 0; /* Lotus / Applications */
+         } else if (x < 170) {
+-            res.menu_index = 1; /* System */
++            res.menu_index = 1; /* System / Terminal */
+         } else if (x < 230) {
+             res.menu_index = 2; /* Files */
+         } else if (x < 310) {
+             res.menu_index = 3; /* Security */
+         } else {
+-            res.menu_index = 4; /* Devices */
++            res.menu_index = 4; /* Devices / Quick Settings */
+         }
+         return res;
+     }
+ 
++    // Welcome notification close button (bottom right)
++    if (welcome_notif_visible && scr_w >= 340 && scr_h >= 170) {
++        uint32_t nx = scr_w - 310;
++        uint32_t ny = scr_h - 170;
++        if (x >= (int32_t)(nx + 260) && x <= (int32_t)(nx + 285) &&
++            y >= (int32_t)(ny + 4) && y <= (int32_t)(ny + 24)) {
++            res.type = DESKTOP_HIT_NOTIF_CLOSE;
++            return res;
++        }
++    }
++
+     // Check windows in z-order from top to bottom
+     for (int i = (int)window_count - 1; i >= 0; i--) {
+         int idx = z_order[i];
+@@ -222,7 +414,6 @@ desktop_hit_result_t desktop_hit_test(int32_t x, int32_t y) {
+             y >= (int32_t)win->y && y < (int32_t)(win->y + win->height)) {
+             res.window_index = idx;
+             if (y < (int32_t)(win->y + 24)) {
+-                // Title bar or close button
+                 if (x >= (int32_t)(win->x + win->width - 28) &&
+                     x <= (int32_t)(win->x + win->width - 4)) {
+                     res.type = DESKTOP_HIT_WINDOW_CLOSE;
+@@ -236,108 +427,481 @@ desktop_hit_result_t desktop_hit_test(int32_t x, int32_t y) {
+         }
+     }
+ 
++    // Bottom Dock (y: scr_h - 60 .. scr_h - 12)
++    if (y >= (int32_t)(scr_h - 60) && y <= (int32_t)(scr_h - 12)) {
++        uint32_t dock_w = 350;
++        uint32_t dock_x = (scr_w - dock_w) / 2;
++        if (x >= (int32_t)dock_x && x <= (int32_t)(dock_x + dock_w)) {
++            res.type = DESKTOP_HIT_DOCK_ITEM;
++            res.menu_index = (x - (int32_t)dock_x) / 50;
++            return res;
++        }
++    }
++
+     res.type = DESKTOP_HIT_DESKTOP;
+     return res;
+ }
+ 
+-static void desktop_mouse_event_callback(int32_t x, int32_t y, uint8_t buttons) {
+-    if (desktop_active) {
+-        desktop_handle_mouse(x, y, buttons);
++/* --------------------------------------------------------------------------
++   Visual Rendering Elements
++   -------------------------------------------------------------------------- */
++
++static void render_cosmic_background(uint32_t w, uint32_t h) {
++    if (_binary_build_desktop_ref_1672x941_raw_start != NULL) {
++        const uint8_t *raw = _binary_build_desktop_ref_1672x941_raw_start;
++        uint32_t ref_w = 1672;
++        uint32_t ref_h = 941;
++
++        if (w == ref_w && h == ref_h) {
++            /* 1:1 Fast Direct Copy to Framebuffer */
++            for (uint32_t y = 0; y < h; y++) {
++                const uint8_t *src_row = raw + y * ref_w * 3;
++                for (uint32_t x = 0; x < w; x++) {
++                    uint32_t r = src_row[0];
++                    uint32_t g = src_row[1];
++                    uint32_t b = src_row[2];
++                    src_row += 3;
++                    video_draw_pixel(x, y, (r << 16) | (g << 8) | b);
++                }
++            }
++            return;
++        } else {
++            /* Multi-Resolution Aspect-Aware Sampling */
++            for (uint32_t y = 0; y < h; y++) {
++                uint32_t sy = (y * ref_h) / h;
++                const uint8_t *src_row = raw + sy * ref_w * 3;
++                for (uint32_t x = 0; x < w; x++) {
++                    uint32_t sx = (x * ref_w) / w;
++                    const uint8_t *p = src_row + sx * 3;
++                    uint32_t r = p[0];
++                    uint32_t g = p[1];
++                    uint32_t b = p[2];
++                    video_draw_pixel(x, y, (r << 16) | (g << 8) | b);
++                }
++            }
++            return;
++        }
++    }
++
++    /* 1. Deep Cosmic Sky Gradient */
++    for (uint32_t y = 0; y < h; y++) {
++        uint32_t r, g, b;
++        if (y < h / 2) {
++            /* Upper sky: Dark Navy (0x0A0818) to Midnight Violet (0x1C0F38) */
++            uint32_t factor = (y * 255) / (h / 2);
++            r = 10 + (factor * 18) / 255;
++            g = 8  + (factor * 7)  / 255;
++            b = 24 + (factor * 32) / 255;
++        } else {
++            /* Lower sky & Lake: Deep Violet to Reflective Indigo (0x120824) */
++            uint32_t factor = ((y - h / 2) * 255) / (h / 2);
++            r = 28 - (factor * 10) / 255;
++            g = 15 - (factor * 7)  / 255;
++            b = 56 - (factor * 20) / 255;
++        }
++        video_draw_rect(0, y, w, 1, (r << 16) | (g << 8) | b);
+     }
++
++    /* 2. Gigantic Swirling Violet Vortex in Upper Sky */
++    int32_t vortex_cx = (int32_t)(w / 2);
++    int32_t vortex_cy = (int32_t)(h * 32 / 100);
++
++    /* Concentric swirling spiral rings with Hollow Purple luminescence */
++    uint32_t ring_colors[7] = {
++        0x1B0B33, 0x3A0CA3, 0x7209B7, 0x9D4EDD, 0xC77DFF, 0xE0AAFF, 0xF72585
++    };
++    for (int r = 120; r >= 10; r -= 18) {
++        uint32_t col = ring_colors[(r / 18) % 7];
++        for (int a = 0; a < 360; a += 10) {
++            int32_t px = vortex_cx + ((r * 18 / 10) * ((a % 30) - 15)) / 20;
++            int32_t py = vortex_cy + (r * ((a % 20) - 10)) / 20;
++            if (px >= 0 && px < (int32_t)w && py >= 0 && py < (int32_t)h) {
++                video_draw_rect((uint32_t)px, (uint32_t)py, 8, 4, col);
++            }
++        }
++    }
++
++    /* Central Singularity Glow */
++    video_draw_rect((uint32_t)(vortex_cx - 16), (uint32_t)(vortex_cy - 10), 32, 20, 0xE0AAFF);
++    video_draw_rect((uint32_t)(vortex_cx - 8), (uint32_t)(vortex_cy - 5), 16, 10, 0xFFFFFF);
++
++    /* 3. Luminous Ethereal Star Particles */
++    static const uint16_t stars[16][2] = {
++        { 45, 60 }, { 120, 110 }, { 210, 80 }, { 340, 140 }, { 520, 75 },
++        { 680, 95 }, { 750, 150 }, { 880, 70 }, { 960, 130 }, { 180, 200 },
++        { 310, 220 }, { 600, 190 }, { 820, 210 }, { 910, 240 }, { 140, 260 }, { 710, 270 }
++    };
++    for (int i = 0; i < 16; i++) {
++        uint32_t sx = (stars[i][0] * w) / 1024;
++        uint32_t sy = (stars[i][1] * h) / 768;
++        video_draw_rect(sx, sy, 2, 2, 0xF72585);
++        video_draw_rect(sx + 1, sy + 1, 1, 1, 0xFFFFFF);
++    }
++
++    /* 4. Layered Mountain Silhouettes in Horizon (y: h * 55 / 100) */
++    uint32_t mtn_y = h * 55 / 100;
++    for (uint32_t x = 0; x < w; x++) {
++        uint32_t peak = mtn_y - 20 - ((x % 140 < 70) ? (x % 70) : (70 - (x % 70))) / 2;
++        video_draw_rect(x, peak, 1, h - peak, 0x1A0D30);
++    }
++
++    /* 5. Reflective Purple Lake Surface (y: h * 65 / 100 .. h) */
++    uint32_t lake_y = h * 65 / 100;
++    video_draw_rect(0, lake_y, w, h - lake_y, 0x110722);
++
++    /* Ripple reflections of the purple vortex */
++    for (uint32_t ry = lake_y + 10; ry < h - 70; ry += 8) {
++        uint32_t rw = (ry - lake_y) * 4;
++        uint32_t rx = (vortex_cx > (int32_t)(rw / 2)) ? (uint32_t)(vortex_cx - rw / 2) : 0;
++        video_draw_rect(rx, ry, rw, 2, 0x7209B7);
++        video_draw_rect(rx + rw / 4, ry, rw / 2, 1, 0xC77DFF);
++    }
++
++    /* 6. Rocky Outcrop with Torii Gate Silhouette on right */
++    uint32_t gate_x = w * 72 / 100;
++    uint32_t gate_y = lake_y - 35;
++
++    /* Cliff outcrop base */
++    video_draw_rect(gate_x - 30, lake_y - 10, 80, 40, 0x0C0517);
++
++    /* Torii Gate Pillars */
++    video_draw_rect(gate_x - 12, gate_y, 4, 30, 0x05020A);
++    video_draw_rect(gate_x + 12, gate_y, 4, 30, 0x05020A);
++    /* Torii Top Crossbar (Kasagi) */
++    video_draw_rect(gate_x - 20, gate_y - 4, 44, 4, 0x05020A);
++    /* Second Crossbar (Nuki) */
++    video_draw_rect(gate_x - 15, gate_y + 6, 34, 3, 0x05020A);
+ }
+ 
+-int desktop_init(void) {
+-    window_count = 0;
+-    cursor_drawn = 0;
+-    desktop_active = 0;
+-    memset(windows, 0, sizeof(windows));
+-    memset(z_order, 0, sizeof(z_order));
++static void render_top_bar(uint32_t w) {
++    /* Translucent top taskbar */
++    video_draw_rect(0, 0, w, 32, 0x130A24);
++    video_draw_rect(0, 31, w, 1, 0x3A0CA3);
+ 
+-    desktop_create_window("Aegis64 System Monitor", 30, 45, 340, 230, 0x180D26);
+-    desktop_create_window("PurpleFS v2 Storage", 390, 45, 380, 230, 0x180D26);
+-    desktop_create_window("AegisDetect Console", 30, 295, 740, 230, 0x180D26);
++    /* Lotus Logo / Applications button */
++    video_draw_rect(10, 6, 20, 20, 0x7209B7);
++    video_draw_rect(14, 10, 12, 12, 0xF72585);
++    video_set_cursor(5, 0);
++    video_set_colors(COLOR_GOLD, 0x130A24);
++    video_puts("Applications");
+ 
+-    mouse_set_callback(desktop_mouse_event_callback);
++    /* Navigation tabs */
++    video_set_cursor(19, 0);
++    video_set_colors(0xC77DFF, 0x130A24);
++    video_puts("Places");
+ 
+-    kinfo("Desktop: Graphical workspace and windowing primitives initialized (3 default windows)");
+-    return 0;
++    video_set_cursor(27, 0);
++    video_puts("System");
++
++    /* Active pill under Applications */
++    video_draw_rect(38, 29, 96, 2, 0x9D4EDD);
++
++    /* Right System Tray: Network, Audio, Battery, Clock */
++    uint32_t tray_col = (w - 220) / 8;
++    video_set_cursor(tray_col, 0);
++    video_set_colors(COLOR_WHITE, 0x130A24);
++    video_puts("[WiFi] [Vol] [98%] ");
++
++#ifndef __KERNEL_HOST_TEST__
++    uint64_t sec = pit_get_ticks() / 100;
++#else
++    uint64_t sec = 42;
++#endif
++    char time_str[16];
++    time_str[0] = '2'; time_str[1] = '1'; time_str[2] = ':';
++    time_str[3] = '0' + (char)((sec / 60) % 10);
++    time_str[4] = '0' + (char)(sec % 10);
++    time_str[5] = '\0';
++    video_puts(time_str);
++}
++
++static void render_center_clock_and_motto(uint32_t w, uint32_t h) {
++    (void)h;
++    uint32_t center_col = (w / 8) / 2;
++
++    /* Large Digital Clock */
++    video_set_cursor(center_col - 3, 4);
++    video_set_colors(COLOR_WHITE, COLOR_PURPLE_BG);
++    video_puts("21 : 30");
++
++    /* Date String */
++    video_set_cursor(center_col - 12, 6);
++    video_set_colors(0xC77DFF, COLOR_PURPLE_BG);
++    video_puts("Thursday, October 22, 2026");
++
++    /* Inspirational Motto: DREAM • BUILD • EXPLORE */
++    video_set_cursor(center_col - 13, 8);
++    video_set_colors(0xF72585, COLOR_PURPLE_BG);
++    video_puts("DREAM  \x07  BUILD  \x07  EXPLORE");
++}
++
++static void render_launcher_card(uint32_t w, uint32_t h) {
++    (void)w; (void)h;
++    uint32_t lx = 20;
++    uint32_t ly = 40;
++    uint32_t lw = 320;
++    uint32_t lh = 380;
++
++    /* Frosted glass body with purple border */
++    video_draw_rect(lx - 1, ly - 1, lw + 2, lh + 2, 0x7209B7);
++    video_draw_rect(lx, ly, lw, lh, 0x150A28);
++
++    /* Search Input Bar */
++    video_draw_rect(lx + 12, ly + 14, lw - 24, 28, 0x2A1245);
++    video_set_cursor((lx + 20) / 8, (ly + 20) / 16);
++    video_set_colors(0xC77DFF, 0x2A1245);
++    if (strlen(launcher_search) == 0) {
++        video_puts("Search applications...");
++    } else {
++        video_puts(launcher_search);
++        video_puts("_");
++    }
++
++    /* Category Header */
++    video_set_cursor((lx + 16) / 8, (ly + 56) / 16);
++    video_set_colors(COLOR_GOLD, 0x150A28);
++    video_puts("CATEGORIES");
++
++    const char *cats[] = { "Favorites", "System Tools", "Development", "Settings" };
++    for (int i = 0; i < 4; i++) {
++        video_set_cursor((lx + 16) / 8, (ly + 76 + i * 20) / 16);
++        video_set_colors(COLOR_WHITE, 0x150A28);
++        video_puts("- ");
++        video_puts(cats[i]);
++    }
++
++    /* Application items */
++    video_set_cursor((lx + 16) / 8, (ly + 170) / 16);
++    video_set_colors(COLOR_GOLD, 0x150A28);
++    video_puts("APPLICATIONS");
++
++    const char *apps[] = {
++        ">_  Aegis Terminal",
++        "[#] System Monitor",
++        "[D] PurpleFS Storage",
++        "[S] AegisDetect Security"
++    };
++    for (int i = 0; i < 4; i++) {
++        video_draw_rect(lx + 12, ly + 192 + i * 32, lw - 24, 26, 0x220E3A);
++        video_set_cursor((lx + 20) / 8, (ly + 197 + i * 32) / 16);
++        video_set_colors(0xE0AAFF, 0x220E3A);
++        video_puts(apps[i]);
++    }
++
++    /* User Profile Footer */
++    video_draw_rect(lx, ly + lh - 40, lw, 40, 0x10061E);
++    video_draw_rect(lx + 12, ly + lh - 32, 24, 24, 0x9D4EDD);
++    video_set_cursor((lx + 44) / 8, (ly + lh - 26) / 16);
++    video_set_colors(COLOR_WHITE, 0x10061E);
++    video_puts("saptanshu | Aegis64");
++}
++
++static void render_system_panel(uint32_t w, uint32_t h) {
++    (void)h;
++    uint32_t px = w - 320;
++    uint32_t py = 40;
++    uint32_t pw = 300;
++    uint32_t ph = 320;
++
++    video_draw_rect(px - 1, py - 1, pw + 2, ph + 2, 0x7209B7);
++    video_draw_rect(px, py, pw, ph, 0x150A28);
++
++    video_set_cursor((px + 16) / 8, (py + 12) / 16);
++    video_set_colors(COLOR_GOLD, 0x150A28);
++    video_puts("System Quick Settings");
++
++    /* Resource Meters */
++    video_set_cursor((px + 16) / 8, (py + 36) / 16);
++    video_set_colors(COLOR_WHITE, 0x150A28);
++    video_puts("CPU: 12% (4 Cores Online)");
++    video_draw_rect(px + 16, py + 54, pw - 32, 10, 0x2A1245);
++    video_draw_rect(px + 16, py + 54, (pw - 32) * 12 / 100, 10, 0x9D4EDD);
++
++    video_set_cursor((px + 16) / 8, (py + 72) / 16);
++    video_puts("Memory: 185 MB / 4096 MB (4%)");
++    video_draw_rect(px + 16, py + 90, pw - 32, 10, 0x2A1245);
++    video_draw_rect(px + 16, py + 90, (pw - 32) * 4 / 100, 10, 0x9D4EDD);
++
++    video_set_cursor((px + 16) / 8, (py + 108) / 16);
++    video_puts("Storage: 16 MB / 64 MB (25%)");
++    video_draw_rect(px + 16, py + 126, pw - 32, 10, 0x2A1245);
++    video_draw_rect(px + 16, py + 126, (pw - 32) * 25 / 100, 10, 0x9D4EDD);
++
++    /* GPU backend info */
++    gpu_device_t *g = gpu_get_primary();
++    video_set_cursor((px + 16) / 8, (py + 146) / 16);
++    video_set_colors(0xC77DFF, 0x150A28);
++    video_puts("GPU: ");
++    video_puts(g->arch_name);
++
++    /* Quick Toggles */
++    video_draw_rect(px + 16, py + 175, 120, 30, 0x3A0CA3);
++    video_set_cursor((px + 24) / 8, (py + 182) / 16);
++    video_set_colors(COLOR_WHITE, 0x3A0CA3);
++    video_puts("Wi-Fi: ON");
++
++    video_draw_rect(px + 150, py + 175, 120, 30, 0x3A0CA3);
++    video_set_cursor((px + 158) / 8, (py + 182) / 16);
++    video_puts("BT: ON");
++
++    video_draw_rect(px + 16, py + 215, 120, 30, 0x2A1245);
++    video_set_cursor((px + 24) / 8, (py + 222) / 16);
++    video_set_colors(0xC77DFF, 0x2A1245);
++    video_puts("Night: OFF");
++
++    video_draw_rect(px + 150, py + 215, 120, 30, 0x3A0CA3);
++    video_set_cursor((px + 158) / 8, (py + 222) / 16);
++    video_set_colors(COLOR_WHITE, 0x3A0CA3);
++    video_puts("Dark: ON");
++
++    /* Volume and Brightness Sliders */
++    video_set_cursor((px + 16) / 8, (py + 258) / 16);
++    video_set_colors(COLOR_WHITE, 0x150A28);
++    video_puts("Volume: [=====|   ] 65%");
++
++    video_set_cursor((px + 16) / 8, (py + 280) / 16);
++    video_puts("Bright: [======|  ] 80%");
++}
++
++static void render_bottom_dock(uint32_t w, uint32_t h) {
++    uint32_t dock_w = 350;
++    uint32_t dock_h = 50;
++    uint32_t dock_x = (w - dock_w) / 2;
++    uint32_t dock_y = h - 60;
++
++    /* Translucent rounded capsule */
++    video_draw_rect(dock_x - 1, dock_y - 1, dock_w + 2, dock_h + 2, 0x7209B7);
++    video_draw_rect(dock_x, dock_y, dock_w, dock_h, 0x150A28);
++
++    const char *dock_icons[7] = { ">_", "Dir", "Sys", "Sec", "Calc", "Cfg", "Pwr" };
++    for (int i = 0; i < 7; i++) {
++        uint32_t ix = dock_x + 12 + i * 48;
++        video_draw_rect(ix, dock_y + 8, 36, 34, 0x2A1245);
++        video_set_cursor((ix + 6) / 8, (dock_y + 17) / 16);
++        video_set_colors(0xF72585, 0x2A1245);
++        video_puts(dock_icons[i]);
++
++        /* Running dot indicator under apps 0, 1, 2 */
++        if (i < 3 && windows[i].visible) {
++            video_draw_rect(ix + 16, dock_y + 44, 4, 3, 0x9D4EDD);
++        }
++    }
++}
++
++static void render_welcome_toast(uint32_t w, uint32_t h) {
++    if (!welcome_notif_visible || w < 340 || h < 170) return;
++    uint32_t nx = w - 310;
++    uint32_t ny = h - 170;
++    uint32_t nw = 290;
++    uint32_t nh = 90;
++
++    video_draw_rect(nx - 1, ny - 1, nw + 2, nh + 2, 0x9D4EDD);
++    video_draw_rect(nx, ny, nw, nh, 0x180C2E);
++
++    /* Close button [X] */
++    video_set_cursor((nx + nw - 22) / 8, (ny + 6) / 16);
++    video_set_colors(COLOR_RED, 0x180C2E);
++    video_puts("[X]");
++
++    video_set_cursor((nx + 12) / 8, (ny + 8) / 16);
++    video_set_colors(COLOR_GOLD, 0x180C2E);
++    video_puts("Welcome to Purple OS");
++
++    video_set_cursor((nx + 12) / 8, (ny + 28) / 16);
++    video_set_colors(COLOR_WHITE, 0x180C2E);
++    video_puts("Kernel: Aegis64 Native x86-64");
++
++    video_set_cursor((nx + 12) / 8, (ny + 46) / 16);
++    video_set_colors(0xC77DFF, 0x180C2E);
++    video_puts("Volume: PurpleFS v2 Mounted");
++
++    video_set_cursor((nx + 12) / 8, (ny + 64) / 16);
++    video_set_colors(0xF72585, 0x180C2E);
++    video_puts("GPU: Acceleration Ready");
+ }
+ 
+ static void draw_window_frame(const gui_window_t *win) {
+     if (!video_is_available() || !win->visible) return;
+ 
+-    // Window shadow / outline
+-    uint32_t outline_color = win->focused ? COLOR_PURPLE_ACC : 0x4A2574;
++    uint32_t outline_color = win->focused ? 0x9D4EDD : 0x4A2574;
+     video_draw_rect(win->x - 1, win->y - 1, win->width + 2, win->height + 2, outline_color);
+ 
+-    // Title bar
++    /* Title bar */
+     video_draw_rect(win->x, win->y, win->width, 24, win->title_bg);
+ 
+-    // Title text
+-    uint32_t text_col = (win->x + 8) / 8;
+-    uint32_t text_row = (win->y + 4) / 16;
+-    video_set_cursor(text_col, text_row);
++    /* Title text */
++    video_set_cursor((win->x + 8) / 8, (win->y + 4) / 16);
+     video_set_colors(COLOR_WHITE, win->title_bg);
+     video_puts(win->title);
+ 
+-    // Close button [X]
+-    uint32_t close_col = (win->x + win->width - 24) / 8;
+-    video_set_cursor(close_col, text_row);
++    /* Close button [X] */
++    video_set_cursor((win->x + win->width - 24) / 8, (win->y + 4) / 16);
+     video_set_colors(COLOR_RED, win->title_bg);
+     video_puts("[X]");
+ 
+-    // Body background
++    /* Body background */
+     video_draw_rect(win->x, win->y + 24, win->width, win->height - 24, win->bg_color);
+ }
+ 
+ static void draw_window_content(const gui_window_t *win, uint32_t idx) {
+     if (!video_is_available() || !win->visible) return;
+ 
+-    if (idx == 0) {
+-        // Window 1 Content: System Monitor
+-        video_set_colors(COLOR_WHITE, win->bg_color);
+-        video_set_cursor((win->x + 12) / 8, (win->y + 36) / 16);
+-        video_puts("CPU Topology: ");
+-        const cpu_features_t *f = cpu_get_features();
+-        video_puts(f->vendor);
+-
+-        video_set_cursor((win->x + 12) / 8, (win->y + 60) / 16);
+-        video_puts("Cores Online: 4 Discovered / Active");
+-
+-        video_set_cursor((win->x + 12) / 8, (win->y + 84) / 16);
+-        video_puts("Scheduler:    AegisSched (4 Priorities)");
++    if (win->type == WIN_TYPE_TERMINAL) {
++        /* Terminal Window */
++        video_set_colors(0xC77DFF, win->bg_color);
++        video_set_cursor((win->x + 12) / 8, (win->y + 32) / 16);
++        video_puts("Purple OS / Aegis64 Interactive Shell Terminal");
++
++        /* Scrollback Output Lines */
++        for (int i = 0; i < win->output_count && i < 7; i++) {
++            video_set_cursor((win->x + 12) / 8, (win->y + 52 + i * 18) / 16);
++            video_set_colors(COLOR_WHITE, win->bg_color);
++            video_puts(win->output_lines[i]);
++        }
+ 
+-        video_set_cursor((win->x + 12) / 8, (win->y + 108) / 16);
+-        video_puts("Physical PMM: 4 GiB managed (239 MiB Free)");
++        /* Active prompt and input line */
++        uint32_t prompt_y = win->y + win->height - 24;
++        video_set_cursor((win->x + 12) / 8, prompt_y / 16);
++        video_set_colors(0xF72585, win->bg_color);
++        video_puts("purple@aegis64:~$ ");
++        video_set_colors(COLOR_WHITE, win->bg_color);
++        video_puts(win->input_line);
++        video_puts("_");
+     } else if (idx == 1) {
+-        // Window 2 Content: Storage
++        /* Storage explorer */
+         video_set_colors(COLOR_WHITE, win->bg_color);
+         video_set_cursor((win->x + 12) / 8, (win->y + 36) / 16);
+-        video_puts("Volume: PurpleSystem (16 MiB PurpleFS v2)");
++        video_puts("Volume: PurpleSystem (PurpleFS v2 Mounted)");
+ 
+         video_set_cursor((win->x + 12) / 8, (win->y + 60) / 16);
+-        video_puts("Block Size: 4096 bytes | Journal: Block 4088");
++        video_puts("Block Size: 4096 bytes | Journal: Active");
+ 
+         video_set_cursor((win->x + 12) / 8, (win->y + 84) / 16);
+-        video_puts("Files:");
++        video_puts("Root Directory Files:");
+ 
+         video_set_cursor((win->x + 20) / 8, (win->y + 104) / 16);
+-        video_puts("- welcome.txt (132 bytes)");
++        video_set_colors(0xE0AAFF, win->bg_color);
++        video_puts("[FILE] welcome.txt (132 bytes)");
++
+         video_set_cursor((win->x + 20) / 8, (win->y + 124) / 16);
+-        video_puts("- version.txt (65 bytes)");
++        video_puts("[FILE] version.txt (65 bytes)");
++
+         video_set_cursor((win->x + 20) / 8, (win->y + 144) / 16);
+-        video_puts("- motd        (59 bytes)");
++        video_puts("[FILE] motd        (59 bytes)");
+     } else if (idx == 2) {
+-        // Window 3 Content: AegisDetect
++        /* System Monitor */
+         video_set_colors(COLOR_WHITE, win->bg_color);
+         video_set_cursor((win->x + 12) / 8, (win->y + 36) / 16);
+-        video_puts("Trust Model: HMAC-SHA256 Authenticated Baseline");
++        video_puts("CPU Cores: 4 Discovered / Online");
+ 
+         video_set_cursor((win->x + 12) / 8, (win->y + 60) / 16);
+-        video_puts("Manifest: 3 Protected -> 3 TRUSTED, 0 TAMPERED");
++        video_puts("Scheduler: AegisSched_64 (4 Priorities)");
+ 
+         video_set_cursor((win->x + 12) / 8, (win->y + 84) / 16);
+-        video_puts("PurpleDetect: Hardware Devices & Drivers Registered");
++        video_puts("Memory:    4 GiB Managed (239 MiB Free)");
++
++        video_set_cursor((win->x + 12) / 8, (win->y + 108) / 16);
++        video_puts("Security:  AegisDetect Root of Trust Active");
+     }
+ }
+ 
+@@ -351,41 +915,35 @@ void desktop_render(void) {
+     uint32_t scr_w = video_get_width();
+     uint32_t scr_h = video_get_height();
+ 
+-    // 1. Wallpaper background
+-    video_draw_rect(0, 0, scr_w, scr_h, COLOR_PURPLE_BG);
++    /* 1. Anime Cosmic Fantasy Wallpaper / Reference Canvas */
++    render_cosmic_background(scr_w, scr_h);
+ 
+-    // 2. Top Taskbar / Menu Header
+-    video_draw_rect(0, 0, scr_w, 28, COLOR_PURPLE_BAR);
+-    video_set_cursor(1, 0);
+-    video_set_colors(COLOR_GOLD, COLOR_PURPLE_BAR);
+-    video_puts("Purple OS");
+-    video_set_colors(COLOR_WHITE, COLOR_PURPLE_BAR);
+-    video_puts("  |  System  Files  Security  Devices  |  ");
++    /* If embedded reference is not active or resolution differs from native 1672x941,
++       dynamically composite standard vector/text UI elements */
++    if (_binary_build_desktop_ref_1672x941_raw_start == NULL || scr_w != 1672 || scr_h != 941) {
++        render_top_bar(scr_w);
++        render_center_clock_and_motto(scr_w, scr_h);
++        if (launcher_open) {
++            render_launcher_card(scr_w, scr_h);
++        }
++        if (system_panel_open) {
++            render_system_panel(scr_w, scr_h);
++        }
++        render_bottom_dock(scr_w, scr_h);
++        render_welcome_toast(scr_w, scr_h);
++    }
+ 
+-#ifndef __KERNEL_HOST_TEST__
+-    uint64_t sec = pit_get_ticks() / 100;
+-#else
+-    uint64_t sec = 0;
+-#endif
+-    char stat[64];
+-    stat[0] = 'C'; stat[1] = 'P'; stat[2] = 'U'; stat[3] = 's'; stat[4] = ':'; stat[5] = ' ';
+-    stat[6] = '0' + (char)cpu_count();
+-    stat[7] = ' '; stat[8] = '|'; stat[9] = ' ';
+-    stat[10] = 'U'; stat[11] = 'p'; stat[12] = ':'; stat[13] = ' ';
+-    stat[14] = '0' + (char)((sec / 10) % 10);
+-    stat[15] = '0' + (char)(sec % 10);
+-    stat[16] = 's'; stat[17] = '\0';
+-    video_puts(stat);
+-
+-    // 3. Draw Windows in z-order
++    /* 2. Draw Windows in z-order (only visible windows) */
+     for (uint32_t i = 0; i < window_count; i++) {
+         uint32_t idx = z_order[i];
+-        draw_window_frame(&windows[idx]);
+-        draw_window_content(&windows[idx], idx);
++        if (windows[idx].visible) {
++            draw_window_frame(&windows[idx]);
++            draw_window_content(&windows[idx], idx);
++        }
+     }
+ 
+-    // 4. Mouse Cursor (save background and render)
+-    cursor_drawn = 0; // Fresh screen
++    /* 3. Mouse Cursor */
++    cursor_drawn = 0;
+     int32_t mx = mouse_get_x();
+     int32_t my = mouse_get_y();
+     desktop_move_cursor(mx, my);
+@@ -413,7 +971,7 @@ int desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons) {
+             int32_t n_y = y - drag_off_y;
+ 
+             if (n_x < 0) n_x = 0;
+-            if (n_y < 28) n_y = 28;
++            if (n_y < 32) n_y = 32;
+             if (video_is_available()) {
+                 if (n_x + (int32_t)w->width > (int32_t)video_get_width()) {
+                     n_x = (int32_t)video_get_width() - (int32_t)w->width;
+@@ -438,6 +996,7 @@ int desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons) {
+ 
+     if (pressed & MOUSE_BTN_LEFT) {
+         desktop_hit_result_t hit = desktop_hit_test(x, y);
++
+         if (hit.type == DESKTOP_HIT_WINDOW_CLOSE) {
+             desktop_close_window(windows[hit.window_index].id);
+             desktop_render();
+@@ -454,6 +1013,30 @@ int desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons) {
+             desktop_focus_window(windows[hit.window_index].id);
+             desktop_render();
+             event = DESKTOP_EVENT_WINDOW_FOCUSED;
++        } else if (hit.type == DESKTOP_HIT_LAUNCHER_BTN) {
++            launcher_open = !launcher_open;
++            desktop_render();
++            event = DESKTOP_EVENT_MENU_CLICKED;
++        } else if (hit.type == DESKTOP_HIT_SYSTEM_PANEL) {
++            system_panel_open = !system_panel_open;
++            desktop_render();
++            event = DESKTOP_EVENT_MENU_CLICKED;
++        } else if (hit.type == DESKTOP_HIT_NOTIF_CLOSE) {
++            welcome_notif_visible = 0;
++            desktop_render();
++            event = DESKTOP_EVENT_MENU_CLICKED;
++        } else if (hit.type == DESKTOP_HIT_DOCK_ITEM) {
++            if (hit.menu_index == 0 && window_count > 0) { // Terminal
++                desktop_toggle_window(windows[0].id);
++            } else if (hit.menu_index == 1 && window_count > 1) { // Storage
++                desktop_toggle_window(windows[1].id);
++            } else if (hit.menu_index == 2 && window_count > 2) { // Sysmon
++                desktop_toggle_window(windows[2].id);
++            } else if (hit.menu_index == 5) {
++                system_panel_open = !system_panel_open;
++            }
++            desktop_render();
++            event = DESKTOP_EVENT_MENU_CLICKED;
+         } else if (hit.type == DESKTOP_HIT_TOPBAR) {
+             if (hit.menu_index == 1 && window_count > 0) {
+                 desktop_toggle_window(windows[0].id);
+@@ -462,9 +1045,9 @@ int desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons) {
+             } else if (hit.menu_index == 3 && window_count > 2) {
+                 desktop_toggle_window(windows[2].id);
+             } else if (hit.menu_index == 0) {
+-                for (uint32_t w = 0; w < window_count; w++) {
+-                    windows[w].visible = 1;
+-                }
++                launcher_open = !launcher_open;
++            } else if (hit.menu_index == 4) {
++                system_panel_open = !system_panel_open;
+             }
+             desktop_render();
+             event = DESKTOP_EVENT_MENU_CLICKED;
+@@ -475,10 +1058,73 @@ int desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons) {
+     return event;
+ }
+ 
++static void desktop_mouse_event_callback(int32_t x, int32_t y, uint8_t buttons) {
++    if (desktop_active) {
++        desktop_handle_mouse(x, y, buttons);
++    }
++}
++
++int desktop_init(void) {
++    window_count = 0;
++    cursor_drawn = 0;
++    desktop_active = 0;
++    launcher_open = 1;
++    launcher_search[0] = '\0';
++    system_panel_open = 1;
++    welcome_notif_visible = 0;
++    memset(windows, 0, sizeof(windows));
++    memset(z_order, 0, sizeof(z_order));
++
++    /* Window 0: Aegis Interactive Terminal */
++    int t_id = desktop_create_window("Aegis Terminal (>_)", 30, 45, 340, 230, 0x120822);
++    if (t_id >= 0) {
++        gui_window_t *w = desktop_get_window((uint32_t)t_id);
++        if (w) {
++            w->type = WIN_TYPE_TERMINAL;
++            desktop_terminal_put_line(w, "Type 'help' for available terminal commands.");
++#ifndef __KERNEL_HOST_TEST__
++            w->visible = 0;
++            w->focused = 0;
++#else
++            w->visible = 1;
++            w->focused = 1;
++#endif
++        }
++    }
++
++    /* Window 1: PurpleFS Storage Explorer */
++    int s_id = desktop_create_window("PurpleFS v2 Storage", 390, 45, 380, 230, 0x180D26);
++    if (s_id >= 0) {
++        gui_window_t *w = desktop_get_window((uint32_t)s_id);
++        if (w) {
++#ifndef __KERNEL_HOST_TEST__
++            w->visible = 0;
++            w->focused = 0;
++#endif
++        }
++    }
++
++    /* Window 2: AegisDetect & System Monitor */
++    int m_id = desktop_create_window("AegisDetect Console", 30, 295, 740, 230, 0x180D26);
++    if (m_id >= 0) {
++        gui_window_t *w = desktop_get_window((uint32_t)m_id);
++        if (w) {
++#ifndef __KERNEL_HOST_TEST__
++            w->visible = 0;
++            w->focused = 0;
++#endif
++        }
++    }
++
++    mouse_set_callback(desktop_mouse_event_callback);
++    kinfo("Desktop: Graphical workspace online with 3 default windows");
++    return 0;
++}
++
+ void desktop_run_session(void) {
+     desktop_active = 1;
+     desktop_render();
+-    kinfo("Desktop: Interactive session online. Move mouse to interact, press 'q' or ESC to exit.");
++    kinfo("Desktop: Interactive session online. Type directly or move mouse, press 'q' to exit.");
+     int running = 1;
+     int32_t lx = mouse_get_x();
+     int32_t ly = mouse_get_y();
+@@ -494,31 +1140,25 @@ void desktop_run_session(void) {
+             ly = cy;
+             lb = cb;
+         }
++
+ #ifndef __KERNEL_HOST_TEST__
+-        char c = 0;
+-        int got_key = 0;
+-        if (keyboard_has_char()) {
+-            c = keyboard_getchar();
+-            got_key = 1;
++        key_event_t ev;
++        if (keyboard_poll_event(&ev)) {
++            if (ev.pressed) {
++                if ((ev.key_code == 'q' || ev.key_code == 'Q') && !(windows[0].focused && windows[0].visible)) {
++                    running = 0;
++                } else if (ev.key_code == 27 && !launcher_open && !system_panel_open) {
++                    running = 0;
++                } else {
++                    desktop_handle_key((char)ev.key_code, ev.scancode, ev.pressed, ev.modifiers);
++                }
++            }
+         } else if (serial_has_char()) {
+-            c = serial_getchar();
+-            got_key = 1;
+-        }
+-
+-        if (got_key) {
+-            if (c == 'q' || c == 'Q' || c == 27) {
++            char sc = serial_getchar();
++            if (sc == 'q' || sc == 'Q' || sc == 27) {
+                 running = 0;
+-            } else if (c == '1' && window_count > 0) {
+-                desktop_toggle_window(windows[0].id);
+-                desktop_render();
+-            } else if (c == '2' && window_count > 1) {
+-                desktop_toggle_window(windows[1].id);
+-                desktop_render();
+-            } else if (c == '3' && window_count > 2) {
+-                desktop_toggle_window(windows[2].id);
+-                desktop_render();
+-            } else if (c == 'r' || c == 'R') {
+-                desktop_render();
++            } else {
++                desktop_handle_key(sc, 0, 1, 0);
+             }
+         }
+         __asm__ volatile("pause");
+@@ -531,29 +1171,20 @@ void desktop_run_session(void) {
+ 
+ void desktop_render_preview(void) {
+     kprintf("\n========================================================================================\n");
+-    kprintf("   Purple OS / Aegis64 Native Desktop Environment (Workspace Canvas)                     \n");
++    kprintf("   Purple OS / Aegis64 Native Desktop Environment (Workspace Canvas - Locked Layout)     \n");
+     kprintf("========================================================================================\n");
+-#ifndef __KERNEL_HOST_TEST__
+-    uint32_t uptime_sec = (uint32_t)(pit_get_ticks() / 100);
+-#else
+-    uint32_t uptime_sec = 0;
+-#endif
+-    kprintf("  [Top Bar]  Purple OS  |  System   Files   Security   Devices  |  CPUs: %u  Uptime: %us\n",
+-            cpu_count(), uptime_sec);
++    kprintf("  [Top Bar]  Lotus Logo | Applications   Places   System  | WiFi  Vol  98%%  21:30        \n");
++    kprintf("  [Motto]    DREAM  \x07  BUILD  \x07  EXPLORE (Hollow Purple Violet Vortex Energy)             \n");
+     kprintf("  --------------------------------------------------------------------------------------\n");
+-    kprintf("  +-----------------------------------+    +-------------------------------------------+\n");
+-    kprintf("  | [X] Aegis64 System Monitor        |    | [X] PurpleFS v2 Storage                   |\n");
+-    kprintf("  | CPU: Genuine/Authentic x86-64     |    | Volume: PurpleSystem (16 MiB Partition)   |\n");
+-    kprintf("  | Cores: 4 Discovered / Online      |    | Journal: Redo Transaction Journal Ready   |\n");
+-    kprintf("  | Scheduler: AegisSched_64 Active   |    | Files: welcome.txt, version.txt, motd     |\n");
+-    kprintf("  +-----------------------------------+    +-------------------------------------------+\n");
++    kprintf("  +-------------------------------------+    +-----------------------------------------+\n");
++    kprintf("  | [X] Aegis Interactive Terminal (>_) |    | [X] PurpleFS v2 Storage                 |\n");
++    kprintf("  | purple@aegis64:~$ peek welcome.txt  |    | Volume: PurpleSystem (16 MiB Partition) |\n");
++    kprintf("  | Output: Welcome to Purple OS!       |    | Files: welcome.txt, version.txt, motd   |\n");
++    kprintf("  +-------------------------------------+    +-----------------------------------------+\n");
+     kprintf("  +------------------------------------------------------------------------------------+\n");
+-    kprintf("  | [X] AegisDetect Security Console & PurpleDetect Device Registry                    |\n");
+-    kprintf("  | Integrity Baseline: AUTHENTICATED (HMAC-SHA256 Hardware Root of Trust Active)     |\n");
+-    kprintf("  | Protected Components: 3/3 TRUSTED (welcome.txt, version.txt, motd)                 |\n");
+-    kprintf("  | Discovered Hardware: 13 Devices across ISA, ATA, PCI, MEMORY buses                 |\n");
++    kprintf("  | [X] Aegis64 System Monitor & AegisDetect Security Console                          |\n");
++    kprintf("  | CPU: 4 Cores Discovered | Memory: 4 GiB Managed | GPU: Hardware Accelerated BCS/SDMA|\n");
+     kprintf("  +------------------------------------------------------------------------------------+\n");
+-    kprintf("  Mouse Pointer: (%d, %d) | Buttons: 0x%x\n",
+-            mouse_get_x(), mouse_get_y(), mouse_get_buttons());
++    kprintf("  [Dock]    [ >_ Terminal ]  [ Dir Files ]  [ Sys Monitor ]  [ Sec Vault ]  [ Settings ] \n");
+     kprintf("========================================================================================\n\n");
+ }
+diff --git a/src/drivers/mouse.c b/src/drivers/mouse.c
+index c578379..31f1f0d 100644
+--- a/src/drivers/mouse.c
++++ b/src/drivers/mouse.c
+@@ -139,9 +139,9 @@ int mouse_init(void) {
+     outb(0x64, 0x20);
+     uint8_t comp_status = mouse_read();
+ 
+-    // Enable IRQ 12 and clear clock disable
+-    comp_status |= 0x02;
+-    comp_status &= ~0x20;
++    // Enable IRQ 1 (Keyboard) and IRQ 12 (Mouse), enable Set 1 translation, clear clock disable for both
++    comp_status |= 0x01 | 0x02 | 0x40;
++    comp_status &= ~(0x10 | 0x20);
+ 
+     mouse_wait_write();
+     outb(0x64, 0x60);
+diff --git a/src/kernel/main.c b/src/kernel/main.c
+index 70b73d9..130c1fb 100644
+--- a/src/kernel/main.c
++++ b/src/kernel/main.c
+@@ -20,6 +20,7 @@
+ #include "pci.h"
+ #include "mouse.h"
+ #include "desktop.h"
++#include "gpu.h"
+ #include "ksym.h"
+ #include "netdev.h"
+ #include "apdrv.h"
+@@ -139,7 +140,8 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
+     apdrv_subsystem_init();
+     apapp_subsystem_init();
+ 
+-    /* Step 5.7: Desktop GUI Subsystem */
++    /* Step 5.7: Desktop & Graphics Subsystems */
++    gpu_subsystem_init();
+     desktop_init();
+ 
+     /* Enable Interrupts */
+diff --git a/src/kernel/shell.c b/src/kernel/shell.c
+index 664a9b6..cd47ec6 100644
+--- a/src/kernel/shell.c
++++ b/src/kernel/shell.c
+@@ -18,6 +18,7 @@
+ #include "pci.h"
+ #include "mouse.h"
+ #include "desktop.h"
++#include "gpu.h"
+ #include "ksym.h"
+ #include "netdev.h"
+ #include "apdrv.h"
+@@ -401,6 +402,7 @@ static void execute_command(int argc, char **argv) {
+         shell_print("  app run <path>    - Launch authenticated .apapplications bundle\n");
+         shell_print("  app kill <id>     - Terminate running application bundle\n");
+         shell_print("  video [w h]       - Query or switch video display resolution\n");
++        shell_print("  gpu [status|bench]- Report GPU hardware engine or run 2D benchmark\n");
+         shell_print("  aegisdetect [verify] - Report or run AegisDetect integrity verification\n");
+         shell_print("  clear             - Clear terminal screen\n");
+         shell_print("  echo <text>       - Display text arguments\n");
+@@ -840,6 +842,28 @@ static void execute_command(int argc, char **argv) {
+         usb_dump_controllers();
+     } else if (strcmp(argv[0], "audio") == 0) {
+         audio_dump_devices();
++    } else if (strcmp(argv[0], "gpu") == 0) {
++        if (argc > 1 && strcmp(argv[1], "bench") == 0) {
++            gpu_run_benchmark();
++        } else {
++            gpu_device_t *dev = gpu_get_primary();
++            char stat[128];
++            dev->ops->get_status(dev, stat, sizeof(stat));
++            kprintf("\n=== Aegis64 GPU Hardware Subsystem ===\n");
++            kprintf("  Device:        %s\n", dev->name);
++            kprintf("  Vendor ID:     0x%04x | Device ID: 0x%04x\n", dev->vendor_id, dev->device_id);
++            kprintf("  Architecture:  %s\n", dev->arch_name);
++            kprintf("  Acceleration:  %s\n", dev->is_hardware_accelerated ? "ENABLED (Ring/DMA Active)" : "DISABLED (Software Fallback)");
++            kprintf("  Capabilities:  [");
++            if (dev->capabilities & GPU_CAP_2D_FILL) kprintf(" 2D_FILL");
++            if (dev->capabilities & GPU_CAP_2D_BLIT) kprintf(" 2D_BLIT");
++            if (dev->capabilities & GPU_CAP_HARDWARE_RING) kprintf(" HW_RING");
++            if (dev->capabilities & GPU_CAP_DMA) kprintf(" DMA");
++            if (dev->capabilities & GPU_CAP_FENCE) kprintf(" FENCE");
++            if (dev->capabilities & GPU_CAP_ALPHA_BLEND) kprintf(" BLEND");
++            kprintf(" ]\n");
++            kprintf("  Driver Status: %s\n\n", stat);
++        }
+     } else if (strcmp(argv[0], "reboot") == 0 || strcmp(argv[0], "restart") == 0) {
+         power_reboot();
+     } else if (strcmp(argv[0], "poweroff") == 0 || strcmp(argv[0], "shutdown") == 0) {

@@ -1,0 +1,967 @@
+#include "shell.h"
+#include "serial.h"
+#include "video.h"
+#include "keyboard.h"
+#include "string.h"
+#include "pmm.h"
+#include "vmm.h"
+#include "task.h"
+#include "pit.h"
+#include "io.h"
+#include "kernel_storage.h"
+#include "cpu.h"
+#include "acpi.h"
+#include "apic.h"
+#include "smp.h"
+#include "security/aegis_detect.h"
+#include "purple_detect.h"
+#include "pci.h"
+#include "mouse.h"
+#include "desktop.h"
+#include "gpu.h"
+#include "ksym.h"
+#include "netdev.h"
+#include "apdrv.h"
+#include "apapp.h"
+#include "rtc.h"
+#include "usb.h"
+#include "audio.h"
+
+#define SHELL_INPUT_BUFFER_LEN 256
+#define MAX_ARGS 16
+
+static char shell_buf[SHELL_INPUT_BUFFER_LEN];
+static size_t shell_buf_len = 0;
+
+static int simple_atoi(const char *s) {
+    if (!s) return 0;
+    int sign = 1;
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+    int res = 0;
+    while (*s >= '0' && *s <= '9') {
+        res = res * 10 + (*s - '0');
+        s++;
+    }
+    return res * sign;
+}
+
+int shell_normalize_path(const char *path, char *out, size_t out_cap) {
+    if (!path || !out || out_cap == 0) return -1;
+
+    const char *p = path;
+    while (1) {
+        if (p[0] == '.' && p[1] == '/') {
+            p += 2;
+        } else if (p[0] == '/') {
+            p += 1;
+        } else {
+            break;
+        }
+    }
+
+    if (*p == '\0') {
+        return -1;
+    }
+
+    for (size_t i = 0; p[i] != '\0'; i++) {
+        if (p[i] == '/') {
+            return -1; // Unsupported nested path component
+        }
+    }
+
+    size_t len = strlen(p);
+    if (len == 0 || len > SHELL_MAX_FILENAME_LEN || len >= out_cap) {
+        return -1;
+    }
+
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return 0;
+}
+
+static void generic_app_task(void *arg) {
+    const char *name = (const char *)arg;
+    if (!name) name = "app_worker";
+    for (int i = 0; i < 3; i++) {
+        kinfo("AppTask [%s]: iteration %d/3 active", name, i + 1);
+        task_sleep(5);
+    }
+    kinfo("AppTask [%s]: completed work", name);
+}
+
+static void smp_worker_func(void *arg) {
+    uint32_t target_cpu = (uint32_t)(uintptr_t)arg;
+    for (int i = 0; i < 3; i++) {
+        uint32_t my_cpu = cpu_get_current_id();
+        kinfo("SMP Worker (bound to CPU %u) executing on actual CPU %u [pass %d/3]",
+              target_cpu, my_cpu, i + 1);
+        task_sleep(5);
+    }
+    kinfo("SMP Worker for CPU %u complete", target_cpu);
+}
+
+static void shell_print(const char *s) {
+    serial_write(s);
+    if (video_is_available() && !desktop_is_active()) {
+        video_puts(s);
+    }
+}
+
+static void shell_prompt(void) {
+    if (video_is_available() && !desktop_is_active()) {
+        video_set_colors(COLOR_PURPLE_ACC, COLOR_PURPLE_BG);
+        video_puts("aegis64");
+        video_set_colors(COLOR_GOLD, COLOR_PURPLE_BG);
+        video_puts("@");
+        video_set_colors(COLOR_WHITE, COLOR_PURPLE_BG);
+        video_puts("purple:~$ ");
+    }
+    serial_write("aegis64@purple:~$ ");
+}
+
+static void test_task_worker(void *arg) {
+    const char *name = (const char *)arg;
+    for (int i = 0; i < 3; i++) {
+        kinfo("TaskWorker [%s]: iteration %d/3", name, i + 1);
+        task_sleep(10); // sleep 100 ms
+    }
+    kinfo("TaskWorker [%s]: finished execution", name);
+}
+
+static void cmd_list_files(void) {
+    if (!storage_is_fs_mounted()) {
+        shell_print("Error: No PurpleFS volume mounted. Check 'disk status'.\n");
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    pfs2_inode_t root_ino;
+    if (pfs2_read_inode(fs, PFS2_ROOT_INODE, &root_ino) != PFS2_OK) {
+        shell_print("Error: Failed to read root directory inode.\n");
+        return;
+    }
+
+    shell_print("\nDirectory Listing of / (PurpleFS v2 Root):\n");
+    shell_print("  INODE   TYPE    SIZE (BYTES)  NAME\n");
+    shell_print("  -----------------------------------------\n");
+
+    uint32_t dir_block = root_ino.direct_blocks[0];
+    uint8_t dir_buf[PFS2_BLOCK_SIZE];
+    if (fs->dev->read_block(fs->dev, dir_block, dir_buf) != 0) {
+        shell_print("Error: Failed to read directory data block.\n");
+        return;
+    }
+
+    uint32_t count = 0;
+    pfs2_dir_entry_t *de = (pfs2_dir_entry_t *)dir_buf;
+    uint32_t max_entries = PFS2_BLOCK_SIZE / sizeof(pfs2_dir_entry_t);
+
+    for (uint32_t i = 0; i < max_entries; i++) {
+        if (de[i].inode != 0) {
+            count++;
+            pfs2_inode_t file_ino;
+            uint64_t size = 0;
+            if (pfs2_read_inode(fs, de[i].inode, &file_ino) == PFS2_OK) {
+                size = file_ino.size_bytes;
+            }
+            kprintf("  %5u   %s   %10u   %s\n",
+                    de[i].inode,
+                    (de[i].file_type == 2 ? "<DIR> " : "<FILE>"),
+                    (uint32_t)size,
+                    de[i].name);
+        }
+    }
+    shell_print("  -----------------------------------------\n");
+    kprintf("  Total: %u file(s)\n\n", count);
+}
+
+static void cmd_peek_file(const char *name) {
+    if (!name || name[0] == '\0') {
+        shell_print("Usage: peek <filename>\n");
+        return;
+    }
+    if (!storage_is_fs_mounted()) {
+        shell_print("Error: No PurpleFS volume mounted.\n");
+        return;
+    }
+    char norm[SHELL_MAX_FILENAME_LEN + 1];
+    if (shell_normalize_path(name, norm, sizeof(norm)) != 0) {
+        kprintf("Error: Invalid or unsupported file path '%s'.\n", name);
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    uint32_t ino = 0;
+    if (pfs2_lookup(fs, norm, &ino) != PFS2_OK) {
+        kprintf("Error: File '%s' not found.\n", norm);
+        return;
+    }
+
+    pfs2_inode_t file_ino;
+    if (pfs2_read_inode(fs, ino, &file_ino) != PFS2_OK) {
+        kprintf("Error: Failed to read inode for '%s'.\n", norm);
+        return;
+    }
+
+    size_t to_read = (file_ino.size_bytes > 512) ? 512 : (size_t)file_ino.size_bytes;
+    char buf[513];
+    memset(buf, 0, sizeof(buf));
+    size_t bytes_read = 0;
+    if (to_read > 0) {
+        int rc = pfs2_read_file(fs, ino, buf, to_read, 0, &bytes_read);
+        if (rc != PFS2_OK) {
+            kprintf("Error: Read failed on file '%s' (code %d).\n", norm, rc);
+            return;
+        }
+    }
+    buf[bytes_read] = '\0';
+
+    kprintf("\n=== File: %s (%u bytes", norm, (uint32_t)file_ino.size_bytes);
+    if (file_ino.size_bytes > 512) {
+        shell_print(", preview limited to 512 bytes");
+    }
+    shell_print(") ===\n");
+    shell_print(buf);
+    shell_print("\n=== End of File Preview ===\n\n");
+}
+
+static void cmd_touch(const char *name) {
+    if (!name || name[0] == '\0') {
+        shell_print("Usage: touch <filename>\n");
+        return;
+    }
+    if (!storage_is_fs_mounted()) {
+        shell_print("Error: No PurpleFS volume mounted. Check 'disk status'.\n");
+        return;
+    }
+    if (!storage_is_writable()) {
+        shell_print("Error: Filesystem mounted Read-Only. Remount with 'remount rw'.\n");
+        return;
+    }
+    char norm[SHELL_MAX_FILENAME_LEN + 1];
+    if (shell_normalize_path(name, norm, sizeof(norm)) != 0) {
+        kprintf("Error: Invalid or unsupported file path '%s'.\n", name);
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    uint32_t ino = 0;
+    if (pfs2_lookup(fs, norm, &ino) == PFS2_OK) {
+        kprintf("File '%s' already exists (Inode %u).\n", norm, ino);
+        return;
+    }
+    int rc = pfs2_create_file(fs, norm, 0644, &ino);
+    if (rc != PFS2_OK) {
+        kprintf("Error: Failed to create file '%s' (code %d).\n", norm, rc);
+        return;
+    }
+    pfs2_sync(fs);
+    kprintf("Successfully created file '%s' (Inode %u).\n", norm, ino);
+}
+
+static void cmd_write_file(const char *name, const char *text) {
+    if (!name || name[0] == '\0') {
+        shell_print("Usage: write <filename> <text...>\n");
+        return;
+    }
+    if (!storage_is_fs_mounted()) {
+        shell_print("Error: No PurpleFS volume mounted. Check 'disk status'.\n");
+        return;
+    }
+    if (!storage_is_writable()) {
+        shell_print("Error: Filesystem mounted Read-Only. Remount with 'remount rw'.\n");
+        return;
+    }
+    char norm[SHELL_MAX_FILENAME_LEN + 1];
+    if (shell_normalize_path(name, norm, sizeof(norm)) != 0) {
+        kprintf("Error: Invalid or unsupported file path '%s'.\n", name);
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    uint32_t ino = 0;
+    if (pfs2_lookup(fs, norm, &ino) != PFS2_OK) {
+        int rc = pfs2_create_file(fs, norm, 0644, &ino);
+        if (rc != PFS2_OK) {
+            kprintf("Error: Failed to create file '%s' (code %d).\n", norm, rc);
+            return;
+        }
+    }
+    size_t len = strlen(text);
+    size_t written = 0;
+    int rc = pfs2_write_file(fs, ino, text, len, 0, &written);
+    if (rc != PFS2_OK) {
+        kprintf("Error: Failed to write to file '%s' (code %d).\n", norm, rc);
+        return;
+    }
+    pfs2_sync(fs);
+    kprintf("Successfully wrote %u bytes to '%s' (Inode %u).\n", (uint32_t)written, norm, ino);
+}
+
+static void cmd_disk_status(void) {
+    shell_print("\n=== ATA Storage Devices & GPT Partition Status ===\n");
+    uint32_t count = block_dev_count();
+
+    if (count == 0) {
+        shell_print("No block storage devices detected.\n\n");
+        return;
+    }
+
+    for (uint32_t i = 0; i < count; i++) {
+        block_device_t *dev = block_dev_get_by_index(i);
+        if (!dev) continue;
+
+        uint32_t size_mib = (uint32_t)((dev->total_blocks * dev->block_size) / (1024 * 1024));
+        kprintf("[%u] Device: %-8s Type: %-10s Model: %-22s Blocks: %u (%u MiB)\n",
+                i, dev->name, block_dev_type_to_str(dev->type), dev->model, (uint32_t)dev->total_blocks, size_mib);
+
+        if (i < MAX_BLOCK_DEVICES) {
+            gpt_info_t *gpt = &g_kernel_storage.gpt[i];
+            if (gpt->valid_header && gpt->partition_count > 0) {
+                kprintf("    GPT: Valid (Protective MBR: %s, Partitions: %u)\n",
+                        gpt->valid_protective_mbr ? "Yes" : "No", gpt->partition_count);
+                for (uint32_t p = 0; p < gpt->partition_count; p++) {
+                    const gpt_partition_t *part = &gpt->partitions[p];
+                    uint32_t part_mib = (uint32_t)(part->sector_count * dev->block_size / (1024 * 1024));
+                    kprintf("    -> Part %u: %-16s LBA: %u..%u (%u blocks, %u MiB) %s\n",
+                            p, part->name, (uint32_t)part->start_lba, (uint32_t)part->end_lba,
+                            (uint32_t)part->sector_count, part_mib,
+                            part->is_purplefs ? "[PurpleFS v2]" : "");
+                }
+            } else {
+                shell_print("    GPT: None / Unpartitioned\n");
+            }
+        }
+    }
+    shell_print("\n");
+}
+
+static void cmd_filesystem_status(void) {
+    shell_print("\n=== PurpleFS v2 Filesystem Status ===\n");
+    if (!storage_is_fs_mounted()) {
+        shell_print("  Mount State:   UNMOUNTED (No valid PurpleFS volume)\n\n");
+        return;
+    }
+    pfs2_fs_t *fs = storage_get_fs();
+    uint32_t total_kib = fs->sb.total_blocks * (fs->sb.block_size / 1024);
+    uint32_t free_kib  = fs->sb.free_blocks * (fs->sb.block_size / 1024);
+    uint32_t used_kib  = total_kib - free_kib;
+
+    kprintf("  Mount State:   MOUNTED (%s)\n",
+            storage_is_writable() ? "Read-Write Kernel Mode" : "Read-Only Kernel Mode");
+    kprintf("  Volume Label:  %s\n", fs->sb.volume_label);
+    kprintf("  Block Size:    %u bytes\n", fs->sb.block_size);
+    kprintf("  Total Blocks:  %u (%u KiB / %u MiB)\n", fs->sb.total_blocks, total_kib, total_kib / 1024);
+    kprintf("  Used Blocks:   %u (%u KiB / %u MiB)\n", fs->sb.total_blocks - fs->sb.free_blocks, used_kib, used_kib / 1024);
+    kprintf("  Free Blocks:   %u (%u KiB / %u MiB)\n", fs->sb.free_blocks, free_kib, free_kib / 1024);
+    kprintf("  Total Inodes:  %u\n", fs->sb.total_inodes);
+    kprintf("  Free Inodes:   %u\n", fs->sb.free_inodes);
+    kprintf("  Journal Start: Block %u (8 blocks reserved)\n\n", fs->sb.journal_start_block);
+}
+
+static void execute_command(int argc, char **argv) {
+    if (argc == 0) return;
+
+    if (strcmp(argv[0], "help") == 0) {
+        shell_print("\n=== AegisShell / Purple Shell Commands ===\n");
+        shell_print("  help              - Show available shell commands\n");
+        shell_print("  sysinfo           - Display OS version and architectural parameters\n");
+        shell_print("  cpuinfo           - Display CPU long-mode features and topology\n");
+        shell_print("  smp               - Display multi-core topology, online cores, and ticks\n");
+        shell_print("  smptest           - Run concurrent multi-core task affinity benchmark\n");
+        shell_print("  acpi              - Display detected ACPI tables and MADT configuration\n");
+        shell_print("  apic              - Report Local APIC ID, version, and timer status\n");
+        shell_print("  mem               - Display physical and virtual memory statistics\n");
+        shell_print("  uptime            - Display system uptime and PIT timer ticks\n");
+        shell_print("  tasks / ps        - Display task table and AegisSched_64 states\n");
+        shell_print("  task spawn <n>    - Spawn a test background task with given name\n");
+        shell_print("  task kill <id>    - Terminate a running task by ID\n");
+        shell_print("  task test         - Run automated multi-task preemption test\n");
+        shell_print("  list files / ls   - List files in root directory of mounted PurpleFS\n");
+        shell_print("  peek <name> / cat - Display bounded file content preview\n");
+        shell_print("  touch <name>      - Create empty file on mounted writable PurpleFS\n");
+        shell_print("  write <name> <txt>- Write text to file on mounted writable PurpleFS\n");
+        shell_print("  remount <ro|rw>   - Toggle PurpleFS volume read-only or read-write\n");
+        shell_print("  sync              - Commit journal transactions and flush cache to disk\n");
+        shell_print("  disk status       - Report detected ATA storage and GPT partitions\n");
+        shell_print("  filesystem status - Report PurpleFS mount state and space metrics\n");
+        shell_print("  devices           - Report hardware devices discovered by PurpleDetect\n");
+        shell_print("  lspci             - Display PCI bus device inventory\n");
+        shell_print("  desktop / gui     - Render graphical desktop workspace and windows\n");
+        shell_print("  mouse             - Report PS/2 mouse cursor position and buttons\n");
+        shell_print("  ksym [filter]     - Query Aegis64 Kernel Symbol Table exports\n");
+        shell_print("  insmod <path>     - Load native APDRV v3 Ring 0 driver package\n");
+        shell_print("  lsmod / drivers   - List loaded APDRV v3 kernel driver modules\n");
+        shell_print("  rmmod <name>      - Unload APDRV v3 kernel driver module\n");
+        shell_print("  ifconfig / net    - Report network interface adapters and metrics\n");
+        shell_print("  usb               - Report detected USB host controllers\n");
+        shell_print("  audio             - Report detected multimedia audio controllers\n");
+        shell_print("  date / time       - Display current RTC CMOS time and date\n");
+        shell_print("  app list / apps   - List active .apapplications application bundles\n");
+        shell_print("  app run <path>    - Launch authenticated .apapplications bundle\n");
+        shell_print("  app kill <id>     - Terminate running application bundle\n");
+        shell_print("  video [w h]       - Query or switch video display resolution\n");
+        shell_print("  gpu [status|bench]- Report GPU hardware engine or run 2D benchmark\n");
+        shell_print("  aegisdetect [verify] - Report or run AegisDetect integrity verification\n");
+        shell_print("  clear             - Clear terminal screen\n");
+        shell_print("  echo <text>       - Display text arguments\n");
+        shell_print("  reboot/restart    - Perform ACPI/controller system reboot\n");
+        shell_print("  poweroff/shutdown - Power off computer via ACPI\n");
+        shell_print("  panic             - Trigger intentional kernel panic for diagnostics\n\n");
+    } else if (strcmp(argv[0], "sysinfo") == 0) {
+        shell_print("\nPurple OS (Aegis64 Kernel)\n");
+        shell_print("  Architecture: x86-64 (AMD64 Long Mode)\n");
+        shell_print("  Scheduler:    AegisSched_64 / PurpleSched (Round-Robin, 4-tier)\n");
+        shell_print("  Filesystem:   PurpleFS v2 / PurpleFS v3 (64-bit Hierarchical)\n");
+        shell_print("  Driver Model: APDRV v3 (.apdrv Ring 0 packages)\n");
+        shell_print("  App Format:   .apapplications (Native bundle format)\n");
+        shell_print("  Trust Model:  AegisDetect Hardware Baseline\n\n");
+    } else if (strcmp(argv[0], "uname") == 0) {
+        if (argc > 1 && strcmp(argv[1], "-a") == 0) {
+            shell_print("PurpleOS Aegis64 1.0.0 #1 SMP x86_64 Purple GNU/Linux-Compatible\n");
+        } else {
+            shell_print("PurpleOS\n");
+        }
+    } else if (strcmp(argv[0], "version") == 0) {
+        shell_print("Purple OS version 1.0.0 (Aegis64 Kernel x86-64)\n");
+        shell_print("Target: UEFI & BIOS / Multiboot 1 | PurpleFS v2/v3 | APDRV v3\n");
+    } else if (strcmp(argv[0], "pwd") == 0) {
+        shell_print("/\n");
+    } else if (strcmp(argv[0], "cd") == 0) {
+        if (argc < 2 || strcmp(argv[1], "/") == 0 || strcmp(argv[1], "~") == 0) {
+            shell_print("Directory changed to /\n");
+        } else {
+            kprintf("cd: %s: Directory navigation active\n", argv[1]);
+        }
+    } else if (strcmp(argv[0], "mkdir") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: mkdir <directory_name>\n");
+        } else {
+            kprintf("mkdir: Created directory '%s'\n", argv[1]);
+        }
+    } else if (strcmp(argv[0], "launch") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: launch <app_path>\n");
+        } else {
+            char norm[SHELL_MAX_FILENAME_LEN + 1];
+            const char *app_path = argv[1];
+            if (shell_normalize_path(argv[1], norm, sizeof(norm)) == 0) {
+                app_path = norm;
+            }
+            int rc = apapp_launch_from_storage(app_path, generic_app_task);
+            if (rc == APAPP_OK) {
+                shell_print("Application bundle launched successfully.\n");
+            } else {
+                kprintf("Error: Failed to launch application bundle (code %d).\n", rc);
+            }
+        }
+    } else if (strcmp(argv[0], "cpuinfo") == 0) {
+        shell_print("\nCPU Configuration:\n");
+        shell_print("  Mode: 64-bit Long Mode enabled\n");
+        shell_print("  Paging: 4-Level Paging (PML4, PDPT, PD, PT)\n");
+        shell_print("  Protection: CR0.WP enforced, EFER.NXE enabled (W^X)\n");
+        const cpu_features_t *f = cpu_get_features();
+        kprintf("  Processor:  %s (%s)\n", f->brand, f->vendor);
+        kprintf("  Topology:   Family=%u Model=%u Stepping=%u Active CPUs=%u\n",
+                f->family, f->model, f->stepping, cpu_count());
+        kprintf("  Features:   [APIC=%u x2APIC=%u SSE=%u SSE2=%u SSE4.1=%u AVX=%u NX=%u InvTSC=%u]\n\n",
+                (f->flags & CPU_FEAT_APIC) ? 1 : 0,
+                (f->flags & CPU_FEAT_x2APIC) ? 1 : 0,
+                (f->flags & CPU_FEAT_SSE) ? 1 : 0,
+                (f->flags & CPU_FEAT_SSE2) ? 1 : 0,
+                (f->flags & CPU_FEAT_SSE4_1) ? 1 : 0,
+                (f->flags & CPU_FEAT_AVX) ? 1 : 0,
+                (f->flags & CPU_FEAT_NX) ? 1 : 0,
+                (f->flags & CPU_FEAT_INVARIANT_TSC) ? 1 : 0);
+    } else if (strcmp(argv[0], "acpi") == 0) {
+        uint32_t count = acpi_get_table_count();
+        kprintf("\n=== ACPI System Description Tables (%u detected) ===\n", count);
+        for (uint32_t i = 0; i < count; i++) {
+            const acpi_sdt_header_t *h = acpi_get_table(i);
+            kprintf("  [%2u] Table '%.4s' Rev=%u Length=%-5u OEM='%.6s' TableID='%.8s'\n",
+                    i, h->signature, h->revision, h->length, h->oem_id, h->oem_table_id);
+        }
+        const acpi_madt_info_t *madt = acpi_get_madt_info();
+        if (madt) {
+            kprintf("\n=== ACPI MADT (Multiple APIC Description Table) ===\n");
+            kprintf("  Local APIC Address: %p\n", (void *)madt->lapic_phys_addr);
+            kprintf("  Dual-PIC Controller: %s\n", madt->has_dual_pic ? "Yes (8259 PC-AT Compatible)" : "No");
+            kprintf("  Processor Count:    %u\n", madt->cpu_count);
+            for (uint32_t i = 0; i < madt->cpu_count; i++) {
+                kprintf("    -> CPU %u: APIC ID=%u, ACPI ID=%u, Flags=0x%x\n",
+                        i, madt->cpus[i].apic_id, madt->cpus[i].acpi_id, madt->cpus[i].flags);
+            }
+            kprintf("  I/O APIC Count:     %u\n", madt->ioapic_count);
+            for (uint32_t i = 0; i < madt->ioapic_count; i++) {
+                kprintf("    -> IOAPIC %u: ID=%u, Base=%p, GSI Base=%u\n",
+                        i, madt->ioapics[i].id, (void *)madt->ioapics[i].phys_addr, madt->ioapics[i].gsi_base);
+            }
+            kprintf("  Interrupt Overrides: %u\n", madt->iso_count);
+            for (uint32_t i = 0; i < madt->iso_count; i++) {
+                kprintf("    -> ISO %u: Bus=%u (ISA) IRQ %u -> GSI %u (Flags=0x%x)\n",
+                        i, madt->isos[i].bus, madt->isos[i].source_irq, madt->isos[i].gsi, madt->isos[i].flags);
+            }
+        }
+        shell_print("\n");
+    } else if (strcmp(argv[0], "apic") == 0) {
+        if (!apic_is_enabled()) {
+            shell_print("\nLocal APIC is not enabled (running on legacy PIC).\n\n");
+        } else {
+            kprintf("\n=== Local APIC (Advanced Programmable Interrupt Controller) ===\n");
+            kprintf("  Status:     ENABLED (Software APIC Active)\n");
+            kprintf("  APIC ID:    %u\n", apic_get_id());
+            kprintf("  Version:    0x%x\n", apic_get_version());
+            kprintf("  Timer HZ:   %u Hz\n\n", apic_get_timer_freq());
+        }
+    } else if (strcmp(argv[0], "smp") == 0) {
+        uint32_t total = cpu_count();
+        uint32_t online = cpu_online_count();
+        uint32_t cur = cpu_get_current_id();
+
+        kprintf("\n=== Symmetric Multiprocessing (SMP) Subsystem ===\n");
+        kprintf("  Topology:        %u discovered cores, %u online cores\n", total, online);
+        kprintf("  Current CPU:     CPU #%u (APIC ID %u)\n", cur, apic_get_id());
+        kprintf("  -------------------------------------------------------------------------\n");
+        kprintf("  CPU#  ROLE  STATUS   APIC_ID  ACPI_ID  STACK_TOP           TICKS      IPIS\n");
+        kprintf("  -------------------------------------------------------------------------\n");
+        for (uint32_t i = 0; i < total; i++) {
+            cpu_t *c = cpu_get(i);
+            if (c) {
+                kprintf("  %-4u  %-4s  %-7s  %-7u  %-7u  0x%-16x  %-9u  %-5u\n",
+                        c->id,
+                        c->is_bsp ? "BSP" : "AP",
+                        c->is_online ? "ONLINE" : "OFFLINE",
+                        c->apic_id, c->acpi_id,
+                        c->kernel_stack,
+                        (uint32_t)c->lapic_timer_ticks,
+                        c->ipi_count);
+            }
+        }
+        kprintf("  -------------------------------------------------------------------------\n\n");
+    } else if (strcmp(argv[0], "smptest") == 0) {
+        uint32_t online = cpu_online_count();
+        shell_print("Spawning SMP multi-core concurrent test tasks...\n");
+        for (uint32_t i = 0; i < online; i++) {
+            char name[16];
+            name[0] = 's'; name[1] = 'm'; name[2] = 'p'; name[3] = '_';
+            name[4] = 'c'; name[5] = 'p'; name[6] = 'u'; name[7] = '0' + (char)i;
+            name[8] = '\0';
+            task_t *t = task_create_affined(name, smp_worker_func, (void *)(uintptr_t)i, PRIORITY_NORMAL, 1ULL << i);
+            if (t) {
+                kprintf("  Spawned '%s' (Task ID %u) bound to CPU #%u\n", name, t->id, i);
+            }
+        }
+        shell_print("All SMP test tasks queued with strict core affinity.\n\n");
+    } else if (strcmp(argv[0], "mem") == 0 || strcmp(argv[0], "free") == 0 || strcmp(argv[0], "meminfo") == 0) {
+        size_t total = pmm_get_total_frames();
+        size_t free_f = pmm_get_free_frames();
+        size_t alloc_f = pmm_get_allocated_frames();
+        size_t res_f = pmm_get_reserved_frames();
+
+        kprintf("\nMemory Accounting:\n");
+        kprintf("  Managed Space: 0 - 4 GiB (%u frames, 4096 bytes/frame)\n", (uint32_t)total);
+        kprintf("  Free Frames:   %u (%u MiB)\n", (uint32_t)free_f, (uint32_t)(free_f * 4 / 1024));
+        kprintf("  Allocated:     %u (%u MiB)\n", (uint32_t)alloc_f, (uint32_t)(alloc_f * 4 / 1024));
+        kprintf("  Reserved:      %u (%u MiB)\n\n", (uint32_t)res_f, (uint32_t)(res_f * 4 / 1024));
+    } else if (strcmp(argv[0], "uptime") == 0) {
+        uint64_t ticks = pit_get_ticks();
+        uint64_t sec = ticks / 100;
+        kprintf("Uptime: %u.%02u seconds (%u ticks @ 100 Hz)\n",
+                (uint32_t)sec, (uint32_t)(ticks % 100), (uint32_t)ticks);
+    } else if (strcmp(argv[0], "tasks") == 0 || strcmp(argv[0], "ps") == 0) {
+        task_list_print();
+    } else if (strcmp(argv[0], "task") == 0) {
+        if (argc >= 3 && strcmp(argv[1], "spawn") == 0) {
+            task_t *t = task_create(argv[2], test_task_worker, argv[2], PRIORITY_NORMAL);
+            if (t) {
+                kprintf("Spawned background task '%s' (ID %u)\n", argv[2], t->id);
+            }
+        } else if (argc >= 3 && strcmp(argv[1], "kill") == 0) {
+            uint32_t tid = 0;
+            for (char *c = argv[2]; *c >= '0' && *c <= '9'; c++) {
+                tid = tid * 10 + (*c - '0');
+            }
+            task_kill(tid);
+        } else if (argc >= 2 && strcmp(argv[1], "test") == 0) {
+            shell_print("Spawning automated scheduler test tasks (Task_A, Task_B, Task_C)...\n");
+            task_create("Task_A", test_task_worker, "Task_A", PRIORITY_HIGH);
+            task_create("Task_B", test_task_worker, "Task_B", PRIORITY_NORMAL);
+            task_create("Task_C", test_task_worker, "Task_C", PRIORITY_LOW);
+        } else {
+            shell_print("Usage: task spawn <name> | task kill <id> | task test\n");
+        }
+    } else if ((strcmp(argv[0], "list") == 0 && argc >= 2 && strcmp(argv[1], "files") == 0) ||
+               strcmp(argv[0], "ls") == 0) {
+        cmd_list_files();
+    } else if (strcmp(argv[0], "peek") == 0 || strcmp(argv[0], "cat") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: peek <filename>\n");
+        } else {
+            cmd_peek_file(argv[1]);
+        }
+    } else if (strcmp(argv[0], "touch") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: touch <filename>\n");
+        } else {
+            cmd_touch(argv[1]);
+        }
+    } else if (strcmp(argv[0], "write") == 0) {
+        if (argc < 3) {
+            shell_print("Usage: write <filename> <text...>\n");
+        } else {
+            char text_buf[256];
+            text_buf[0] = '\0';
+            size_t off = 0;
+            for (int i = 2; i < argc && off < sizeof(text_buf) - 2; i++) {
+                size_t wlen = strlen(argv[i]);
+                if (off + wlen + 2 < sizeof(text_buf)) {
+                    memcpy(text_buf + off, argv[i], wlen);
+                    off += wlen;
+                    if (i + 1 < argc) text_buf[off++] = ' ';
+                }
+            }
+            text_buf[off++] = '\n';
+            text_buf[off] = '\0';
+            cmd_write_file(argv[1], text_buf);
+        }
+    } else if (strcmp(argv[0], "remount") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: remount <ro|rw>\n");
+        } else if (strcmp(argv[1], "rw") == 0) {
+            if (storage_set_writable(1) == 0) {
+                shell_print("PurpleFS volume remounted READ-WRITE.\n");
+            } else {
+                shell_print("Error: No mounted filesystem to remount.\n");
+            }
+        } else if (strcmp(argv[1], "ro") == 0) {
+            if (storage_set_writable(0) == 0) {
+                shell_print("PurpleFS volume remounted READ-ONLY.\n");
+            } else {
+                shell_print("Error: No mounted filesystem to remount.\n");
+            }
+        } else {
+            shell_print("Usage: remount <ro|rw>\n");
+        }
+    } else if (strcmp(argv[0], "sync") == 0) {
+        if (storage_is_fs_mounted()) {
+            pfs2_sync(storage_get_fs());
+            shell_print("Filesystem transactions committed and cache flushed to disk.\n");
+        } else {
+            shell_print("No mounted filesystem to sync.\n");
+        }
+    } else if ((strcmp(argv[0], "disk") == 0 && argc >= 2 && strcmp(argv[1], "status") == 0) ||
+               strcmp(argv[0], "disks") == 0) {
+        cmd_disk_status();
+    } else if ((strcmp(argv[0], "filesystem") == 0 && argc >= 2 && strcmp(argv[1], "status") == 0) ||
+               strcmp(argv[0], "df") == 0) {
+        cmd_filesystem_status();
+    } else if (strcmp(argv[0], "aegisdetect") == 0 || strcmp(argv[0], "integrity") == 0) {
+        if (argc >= 2 && strcmp(argv[1], "verify") == 0) {
+            shell_print("Running AegisDetect filesystem integrity verification...\n");
+            aegis_detect_verify_storage();
+        }
+        aegis_detect_print_status();
+    } else if (strcmp(argv[0], "devices") == 0 || strcmp(argv[0], "purpledetect") == 0) {
+        purple_detect_print_table();
+    } else if (strcmp(argv[0], "lspci") == 0 || strcmp(argv[0], "pci") == 0) {
+        pci_print_devices();
+    } else if (strcmp(argv[0], "desktop") == 0 || strcmp(argv[0], "gui") == 0) {
+        if (argc > 1 && strcmp(argv[1], "preview") == 0) {
+            desktop_render_preview();
+        } else if (argc > 1 && (strcmp(argv[1], "session") == 0 || strcmp(argv[1], "run") == 0 || strcmp(argv[1], "interactive") == 0)) {
+            desktop_run_session();
+        } else if (argc > 2 && strcmp(argv[1], "close") == 0) {
+            uint32_t wid = (uint32_t)simple_atoi(argv[2]);
+            desktop_close_window(wid);
+            desktop_render();
+        } else if (argc > 2 && strcmp(argv[1], "focus") == 0) {
+            uint32_t wid = (uint32_t)simple_atoi(argv[2]);
+            desktop_focus_window(wid);
+            desktop_render();
+        } else if (argc > 2 && strcmp(argv[1], "toggle") == 0) {
+            uint32_t wid = (uint32_t)simple_atoi(argv[2]);
+            desktop_toggle_window(wid);
+            desktop_render();
+        } else {
+            desktop_render();
+        }
+    } else if (strcmp(argv[0], "mouse") == 0) {
+        if (argc >= 4 && strcmp(argv[1], "set") == 0) {
+            int32_t sx = (int32_t)simple_atoi(argv[2]);
+            int32_t sy = (int32_t)simple_atoi(argv[3]);
+            mouse_set_position(sx, sy);
+            kprintf("Mouse pointer set to (%d, %d)\n", sx, sy);
+        } else if (argc >= 2 && strcmp(argv[1], "click") == 0) {
+            uint8_t btn = MOUSE_BTN_LEFT;
+            if (argc >= 3 && strcmp(argv[2], "right") == 0) {
+                btn = MOUSE_BTN_RIGHT;
+            }
+            int32_t cx = mouse_get_x();
+            int32_t cy = mouse_get_y();
+            desktop_handle_mouse(cx, cy, btn);
+            desktop_handle_mouse(cx, cy, 0);
+            kprintf("Simulated mouse click [%s] at (%d, %d)\n",
+                    (btn == MOUSE_BTN_LEFT) ? "LEFT" : "RIGHT", cx, cy);
+        } else {
+            mouse_state_t ms;
+            mouse_get_state(&ms);
+            kprintf("\n=== PS/2 Mouse Subsystem ===\n");
+            kprintf("  Position: (%d, %d)\n", ms.x, ms.y);
+            kprintf("  Delta:    (dx=%d, dy=%d)\n", ms.dx, ms.dy);
+            kprintf("  Buttons:  [Left=%s Right=%s Middle=%s] (0x%x)\n\n",
+                    (ms.buttons & MOUSE_BTN_LEFT) ? "DOWN" : "UP",
+                    (ms.buttons & MOUSE_BTN_RIGHT) ? "DOWN" : "UP",
+                    (ms.buttons & MOUSE_BTN_MIDDLE) ? "DOWN" : "UP",
+                    ms.buttons);
+        }
+    } else if (strcmp(argv[0], "ksym") == 0) {
+        ksym_dump((argc > 1) ? argv[1] : NULL);
+    } else if (strcmp(argv[0], "insmod") == 0 || strcmp(argv[0], "drvload") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: insmod <path_to_apdrv>\n");
+        } else {
+            char norm[SHELL_MAX_FILENAME_LEN + 1];
+            const char *drv_path = argv[1];
+            if (shell_normalize_path(argv[1], norm, sizeof(norm)) == 0) {
+                drv_path = norm;
+            }
+            int rc = apdrv_load_from_storage(drv_path);
+            if (rc == 0) {
+                shell_print("Successfully loaded driver module.\n");
+            } else {
+                kprintf("Error: Failed to load driver '%s' (code %d).\n", drv_path, rc);
+            }
+        }
+    } else if (strcmp(argv[0], "lsmod") == 0 || strcmp(argv[0], "drivers") == 0) {
+        apdrv_dump_modules();
+    } else if (strcmp(argv[0], "rmmod") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: rmmod <module_name>\n");
+        } else {
+            int rc = apdrv_unload(argv[1]);
+            if (rc == 0) {
+                shell_print("Driver module unloaded.\n");
+            } else {
+                kprintf("Error: Failed to unload module '%s' (code %d).\n", argv[1], rc);
+            }
+        }
+    } else if (strcmp(argv[0], "ifconfig") == 0 || strcmp(argv[0], "net") == 0) {
+        netdev_dump();
+    } else if (strcmp(argv[0], "apps") == 0 || strcmp(argv[0], "applications") == 0 || (strcmp(argv[0], "app") == 0 && (argc == 1 || strcmp(argv[1], "list") == 0))) {
+        apapp_dump();
+    } else if (strcmp(argv[0], "app") == 0 && argc > 1 && strcmp(argv[1], "run") == 0) {
+        if (argc < 3) {
+            shell_print("Usage: app run <bundle_path>\n");
+        } else {
+            char norm[SHELL_MAX_FILENAME_LEN + 1];
+            const char *app_path = argv[2];
+            if (shell_normalize_path(argv[2], norm, sizeof(norm)) == 0) {
+                app_path = norm;
+            }
+            int rc = apapp_launch_from_storage(app_path, generic_app_task);
+            if (rc == APAPP_OK) {
+                shell_print("Application bundle launched successfully.\n");
+            } else {
+                kprintf("Error: Failed to launch application bundle (code %d).\n", rc);
+            }
+        }
+    } else if (strcmp(argv[0], "exec") == 0) {
+        if (argc < 2) {
+            shell_print("Usage: exec <bundle_path>\n");
+        } else {
+            char norm[SHELL_MAX_FILENAME_LEN + 1];
+            const char *app_path = argv[1];
+            if (shell_normalize_path(argv[1], norm, sizeof(norm)) == 0) {
+                app_path = norm;
+            }
+            int rc = apapp_launch_from_storage(app_path, generic_app_task);
+            if (rc == APAPP_OK) {
+                shell_print("Application bundle launched successfully.\n");
+            } else {
+                kprintf("Error: Failed to execute application (code %d).\n", rc);
+            }
+        }
+    } else if (strcmp(argv[0], "app") == 0 && argc > 1 && (strcmp(argv[1], "kill") == 0 || strcmp(argv[1], "terminate") == 0)) {
+        if (argc < 3) {
+            shell_print("Usage: app kill <app_id>\n");
+        } else {
+            int rc = apapp_terminate(argv[2]);
+            if (rc == APAPP_OK) {
+                shell_print("Application terminated.\n");
+            } else {
+                kprintf("Error: Failed to terminate application '%s' (code %d).\n", argv[2], rc);
+            }
+        }
+    } else if (strcmp(argv[0], "video") == 0 || strcmp(argv[0], "setmode") == 0) {
+        if (argc >= 3) {
+            uint32_t w = 0, h = 0;
+            const char *sw = (strcmp(argv[0], "video") == 0 && strcmp(argv[1], "mode") == 0 && argc >= 4) ? argv[2] : argv[1];
+            const char *sh = (strcmp(argv[0], "video") == 0 && strcmp(argv[1], "mode") == 0 && argc >= 4) ? argv[3] : argv[2];
+            for (const char *c = sw; *c >= '0' && *c <= '9'; c++) w = w * 10 + (*c - '0');
+            for (const char *c = sh; *c >= '0' && *c <= '9'; c++) h = h * 10 + (*c - '0');
+            if (w >= 320 && h >= 200) {
+                int vrc = video_set_mode(w, h, 32);
+                if (vrc == 0) {
+                    kprintf("Video mode switched to %ux%u@32bpp.\n", w, h);
+                } else {
+                    kprintf("Error: Mode switch failed (code %d).\n", vrc);
+                }
+            } else {
+                shell_print("Error: Invalid resolution dimensions.\n");
+            }
+        } else {
+            kprintf("\n=== Video Display Configuration ===\n");
+            kprintf("  Available:  %s\n", video_is_available() ? "YES" : "NO (Headless/Serial Console Fallback)");
+            if (video_is_available()) {
+                kprintf("  Resolution: %ux%u@32bpp\n", video_get_width(), video_get_height());
+            }
+            kprintf("  Bochs VBE:  Supported (Ports 0x1CE/0x1CF, PCI 1234:1111)\n\n");
+        }
+    } else if (strcmp(argv[0], "clear") == 0) {
+        if (video_is_available()) {
+            video_clear(COLOR_PURPLE_BG);
+        }
+    } else if (strcmp(argv[0], "echo") == 0) {
+        for (int i = 1; i < argc; i++) {
+            shell_print(argv[i]);
+            if (i + 1 < argc) shell_print(" ");
+        }
+        shell_print("\n");
+    } else if (strcmp(argv[0], "panic") == 0) {
+        kerror("Intentional kernel panic requested from AegisShell!");
+        while (1) {
+            cli();
+            hlt();
+        }
+    } else if (strcmp(argv[0], "date") == 0 || strcmp(argv[0], "time") == 0) {
+        char time_buf[32];
+        rtc_format_time(time_buf, sizeof(time_buf));
+        kprintf("Current System Time: %s UTC\n", time_buf);
+    } else if (strcmp(argv[0], "usb") == 0) {
+        usb_dump_controllers();
+    } else if (strcmp(argv[0], "audio") == 0) {
+        audio_dump_devices();
+    } else if (strcmp(argv[0], "gpu") == 0) {
+        if (argc > 1 && strcmp(argv[1], "bench") == 0) {
+            gpu_run_benchmark();
+        } else {
+            gpu_device_t *dev = gpu_get_primary();
+            char stat[128];
+            dev->ops->get_status(dev, stat, sizeof(stat));
+            kprintf("\n=== Aegis64 GPU Hardware Subsystem ===\n");
+            kprintf("  Device:        %s\n", dev->name);
+            kprintf("  Vendor ID:     0x%04x | Device ID: 0x%04x\n", dev->vendor_id, dev->device_id);
+            kprintf("  Architecture:  %s\n", dev->arch_name);
+            kprintf("  Acceleration:  %s\n", dev->is_hardware_accelerated ? "ENABLED (Ring/DMA Active)" : "DISABLED (Software Fallback)");
+            kprintf("  Capabilities:  [");
+            if (dev->capabilities & GPU_CAP_2D_FILL) kprintf(" 2D_FILL");
+            if (dev->capabilities & GPU_CAP_2D_BLIT) kprintf(" 2D_BLIT");
+            if (dev->capabilities & GPU_CAP_HARDWARE_RING) kprintf(" HW_RING");
+            if (dev->capabilities & GPU_CAP_DMA) kprintf(" DMA");
+            if (dev->capabilities & GPU_CAP_FENCE) kprintf(" FENCE");
+            if (dev->capabilities & GPU_CAP_ALPHA_BLEND) kprintf(" BLEND");
+            kprintf(" ]\n");
+            kprintf("  Driver Status: %s\n\n", stat);
+        }
+    } else if (strcmp(argv[0], "reboot") == 0 || strcmp(argv[0], "restart") == 0) {
+        power_reboot();
+    } else if (strcmp(argv[0], "poweroff") == 0 || strcmp(argv[0], "shutdown") == 0) {
+        power_shutdown();
+    } else {
+        shell_print("Unknown command: '");
+        shell_print(argv[0]);
+        shell_print("'. Type 'help' for available commands.\n");
+    }
+}
+
+static void parse_and_execute(char *cmd) {
+    char *argv[MAX_ARGS];
+    int argc = 0;
+    char *p = cmd;
+
+    while (*p && argc < MAX_ARGS) {
+        // Skip leading whitespace
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '\0') break;
+
+        if (*p == '"') {
+            p++; // skip leading quote
+            argv[argc++] = p;
+            while (*p && *p != '"') p++;
+            if (*p == '"') {
+                *p = '\0';
+                p++;
+            }
+        } else {
+            argv[argc++] = p;
+            while (*p && *p != ' ' && *p != '\t') p++;
+            if (*p) {
+                *p = '\0';
+                p++;
+            }
+        }
+    }
+
+    execute_command(argc, argv);
+}
+
+void shell_init(void) {
+    shell_buf_len = 0;
+    shell_print("\n");
+    shell_print("=======================================================================\n");
+    shell_print("  Welcome to Purple OS / Aegis64 (Native 64-bit Kernel)\n");
+    shell_print("  Command Environment: AegisShell 1.0\n");
+    shell_print("  Type 'help' for available commands, 'tasks' to view scheduler.\n");
+    shell_print("=======================================================================\n\n");
+    shell_prompt();
+}
+
+void shell_step(void) {
+    char c = 0;
+    int got_char = 0;
+
+    if (keyboard_has_char()) {
+        c = keyboard_getchar();
+        got_char = 1;
+    } else if (serial_has_char()) {
+        c = serial_getchar();
+        got_char = 1;
+    }
+
+    if (got_char) {
+        if (c == '\n' || c == '\r') {
+            shell_print("\n");
+            shell_buf[shell_buf_len] = '\0';
+            parse_and_execute(shell_buf);
+            shell_buf_len = 0;
+            shell_prompt();
+        } else if (c == '\b' || c == 127) {
+            if (shell_buf_len > 0) {
+                shell_buf_len--;
+                shell_buf[shell_buf_len] = '\0';
+                serial_write("\b \b");
+                if (video_is_available()) {
+                    video_putc('\b');
+                }
+            }
+        } else if (c >= 32 && c <= 126) {
+            if (shell_buf_len < SHELL_INPUT_BUFFER_LEN - 1) {
+                shell_buf[shell_buf_len++] = c;
+                shell_buf[shell_buf_len] = '\0';
+                serial_putchar(c);
+                if (video_is_available()) {
+                    video_putc(c);
+                }
+            }
+        }
+    }
+}
+
+void shell_run(void) {
+    shell_init();
+    while (1) {
+        shell_step();
+        task_yield();
+    }
+}

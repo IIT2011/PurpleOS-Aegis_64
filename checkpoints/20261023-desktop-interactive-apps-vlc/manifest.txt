@@ -1,0 +1,58 @@
+## Aegis_Purple...origin/Aegis_Purple
+ M Makefile
+ M assets/artwork/wallpaper_1920x1080.png
+ M assets/artwork/wallpaper_3840x2160.png
+ M include/desktop.h
+ M include/string.h
+ M scripts/build_apapp.py
+ M scripts/build_apdrv.py
+ M scripts/build_uefi_disk.py
+ M src/drivers/desktop.c
+ M src/drivers/mouse.c
+ M src/kernel/main.c
+ M src/kernel/shell.c
+ M src/kernel/string.c
+ M tests/test_desktop.c
+?? assets/artwork/wallpaper_1280x720.png
+?? assets/artwork/wallpaper_1366x768.png
+?? assets/artwork/wallpaper_2560x1440.png
+?? assets/fonts/NotoSansMono-Bold.ttf
+?? assets/fonts/NotoSansMono-Regular.ttf
+?? assets/fonts/NotoSansSymbols2-Regular.ttf
+?? assets/icons/
+?? checkpoints/20261022-desktop-renderer-correction/
+?? checkpoints/20261022-final-forensic-verification/
+?? checkpoints/20261023-desktop-applications-vlc/
+?? checkpoints/20261023-desktop-interactive-apps-vlc/
+?? checkpoints/20261023-master-desktop-ecosystem/
+?? docs/PURPLE_DESKTOP_REFERENCE_SPEC.md
+?? docs/PURPLE_DESKTOP_VISUAL_REGRESSION_REPORT.md
+?? docs/PURPLE_ICON_LIBRARY_CATALOG.md
+?? docs/PURPLE_NOTO_FONTS_CATALOG.md
+?? docs/PURPLE_OS_FORENSIC_VERIFICATION_REPORT.md
+?? docs/PURPLE_OS_LOCKED_DESKTOP_GPU_ARCHITECTURE.md
+?? include/font.h
+?? include/font_data.h
+?? include/gpu.h
+?? include/icon_data.h
+?? scripts/capture_desktop_screenshot.py
+?? scripts/generate_icon_library.py
+?? scripts/generate_noto_fonts.py
+?? scripts/verify_desktop_visual_regression.py
+?? scripts/verify_gpt_300m_layout.py
+?? scripts/verify_qemu_keyboard_guest.py
+?? src/drivers/font.c
+?? src/drivers/font_data.c
+?? src/drivers/gpu.c
+?? src/drivers/icon_data.c
+?? tests/test_font.c
+?? tests/test_gpu.c
+?? tests/test_gui_widgets.c
+?? tests/test_icons.c
+?? tests/test_keyboard_focus.c
+commit e26d24fd7d3637f84e07af0aadd29859cf8087e8
+Author: Aegis Architect <architect@aegis64.org>
+Date:   Thu Oct 22 21:35:12 2026 +0530
+
+    autosync: save local changes
+4da534511c6ce9001be0ad8a8b183d42ef1ed0cdd90523daebb2bbd73829e0b8  build/aegis64-uefi.img

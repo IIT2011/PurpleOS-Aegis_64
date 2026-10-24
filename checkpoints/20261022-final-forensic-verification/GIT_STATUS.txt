@@ -1,0 +1,27 @@
+On branch Aegis_Purple
+Your branch is up to date with 'origin/Aegis_Purple'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   Makefile
+	modified:   include/desktop.h
+	modified:   src/drivers/desktop.c
+	modified:   src/drivers/mouse.c
+	modified:   src/kernel/main.c
+	modified:   src/kernel/shell.c
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	checkpoints/20261022-final-forensic-verification/
+	docs/PURPLE_OS_FORENSIC_VERIFICATION_REPORT.md
+	docs/PURPLE_OS_LOCKED_DESKTOP_GPU_ARCHITECTURE.md
+	include/gpu.h
+	scripts/capture_desktop_screenshot.py
+	scripts/verify_gpt_300m_layout.py
+	scripts/verify_qemu_keyboard_guest.py
+	src/drivers/gpu.c
+	tests/test_gpu.c
+	tests/test_keyboard_focus.c
+
+no changes added to commit (use "git add" and/or "git commit -a")

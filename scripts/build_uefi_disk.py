@@ -443,11 +443,14 @@ menuentry "Purple OS / Aegis64" {
         "KERNEL.ELF": kernel_elf_data
     }
 
-    print("=== Building FAT ESP Image ===")
-    build_fat16_image("build/esp.img", files)
+    out_disk = sys.argv[1] if len(sys.argv) > 1 else "build/aegis64-uefi.img"
+    esp_disk = sys.argv[2] if len(sys.argv) > 2 else "build/esp.img"
 
-    print("=== Building GPT Multi-Partition Disk Image ===")
-    build_gpt_disk("build/aegis64-uefi.img", "build/esp.img")
+    print(f"=== Building FAT ESP Image ({esp_disk}) ===")
+    build_fat16_image(esp_disk, files)
+
+    print(f"=== Building GPT Multi-Partition Disk Image ({out_disk}) ===")
+    build_gpt_disk(out_disk, esp_disk)
 
     # Copy OVMF vars template
     ovmf_vars_src = "/usr/share/edk2/x64/OVMF_VARS.4m.fd"

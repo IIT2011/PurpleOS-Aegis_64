@@ -138,6 +138,83 @@ def generate_default_apps(output_dir):
             "perms": PERM_GUI,
             "width": 280,
             "height": 340
+        },
+        {
+            "filename": "settings.apapplication",
+            "id": "settings.apapplications",
+            "name": "Settings & Preferences",
+            "version": "1.1.0",
+            "author": "Purple OS Team",
+            "desc": "System preferences, theme, audio, and display settings",
+            "perms": PERM_GUI | PERM_SYSADMIN,
+            "width": 480,
+            "height": 320
+        },
+        {
+            "filename": "appmgr.apapplication",
+            "id": "appmgr.apapplications",
+            "name": "Application Manager",
+            "version": "1.0.0",
+            "author": "Aegis Security Lab",
+            "desc": "Package manager and HMAC signature validator",
+            "perms": PERM_GUI | PERM_SYSADMIN | PERM_STORAGE,
+            "width": 520,
+            "height": 340
+        },
+        {
+            "filename": "editor.apapplication",
+            "id": "editor.apapplications",
+            "name": "Aegis Text Editor",
+            "version": "1.0.0",
+            "author": "Purple OS Team",
+            "desc": "Full-screen native text editor and document creator",
+            "perms": PERM_GUI | PERM_STORAGE,
+            "width": 560,
+            "height": 360
+        },
+        {
+            "filename": "help.apapplication",
+            "id": "help.apapplications",
+            "name": "Help & Documentation Center",
+            "version": "1.0.0",
+            "author": "Purple OS Documentation Team",
+            "desc": "Interactive OS guide, shortcuts, and manual",
+            "perms": PERM_GUI,
+            "width": 580,
+            "height": 380
+        },
+        {
+            "filename": "vlc.apapplication",
+            "id": "vlc.apapplications",
+            "name": "VLC Media Player",
+            "version": "3.0.21-purple",
+            "author": "VideoLAN / Purple OS Team",
+            "desc": "Default media player and streaming media engine",
+            "perms": PERM_GUI | PERM_STORAGE | PERM_NETWORK,
+            "width": 620,
+            "height": 420
+        },
+        {
+            "filename": "viewer.apapplication",
+            "id": "viewer.apapplications",
+            "name": "Purple View",
+            "version": "1.0.0",
+            "author": "Purple OS Team",
+            "desc": "Document viewer for .txt, .md Markdown, and .pdf files",
+            "perms": PERM_GUI | PERM_STORAGE,
+            "width": 600,
+            "height": 440
+        },
+        {
+            "filename": "diskmgr.apapplication",
+            "id": "diskmgr.apapplications",
+            "name": "Purple Partition Manager",
+            "version": "1.0.0",
+            "author": "Aegis Storage Group",
+            "desc": "Disk utility, partition manager, and filesystem administration",
+            "perms": PERM_GUI | PERM_STORAGE | PERM_SYSADMIN,
+            "width": 640,
+            "height": 420
         }
     ]
 

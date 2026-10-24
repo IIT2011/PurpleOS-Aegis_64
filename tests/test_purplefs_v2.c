@@ -1301,9 +1301,93 @@ static int test_persistence_multiblock_remount(void) {
     return 1;
 }
 
+static int test_unlink_readdir_rename(void) {
+    pfs2_block_dev_t *dev = pfs2_mem_dev_create(1024);
+    pfs2_format(dev, 1024, "ops_test");
+
+    pfs2_fs_t fs;
+    if (pfs2_mount(&fs, dev) != PFS2_OK) {
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    uint32_t ino = 0;
+    if (pfs2_create_file(&fs, "file_a.txt", 0644, &ino) != PFS2_OK) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    const char *msg = "Sample Content";
+    size_t bw = 0;
+    if (pfs2_write_file(&fs, ino, msg, strlen(msg), 0, &bw) != PFS2_OK || bw != strlen(msg)) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    // Readdir test
+    pfs2_dir_entry_t ent;
+    pfs2_inode_t ino_read;
+    int found = 0;
+    for (uint32_t i = 0; i < 10; i++) {
+        if (pfs2_readdir(&fs, i, &ent, &ino_read) == PFS2_OK) {
+            if (strcmp(ent.name, "file_a.txt") == 0) {
+                found = 1;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    // Rename test
+    if (pfs2_rename(&fs, "file_a.txt", "file_b.txt") != PFS2_OK) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+    uint32_t lookup_ino = 0;
+    if (pfs2_lookup(&fs, "file_a.txt", &lookup_ino) == PFS2_OK) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+    if (pfs2_lookup(&fs, "file_b.txt", &lookup_ino) != PFS2_OK) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    // Unlink test
+    uint32_t free_before = fs.sb.free_inodes;
+    if (pfs2_unlink(&fs, "file_b.txt") != PFS2_OK) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+    if (pfs2_lookup(&fs, "file_b.txt", &lookup_ino) == PFS2_OK) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+    if (fs.sb.free_inodes != free_before + 1) {
+        pfs2_unmount(&fs);
+        pfs2_mem_dev_destroy(dev);
+        return 0;
+    }
+
+    pfs2_unmount(&fs);
+    pfs2_mem_dev_destroy(dev);
+    return 1;
+}
+
 int main(void) {
     printf("=====================================================\n");
-    printf(" Running PurpleFS v2 Host Test Suite (25 Test Cases) \n");
+    printf(" Running PurpleFS v2 Host Test Suite (26 Test Cases) \n");
     printf("=====================================================\n");
 
     RUN_TEST(test_format_and_mount);
@@ -1333,6 +1417,7 @@ int main(void) {
     RUN_TEST(test_boundary_filename_and_dir_limits);
     RUN_TEST(test_directory_creation_and_traversal_unsupported);
     RUN_TEST(test_persistence_multiblock_remount);
+    RUN_TEST(test_unlink_readdir_rename);
 
     printf("=====================================================\n");
     printf(" PurpleFS v2 Tests: %d/%d passed\n", tests_passed, tests_run);

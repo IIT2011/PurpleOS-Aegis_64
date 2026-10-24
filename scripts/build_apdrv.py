@@ -175,5 +175,95 @@ def main():
         ["kinfo", "audio_dump_devices"]
     )
 
+    # 4. storage.apdrv (AHCI / NVMe / ATA Storage Stack)
+    build_module(
+        os.path.join(out_dir, "storage.apdrv"),
+        "purple_storage",
+        "Unified AHCI / NVMe / ATA Block Storage Stack",
+        "Purple OS Hardware Group",
+        0xFFFF, 0xFFFF,
+        ["kinfo", "block_dev_register"]
+    )
+
+    # 5. network.apdrv (PCIe Ethernet Family)
+    build_module(
+        os.path.join(out_dir, "network.apdrv"),
+        "purple_net",
+        "Unified PCIe Network Interface Driver Family",
+        "Purple OS Hardware Group",
+        0x8086, 0x100E,
+        ["kinfo", "netdev_register"]
+    )
+
+    # 6. usb.apdrv (USB 3.0 / 2.0 Unified Host Driver)
+    build_module(
+        os.path.join(out_dir, "usb.apdrv"),
+        "purple_usb",
+        "Unified USB 3.0 / 2.0 Host Controller Subsystem",
+        "Purple OS Hardware Group",
+        0xFFFF, 0xFFFF,
+        ["kinfo", "usb_dump_controllers"]
+    )
+
+    # 7. audio.apdrv (Unified Audio Output Stack)
+    build_module(
+        os.path.join(out_dir, "audio.apdrv"),
+        "purple_audio",
+        "Unified HD Audio Driver and Codec Pipeline",
+        "Purple OS Hardware Group",
+        0x8086, 0x2668,
+        ["kinfo", "audio_dump_devices"]
+    )
+
+    # 8. gpu-intel.apdrv (Intel HD Graphics Hardware Accelerator)
+    build_module(
+        os.path.join(out_dir, "gpu-intel.apdrv"),
+        "gpu_intel",
+        "Intel HD Graphics Gen9/Gen11 Ring Buffer Accelerator",
+        "Purple OS Hardware Group",
+        0x8086, 0x5912,
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+    )
+
+    # 9. gpu-amd.apdrv (AMD Radeon GCN/RDNA Hardware Accelerator)
+    build_module(
+        os.path.join(out_dir, "gpu-amd.apdrv"),
+        "gpu_amd",
+        "AMD Radeon GCN/RDNA SDMA Blit Engine Driver",
+        "Purple OS Hardware Group",
+        0x1002, 0x67DF,
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+    )
+
+    # 10. input.apdrv (PS/2 & USB HID Input Subsystem)
+    build_module(
+        os.path.join(out_dir, "input.apdrv"),
+        "purple_input",
+        "Unified PS/2 & USB HID Keyboard and Mouse Driver",
+        "Purple OS Hardware Group",
+        0xFFFF, 0xFFFF,
+        ["kinfo", "keyboard_poll_event"]
+    )
+
+    # 11. wifi.apdrv (802.11 Wireless Network Adapter Driver Family)
+    build_module(
+        os.path.join(out_dir, "wifi.apdrv"),
+        "purple_wifi",
+        "Intel & Realtek 802.11 Wireless Adapter Stack",
+        "Purple OS Hardware Group",
+        0x8086, 0x4220,
+        ["kinfo", "netdev_register"]
+    )
+
+    # 12. bluetooth.apdrv (Bluetooth HCI Host Controller Driver Family)
+    build_module(
+        os.path.join(out_dir, "bluetooth.apdrv"),
+        "purple_bt",
+        "Bluetooth HCI USB / UART Controller Driver",
+        "Purple OS Hardware Group",
+        0x8087, 0x07DA,
+        ["kinfo", "usb_dump_controllers"]
+    )
+
 if __name__ == "__main__":
     main()

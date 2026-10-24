@@ -20,6 +20,7 @@
 #include "pci.h"
 #include "mouse.h"
 #include "desktop.h"
+#include "gpu.h"
 #include "ksym.h"
 #include "netdev.h"
 #include "apdrv.h"
@@ -139,7 +140,8 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     apdrv_subsystem_init();
     apapp_subsystem_init();
 
-    /* Step 5.7: Desktop GUI Subsystem */
+    /* Step 5.7: Desktop & Graphics Subsystems */
+    gpu_subsystem_init();
     desktop_init();
 
     /* Enable Interrupts */

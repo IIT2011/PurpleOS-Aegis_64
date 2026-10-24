@@ -29,10 +29,14 @@ C_SRCS = src/kernel/main.c \
          src/drivers/serial.c \
          src/drivers/video.c \
          src/drivers/font8x16.c \
+         src/drivers/font.c \
+         src/drivers/font_data.c \
+         src/drivers/icon_data.c \
          src/drivers/pit.c \
          src/drivers/keyboard.c \
          src/drivers/mouse.c \
          src/drivers/desktop.c \
+         src/drivers/gpu.c \
          src/drivers/netdev.c \
          src/drivers/apdrv.c \
          src/drivers/usb.c \
@@ -61,10 +65,20 @@ OBJS = $(patsubst src/%.S,$(BUILD_DIR)/%.o,$(ASM_SRCS)) \
 
 KERNEL64_ELF = $(BUILD_DIR)/kernel64.elf
 KERNEL32_ELF = $(BUILD_DIR)/kernel.elf
+WALLPAPER_CLEAN_RAW = $(BUILD_DIR)/wallpaper_clean_1672x941.raw
+WALLPAPER_CLEAN_OBJ = $(BUILD_DIR)/wallpaper_clean.o
 
 .PHONY: all clean test test-asan check check-scheduler-qemu check-storage-qemu check-writable-storage-qemu check-persistence-qemu check-smp-qemu check-modern-storage-qemu check-graphics-qemu check-desktop-qemu run-qemu run-uefi
 
 all: $(KERNEL32_ELF) $(KERNEL64_ELF)
+
+$(WALLPAPER_CLEAN_RAW): assets/artwork/wallpaper_3840x2160.png
+	@mkdir -p $(BUILD_DIR)
+	$(PYTHON) -c "from PIL import Image; open('$@', 'wb').write(Image.open('assets/artwork/wallpaper_3840x2160.png').convert('RGB').resize((1672, 941), Image.Resampling.LANCZOS).tobytes())"
+
+$(WALLPAPER_CLEAN_OBJ): $(WALLPAPER_CLEAN_RAW)
+	@mkdir -p $(BUILD_DIR)
+	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 $< $@
 
 $(BUILD_DIR)/%.o: src/%.S
 	@mkdir -p $(dir $@)
@@ -74,15 +88,15 @@ $(BUILD_DIR)/%.o: src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(KERNEL64_ELF): $(OBJS) linker.ld
+$(KERNEL64_ELF): $(OBJS) $(WALLPAPER_CLEAN_OBJ) linker.ld
 	@mkdir -p $(BUILD_DIR)
-	$(LD) $(LDFLAGS) $(OBJS) -o $@
+	$(LD) $(LDFLAGS) $(OBJS) $(WALLPAPER_CLEAN_OBJ) -o $@
 
 $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path $(BUILD_DIR)/test_keyboard_focus $(BUILD_DIR)/test_gpu $(BUILD_DIR)/test_font $(BUILD_DIR)/test_icons $(BUILD_DIR)/test_gui_widgets
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
@@ -104,6 +118,11 @@ test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(
 	@$(PYTHON) scripts/build_apdrv.py build/drivers_apdrv
 	./$(BUILD_DIR)/test_drivers
 	./$(BUILD_DIR)/test_shell_path
+	./$(BUILD_DIR)/test_keyboard_focus
+	./$(BUILD_DIR)/test_gpu
+	./$(BUILD_DIR)/test_font
+	./$(BUILD_DIR)/test_icons
+	./$(BUILD_DIR)/test_gui_widgets
 
 test-asan:
 	@mkdir -p $(BUILD_DIR)
@@ -119,12 +138,12 @@ test-asan:
 	./$(BUILD_DIR)/test_aegis_detect_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_purple_detect.c src/drivers/purple_detect.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_purple_detect_asan
 	./$(BUILD_DIR)/test_purple_detect_asan
-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_asan
 	./$(BUILD_DIR)/test_desktop_asan
-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
 	./$(BUILD_DIR)/test_apdrv_asan
 	@$(PYTHON) scripts/build_apapp.py build/apps
-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apapp_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apapp_asan
 	./$(BUILD_DIR)/test_apapp_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_video.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_video_asan
 	./$(BUILD_DIR)/test_video_asan
@@ -135,16 +154,38 @@ test-asan:
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_nvme.c src/drivers/storage/nvme.c src/drivers/block_dev.c src/drivers/dma.c src/drivers/pci.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_nvme_asan
 	./$(BUILD_DIR)/test_nvme_asan
 	@$(PYTHON) scripts/build_apdrv.py build/drivers_apdrv
-	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_drivers_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_drivers_asan
 	./$(BUILD_DIR)/test_drivers_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_keyboard_focus.c src/drivers/keyboard.c -o $(BUILD_DIR)/test_keyboard_focus_asan
+	./$(BUILD_DIR)/test_keyboard_focus_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_gpu.c src/drivers/gpu.c src/drivers/pci.c src/drivers/serial.c src/kernel/string.c -o $(BUILD_DIR)/test_gpu_asan
+	./$(BUILD_DIR)/test_gpu_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_font.c src/drivers/font.c src/drivers/font_data.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_font_asan
+	./$(BUILD_DIR)/test_font_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_icons.c src/drivers/icon_data.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_icons_asan
+	./$(BUILD_DIR)/test_icons_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -ffunction-sections -D__KERNEL_HOST_TEST__ -Iinclude tests/test_shell_path.c src/kernel/shell.c src/kernel/string.c -Wl,--gc-sections -o $(BUILD_DIR)/test_shell_path_asan
 	./$(BUILD_DIR)/test_shell_path_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_gui_widgets.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_gui_widgets_asan
+	./$(BUILD_DIR)/test_gui_widgets_asan
+
+$(BUILD_DIR)/test_gui_widgets: tests/test_gui_widgets.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_icons: tests/test_icons.c src/drivers/icon_data.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_font: tests/test_font.c src/drivers/font.c src/drivers/font_data.c src/drivers/video.c src/drivers/font8x16.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
 $(BUILD_DIR)/test_shell_path: tests/test_shell_path.c src/kernel/shell.c src/kernel/string.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -ffunction-sections -D__KERNEL_HOST_TEST__ -Iinclude $^ -Wl,--gc-sections -o $@
 
-$(BUILD_DIR)/test_drivers: tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+$(BUILD_DIR)/test_drivers: tests/test_drivers.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/dma.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
@@ -164,15 +205,23 @@ $(BUILD_DIR)/test_video: tests/test_video.c src/drivers/video.c src/drivers/font
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/test_apapp: tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+$(BUILD_DIR)/test_apapp: tests/test_apapp.c src/kernel/apapp.c src/crypto/sha256.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/test_apdrv: tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+$(BUILD_DIR)/test_apdrv: tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
-$(BUILD_DIR)/test_desktop: tests/test_desktop.c src/drivers/desktop.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+$(BUILD_DIR)/test_desktop: tests/test_desktop.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_keyboard_focus: tests/test_keyboard_focus.c src/drivers/keyboard.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_gpu: tests/test_gpu.c src/drivers/gpu.c src/drivers/pci.c src/drivers/serial.c src/kernel/string.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 

@@ -53,11 +53,12 @@ static void test_desktop_init_and_windows(void) {
 
 static void test_desktop_window_capacity(void) {
     printf("[TEST  2] Running test_desktop_window_capacity             ... ");
-    desktop_init(); // 3 default windows
+    desktop_init();
 
-    for (int i = 3; i < DESKTOP_MAX_WINDOWS; i++) {
+    uint32_t start_count = desktop_get_window_count();
+    for (uint32_t i = start_count; i < DESKTOP_MAX_WINDOWS; i++) {
         char title[16];
-        snprintf(title, sizeof(title), "Win%d", i);
+        snprintf(title, sizeof(title), "Win%u", i);
         int id = desktop_create_window(title, 10 * i, 10 * i, 200, 150, 0x222222);
         assert(id > 0);
     }

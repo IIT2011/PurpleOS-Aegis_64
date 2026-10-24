@@ -18,6 +18,7 @@
 #include "pci.h"
 #include "mouse.h"
 #include "desktop.h"
+#include "gpu.h"
 #include "ksym.h"
 #include "netdev.h"
 #include "apdrv.h"
@@ -106,13 +107,13 @@ static void smp_worker_func(void *arg) {
 
 static void shell_print(const char *s) {
     serial_write(s);
-    if (video_is_available()) {
+    if (video_is_available() && !desktop_is_active()) {
         video_puts(s);
     }
 }
 
 static void shell_prompt(void) {
-    if (video_is_available()) {
+    if (video_is_available() && !desktop_is_active()) {
         video_set_colors(COLOR_PURPLE_ACC, COLOR_PURPLE_BG);
         video_puts("aegis64");
         video_set_colors(COLOR_GOLD, COLOR_PURPLE_BG);
@@ -401,6 +402,7 @@ static void execute_command(int argc, char **argv) {
         shell_print("  app run <path>    - Launch authenticated .apapplications bundle\n");
         shell_print("  app kill <id>     - Terminate running application bundle\n");
         shell_print("  video [w h]       - Query or switch video display resolution\n");
+        shell_print("  gpu [status|bench]- Report GPU hardware engine or run 2D benchmark\n");
         shell_print("  aegisdetect [verify] - Report or run AegisDetect integrity verification\n");
         shell_print("  clear             - Clear terminal screen\n");
         shell_print("  echo <text>       - Display text arguments\n");
@@ -840,6 +842,28 @@ static void execute_command(int argc, char **argv) {
         usb_dump_controllers();
     } else if (strcmp(argv[0], "audio") == 0) {
         audio_dump_devices();
+    } else if (strcmp(argv[0], "gpu") == 0) {
+        if (argc > 1 && strcmp(argv[1], "bench") == 0) {
+            gpu_run_benchmark();
+        } else {
+            gpu_device_t *dev = gpu_get_primary();
+            char stat[128];
+            dev->ops->get_status(dev, stat, sizeof(stat));
+            kprintf("\n=== Aegis64 GPU Hardware Subsystem ===\n");
+            kprintf("  Device:        %s\n", dev->name);
+            kprintf("  Vendor ID:     0x%04x | Device ID: 0x%04x\n", dev->vendor_id, dev->device_id);
+            kprintf("  Architecture:  %s\n", dev->arch_name);
+            kprintf("  Acceleration:  %s\n", dev->is_hardware_accelerated ? "ENABLED (Ring/DMA Active)" : "DISABLED (Software Fallback)");
+            kprintf("  Capabilities:  [");
+            if (dev->capabilities & GPU_CAP_2D_FILL) kprintf(" 2D_FILL");
+            if (dev->capabilities & GPU_CAP_2D_BLIT) kprintf(" 2D_BLIT");
+            if (dev->capabilities & GPU_CAP_HARDWARE_RING) kprintf(" HW_RING");
+            if (dev->capabilities & GPU_CAP_DMA) kprintf(" DMA");
+            if (dev->capabilities & GPU_CAP_FENCE) kprintf(" FENCE");
+            if (dev->capabilities & GPU_CAP_ALPHA_BLEND) kprintf(" BLEND");
+            kprintf(" ]\n");
+            kprintf("  Driver Status: %s\n\n", stat);
+        }
     } else if (strcmp(argv[0], "reboot") == 0 || strcmp(argv[0], "restart") == 0) {
         power_reboot();
     } else if (strcmp(argv[0], "poweroff") == 0 || strcmp(argv[0], "shutdown") == 0) {

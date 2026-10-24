@@ -1,0 +1,37 @@
+ M Makefile
+ M assets/artwork/wallpaper_1920x1080.png
+ M assets/artwork/wallpaper_3840x2160.png
+ M include/desktop.h
+ M scripts/build_uefi_disk.py
+ M src/drivers/desktop.c
+ M src/drivers/mouse.c
+ M src/kernel/main.c
+ M src/kernel/shell.c
+?? assets/artwork/wallpaper_1280x720.png
+?? assets/artwork/wallpaper_1366x768.png
+?? assets/artwork/wallpaper_2560x1440.png
+?? assets/fonts/NotoSansMono-Bold.ttf
+?? assets/fonts/NotoSansMono-Regular.ttf
+?? assets/fonts/NotoSansSymbols2-Regular.ttf
+?? checkpoints/20261022-desktop-renderer-correction/
+?? checkpoints/20261022-final-forensic-verification/
+?? checkpoints/20261023-master-desktop-ecosystem/
+?? docs/PURPLE_DESKTOP_REFERENCE_SPEC.md
+?? docs/PURPLE_DESKTOP_VISUAL_REGRESSION_REPORT.md
+?? docs/PURPLE_NOTO_FONTS_CATALOG.md
+?? docs/PURPLE_OS_FORENSIC_VERIFICATION_REPORT.md
+?? docs/PURPLE_OS_LOCKED_DESKTOP_GPU_ARCHITECTURE.md
+?? include/font.h
+?? include/font_data.h
+?? include/gpu.h
+?? scripts/capture_desktop_screenshot.py
+?? scripts/generate_noto_fonts.py
+?? scripts/verify_desktop_visual_regression.py
+?? scripts/verify_gpt_300m_layout.py
+?? scripts/verify_qemu_keyboard_guest.py
+?? src/drivers/font.c
+?? src/drivers/font_data.c
+?? src/drivers/gpu.c
+?? tests/test_font.c
+?? tests/test_gpu.c
+?? tests/test_keyboard_focus.c

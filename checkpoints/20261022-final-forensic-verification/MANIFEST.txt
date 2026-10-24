@@ -1,0 +1,20 @@
+Purple OS / Aegis64 Checkpoint: 20261022-final-forensic-verification
+Timestamp: 2026-10-22T22:00:00+05:30
+Branch: Aegis_Purple
+HEAD: e26d24fd7d3637f84e07af0aadd29859cf8087e8
+Task: Final Forensic Verification (Tests, Input, PurpleFS/GPT, GPU Real vs Prototype Audit)
+Preserved Files:
+- Makefile
+- include/desktop.h
+- src/drivers/desktop.c
+- src/drivers/mouse.c
+- src/kernel/main.c
+- src/kernel/shell.c
+- src/drivers/gpu.c
+- include/gpu.h
+- tests/test_gpu.c
+- tests/test_keyboard_focus.c
+- scripts/capture_desktop_screenshot.py
+- docs/PURPLE_OS_LOCKED_DESKTOP_GPU_ARCHITECTURE.md
+- GIT_STATUS.txt
+- GIT_DIFF.patch

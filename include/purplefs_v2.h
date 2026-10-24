@@ -138,6 +138,9 @@ int pfs2_mount(pfs2_fs_t *fs, pfs2_block_dev_t *dev);
 int pfs2_unmount(pfs2_fs_t *fs);
 
 int pfs2_create_file(pfs2_fs_t *fs, const char *name, uint16_t mode, uint32_t *out_inode);
+int pfs2_unlink(pfs2_fs_t *fs, const char *name);
+int pfs2_readdir(pfs2_fs_t *fs, uint32_t index, pfs2_dir_entry_t *out_entry, pfs2_inode_t *out_inode);
+int pfs2_rename(pfs2_fs_t *fs, const char *old_name, const char *new_name);
 int pfs2_lookup(pfs2_fs_t *fs, const char *name, uint32_t *out_inode);
 int pfs2_read_file(pfs2_fs_t *fs, uint32_t inode_num, void *buf, size_t count, uint64_t offset, size_t *out_bytes_read);
 int pfs2_write_file(pfs2_fs_t *fs, uint32_t inode_num, const void *buf, size_t count, uint64_t offset, size_t *out_bytes_written);
