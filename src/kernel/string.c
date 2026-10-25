@@ -124,4 +124,18 @@ char *strstr(const char *haystack, const char *needle) {
     }
     return NULL;
 }
+char *strdup(const char *s) {
+    if (!s) return NULL;
+    size_t len = strlen(s) + 1;
+#ifdef __KERNEL_HOST_TEST__
+    char *copy = (char *)malloc(len);
+#else
+    extern void *pmm_alloc_frames(size_t count);
+    char *copy = (char *)pmm_alloc_frames((len + 4095) / 4096);
+#endif
+    if (copy) {
+        memcpy(copy, s, len);
+    }
+    return copy;
+}
 #pragma GCC diagnostic pop
