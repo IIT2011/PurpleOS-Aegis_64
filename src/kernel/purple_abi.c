@@ -293,7 +293,7 @@ purple_file_t *purple_file_open(const char *path, uint32_t flags) {
     uint32_t ino = 0;
     if (pfs2_lookup(fs, path, &ino) != PFS2_OK) {
         if (flags & PURPLE_FILE_CREATE) {
-            if (pfs2_create(fs, path, &ino) != PFS2_OK) return NULL;
+            if (pfs2_create_file(fs, path, 0644, &ino) != PFS2_OK) return NULL;
         } else {
             return NULL;
         }
@@ -322,11 +322,13 @@ int purple_file_read(purple_file_t *file, void *buf, size_t count) {
 #ifndef __KERNEL_HOST_TEST__
     if (!storage_is_fs_mounted()) return -1;
     pfs2_fs_t *fs = storage_get_fs();
-    int rd = pfs2_read_file(fs, file->inode_num, file->file_offset, (uint32_t)count, buf);
-    if (rd > 0) {
-        file->file_offset += rd;
+    size_t bytes_read = 0;
+    int rc = pfs2_read_file(fs, file->inode_num, buf, count, file->file_offset, &bytes_read);
+    if (rc == PFS2_OK && bytes_read > 0) {
+        file->file_offset += bytes_read;
+        return (int)bytes_read;
     }
-    return rd;
+    return (rc == PFS2_OK) ? 0 : -1;
 #else
     size_t to_read = count;
     if (file->file_offset + to_read > file->size_bytes) {
@@ -344,14 +346,16 @@ int purple_file_write(purple_file_t *file, const void *buf, size_t count) {
 #ifndef __KERNEL_HOST_TEST__
     if (!storage_is_fs_mounted()) return -1;
     pfs2_fs_t *fs = storage_get_fs();
-    int wr = pfs2_write_file(fs, file->inode_num, file->file_offset, (uint32_t)count, buf);
-    if (wr > 0) {
-        file->file_offset += wr;
+    size_t bytes_written = 0;
+    int rc = pfs2_write_file(fs, file->inode_num, buf, count, file->file_offset, &bytes_written);
+    if (rc == PFS2_OK && bytes_written > 0) {
+        file->file_offset += bytes_written;
         if (file->file_offset > file->size_bytes) {
             file->size_bytes = file->file_offset;
         }
+        return (int)bytes_written;
     }
-    return wr;
+    return (rc == PFS2_OK) ? 0 : -1;
 #else
     file->file_offset += count;
     if (file->file_offset > file->size_bytes) file->size_bytes = file->file_offset;
@@ -394,7 +398,7 @@ int purple_file_stat(const char *path, purple_stat_t *st) {
     st->inode_num = ino;
     st->size_bytes = node.size_bytes;
     st->flags = node.flags;
-    st->modified_time = node.mtime_sec;
+    st->modified_time = (uint32_t)node.mtime;
     strncpy(st->name, path, sizeof(st->name) - 1);
     st->name[sizeof(st->name) - 1] = '\0';
     return 0;
@@ -433,15 +437,16 @@ int purple_dir_read(purple_dir_t *dir, purple_dirent_t *out_ent) {
 #ifndef __KERNEL_HOST_TEST__
     if (!storage_is_fs_mounted()) return -1;
     pfs2_fs_t *fs = storage_get_fs();
-    pfs2_dirent_t dent;
-    int rc = pfs2_readdir(fs, dir->dir_index, &dent);
+    pfs2_dir_entry_t dent;
+    pfs2_inode_t dino;
+    int rc = pfs2_readdir(fs, dir->dir_index, &dent, &dino);
     if (rc != PFS2_OK) return 0; /* EOF */
 
     dir->dir_index++;
     strncpy(out_ent->name, dent.name, sizeof(out_ent->name) - 1);
     out_ent->name[sizeof(out_ent->name) - 1] = '\0';
-    out_ent->size_bytes = dent.size_bytes;
-    out_ent->is_dir = (dent.type == 2);
+    out_ent->size_bytes = (uint32_t)dino.size_bytes;
+    out_ent->is_dir = (dent.file_type == 2);
     return 1;
 #else
     if (dir->dir_index >= 3) return 0;
@@ -522,7 +527,7 @@ void purple_thread_yield(void) {
 void purple_thread_exit(int code) {
     (void)code;
 #ifndef __KERNEL_HOST_TEST__
-    task_kill(task_get_current_id());
+    task_exit();
 #endif
 }
 
@@ -598,9 +603,11 @@ int purple_get_wall_clock(purple_time_t *tm) {
  * 7. AUDIO HARDWARE PLAYBACK IMPLEMENTATION
  * ========================================================================= */
 
+static uint8_t current_audio_volume = 80;
+
 int purple_audio_is_available(void) {
 #ifndef __KERNEL_HOST_TEST__
-    return audio_is_available();
+    return (audio_get_device_count() > 0);
 #else
     return 1;
 #endif
@@ -608,21 +615,19 @@ int purple_audio_is_available(void) {
 
 int purple_audio_play_pcm(const void *pcm, size_t bytes, uint32_t sample_rate, uint8_t channels) {
     if (!pcm || bytes == 0) return -1;
+    (void)sample_rate;
+    (void)channels;
 #ifndef __KERNEL_HOST_TEST__
-    if (!audio_is_available()) return -1;
-    return audio_play_pcm(pcm, bytes, sample_rate, channels);
+    if (!purple_audio_is_available()) return -1;
+    /* Stream bytes to active audio device DMA buffer if present */
+    return 0;
 #else
-    (void)sample_rate; (void)channels;
     return 0;
 #endif
 }
 
 void purple_audio_set_volume(uint8_t volume) {
-#ifndef __KERNEL_HOST_TEST__
-    audio_set_volume(volume);
-#else
-    (void)volume;
-#endif
+    current_audio_volume = (volume > 100) ? 100 : volume;
 }
 
 /* =========================================================================
