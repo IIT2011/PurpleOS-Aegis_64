@@ -794,7 +794,21 @@ static void execute_command(int argc, char **argv) {
             }
         }
     } else if (strcmp(argv[0], "video") == 0 || strcmp(argv[0], "setmode") == 0) {
-        if (argc >= 3) {
+        if (argc >= 2 && strcmp(argv[1], "test") == 0) {
+            shell_print("Executing video framebuffer color calibration self-test...\n");
+            int trc = video_test_colors();
+            if (trc == 0) {
+                shell_print("[OK] Video Color Test PASSED: Primary RGB, Yellow, Purple, White & Black verified.\n");
+            } else {
+                kprintf("[FAIL] Video Color Test Failed (error %d) - Check channel mask alignment.\n", trc);
+            }
+        } else if (argc >= 2 && strcmp(argv[1], "bgr") == 0) {
+            video_set_channel_masks(16, 8, 8, 8, 0, 8);
+            shell_print("Video channel order set to BGRX (R:pos=16, G:pos=8, B:pos=0).\n");
+        } else if (argc >= 2 && strcmp(argv[1], "rgb") == 0) {
+            video_set_channel_masks(0, 8, 8, 8, 16, 8);
+            shell_print("Video channel order set to RGBX (R:pos=0, G:pos=8, B:pos=16).\n");
+        } else if (argc >= 3) {
             uint32_t w = 0, h = 0;
             const char *sw = (strcmp(argv[0], "video") == 0 && strcmp(argv[1], "mode") == 0 && argc >= 4) ? argv[2] : argv[1];
             const char *sh = (strcmp(argv[0], "video") == 0 && strcmp(argv[1], "mode") == 0 && argc >= 4) ? argv[3] : argv[2];
@@ -814,9 +828,14 @@ static void execute_command(int argc, char **argv) {
             kprintf("\n=== Video Display Configuration ===\n");
             kprintf("  Available:  %s\n", video_is_available() ? "YES" : "NO (Headless/Serial Console Fallback)");
             if (video_is_available()) {
+                uint8_t rp = 0, gp = 0, bp = 0;
+                video_get_channel_masks(&rp, &gp, &bp);
                 kprintf("  Resolution: %ux%u@32bpp\n", video_get_width(), video_get_height());
+                kprintf("  Channels:   R_pos=%u G_pos=%u B_pos=%u (%s layout)\n",
+                        rp, gp, bp, (rp == 16 && bp == 0) ? "BGRX (Standard PC)" : (rp == 0 && bp == 16) ? "RGBX" : "Custom");
             }
-            kprintf("  Bochs VBE:  Supported (Ports 0x1CE/0x1CF, PCI 1234:1111)\n\n");
+            kprintf("  Bochs VBE:  Supported (Ports 0x1CE/0x1CF, PCI 1234:1111)\n");
+            kprintf("  Commands:   video [w h] | video test | video bgr | video rgb\n\n");
         }
     } else if (strcmp(argv[0], "clear") == 0) {
         if (video_is_available()) {
