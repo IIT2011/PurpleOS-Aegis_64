@@ -82,6 +82,31 @@ static void test_video_color_masks(void) {
     uint32_t blue = video_color(0x00, 0x00, 0xFF);
     assert(blue == 0x000000FF);
 
+    /* Test RGB vs BGR channel translation */
+    video_set_channel_masks(16, 8, 8, 8, 0, 8); // BGRX
+    video_draw_pixel(0, 0, 0xFF0000); // Red
+    assert(fake_fb[0] == 0xFF0000);
+    assert(video_get_pixel(0, 0) == 0xFF0000);
+
+    video_set_channel_masks(0, 8, 8, 8, 16, 8); // RGBX (Red at bit 0, Blue at bit 16)
+    video_draw_pixel(1, 0, 0xFF0000); // Red
+    assert(fake_fb[1] == 0x0000FF); // Hardware gets 0x0000FF
+    assert(video_get_pixel(1, 0) == 0xFF0000); // Readback correctly returns canonical Red
+
+    video_draw_pixel(2, 0, 0x0000FF); // Blue
+    assert(fake_fb[2] == 0xFF0000); // Hardware gets 0xFF0000
+    assert(video_get_pixel(2, 0) == 0x0000FF);
+
+    video_draw_pixel(3, 0, 0xFFFF00); // Yellow
+    assert(fake_fb[3] == 0x00FFFF); // Hardware gets 0x00FFFF
+    assert(video_get_pixel(3, 0) == 0xFFFF00);
+
+    assert(video_test_colors() == 0);
+
+    /* Restore standard BGRX */
+    video_set_channel_masks(16, 8, 8, 8, 0, 8);
+    assert(video_test_colors() == 0);
+
     printf("PASSED\n");
 }
 
