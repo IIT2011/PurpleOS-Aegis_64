@@ -40,6 +40,43 @@ uint32_t video_color(uint8_t r, uint8_t g, uint8_t b) {
     return r_val | g_val | b_val;
 }
 
+uint32_t video_rgb_to_hw(uint32_t rgb) {
+    if (r_pos == 16 && g_pos == 8 && b_pos == 0 && r_size == 8 && g_size == 8 && b_size == 8) {
+        return rgb;
+    }
+    uint8_t r = (rgb >> 16) & 0xFF;
+    uint8_t g = (rgb >> 8) & 0xFF;
+    uint8_t b = rgb & 0xFF;
+    uint32_t r_val = (r >> (8 - r_size)) << r_pos;
+    uint32_t g_val = (g >> (8 - g_size)) << g_pos;
+    uint32_t b_val = (b >> (8 - b_size)) << b_pos;
+    return r_val | g_val | b_val;
+}
+
+uint32_t video_hw_to_rgb(uint32_t hw) {
+    if (r_pos == 16 && g_pos == 8 && b_pos == 0 && r_size == 8 && g_size == 8 && b_size == 8) {
+        return hw;
+    }
+    uint8_t r = ((hw >> r_pos) << (8 - r_size)) & 0xFF;
+    uint8_t g = ((hw >> g_pos) << (8 - g_size)) & 0xFF;
+    uint8_t b = ((hw >> b_pos) << (8 - b_size)) & 0xFF;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+void video_set_channel_masks(uint8_t rpos, uint8_t rsz, uint8_t gpos, uint8_t gsz, uint8_t bpos, uint8_t bsz) {
+    r_pos = rpos; r_size = rsz;
+    g_pos = gpos; g_size = gsz;
+    b_pos = bpos; b_size = bsz;
+    kinfo("Video: Dynamic channel masks set to R:[pos=%u, sz=%u] G:[pos=%u, sz=%u] B:[pos=%u, sz=%u]",
+          r_pos, r_size, g_pos, g_size, b_pos, b_size);
+}
+
+void video_get_channel_masks(uint8_t *rpos, uint8_t *gpos, uint8_t *bpos) {
+    if (rpos) *rpos = r_pos;
+    if (gpos) *gpos = g_pos;
+    if (bpos) *bpos = b_pos;
+}
+
 void video_init(struct multiboot_info *mbi) {
     if (!mbi || !(mbi->flags & MULTIBOOT_INFO_FRAMEBUFFER_INFO)) {
         kinfo("Video: Framebuffer information not available from bootloader");
