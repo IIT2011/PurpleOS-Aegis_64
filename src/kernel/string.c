@@ -1,5 +1,5 @@
 #include "string.h"
-#ifdef __KERNEL_HOST_TEST__
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
 #include <stdlib.h>
 #endif
 
@@ -130,7 +130,7 @@ char *strstr(const char *haystack, const char *needle) {
 char *strdup(const char *s) {
     if (!s) return NULL;
     size_t len = strlen(s) + 1;
-#ifdef __KERNEL_HOST_TEST__
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
     char *copy = (char *)malloc(len);
 #else
     extern void *pmm_alloc_frames(size_t count);
