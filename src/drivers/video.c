@@ -227,13 +227,13 @@ int video_set_mode(uint32_t width, uint32_t height, uint32_t bpp) {
 void video_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
     if (!fb_available || x >= fb_width || y >= fb_height) return;
     uint32_t *dest = (uint32_t *)((uint8_t *)fb_ptr + y * fb_pitch) + x;
-    *dest = color;
+    *dest = video_rgb_to_hw(color);
 }
 
 uint32_t video_get_pixel(uint32_t x, uint32_t y) {
     if (!fb_available || x >= fb_width || y >= fb_height) return 0;
     const uint32_t *src = (const uint32_t *)((const uint8_t *)fb_ptr + y * fb_pitch) + x;
-    return *src;
+    return video_hw_to_rgb(*src);
 }
 
 void video_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
@@ -242,12 +242,41 @@ void video_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t co
     if (x + w > fb_width) w = fb_width - x;
     if (y + h > fb_height) h = fb_height - y;
 
+    uint32_t hw_color = video_rgb_to_hw(color);
     for (uint32_t r = 0; r < h; r++) {
         uint32_t *row = (uint32_t *)((uint8_t *)fb_ptr + (y + r) * fb_pitch) + x;
         for (uint32_t c = 0; c < w; c++) {
-            row[c] = color;
+            row[c] = hw_color;
         }
     }
+}
+
+int video_test_colors(void) {
+    if (!fb_available) return -1;
+    static const uint32_t test_colors[8] = {
+        0xFF0000, /* RED */
+        0x00FF00, /* GREEN */
+        0x0000FF, /* BLUE */
+        0xFFFF00, /* YELLOW */
+        0x00FFFF, /* CYAN */
+        0xFF00FF, /* MAGENTA */
+        0xFFFFFF, /* WHITE */
+        0x000000  /* BLACK */
+    };
+    uint32_t bar_w = fb_width / 8;
+    uint32_t bar_h = 32;
+    for (int i = 0; i < 8; i++) {
+        video_draw_rect(i * bar_w, 0, bar_w, bar_h, test_colors[i]);
+    }
+    for (int i = 0; i < 8; i++) {
+        uint32_t px = i * bar_w + bar_w / 2;
+        uint32_t py = bar_h / 2;
+        uint32_t readback = video_get_pixel(px, py);
+        if ((readback & 0xFFFFFF) != test_colors[i]) {
+            return -2;
+        }
+    }
+    return 0;
 }
 
 void video_clear(uint32_t color) {
@@ -285,6 +314,8 @@ static void video_scroll(void) {
 static void video_draw_glyph(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg) {
     uint8_t ch = (uint8_t)c;
     const uint8_t *bitmap = font8x16[ch];
+    uint32_t hw_fg = video_rgb_to_hw(fg);
+    uint32_t hw_bg = video_rgb_to_hw(bg);
 
     for (uint32_t row = 0; row < 16; row++) {
         if (y + row >= fb_height) break;
@@ -292,7 +323,7 @@ static void video_draw_glyph(uint32_t x, uint32_t y, char c, uint32_t fg, uint32
         uint32_t *dest = (uint32_t *)((uint8_t *)fb_ptr + (y + row) * fb_pitch) + x;
         for (uint32_t col = 0; col < 8; col++) {
             if (x + col < fb_width) {
-                dest[col] = (bits & (0x80 >> col)) ? fg : bg;
+                dest[col] = (bits & (0x80 >> col)) ? hw_fg : hw_bg;
             }
         }
     }
