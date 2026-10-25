@@ -26,6 +26,7 @@ C_SRCS = src/kernel/main.c \
          src/kernel/storage.c \
          src/kernel/ksym.c \
          src/kernel/apapp.c \
+         src/kernel/purple_abi.c \
          src/drivers/serial.c \
          src/drivers/video.c \
          src/drivers/font8x16.c \
