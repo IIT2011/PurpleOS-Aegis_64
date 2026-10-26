@@ -143,8 +143,12 @@ long_mode_entry:
 .align 16
 gdt64:
     .quad 0x0000000000000000    /* 0x00: Null descriptor */
-    .quad 0x00209A0000000000    /* 0x08: 64-bit Kernel Code (Execute/Read, DPL 0, L=1) */
-    .quad 0x0000920000000000    /* 0x10: 64-bit Kernel Data (Read/Write, DPL 0) */
+    .quad 0x00AF9A000000FFFF    /* 0x08: 64-bit Kernel Code (Execute/Read, DPL 0, L=1) */
+    .quad 0x00CF92000000FFFF    /* 0x10: 64-bit Kernel Data (Read/Write, DPL 0) */
+    .quad 0x00CFF2000000FFFF    /* 0x18: 64-bit User Data (Read/Write, DPL 3) */
+    .quad 0x00AFFA000000FFFF    /* 0x20: 64-bit User Code (Execute/Read, DPL 3, L=1) */
+    .quad 0x0000000000000000    /* 0x28: TSS Descriptor low */
+    .quad 0x0000000000000000    /* 0x30: TSS Descriptor high */
 gdt64_end:
 
 .global gdt64_ptr

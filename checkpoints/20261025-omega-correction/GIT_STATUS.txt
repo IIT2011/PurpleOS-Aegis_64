@@ -1,0 +1,74 @@
+On branch Aegis_Purple
+Your branch is up to date with 'origin/Aegis_Purple'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+  (commit or discard the untracked or modified content in submodules)
+	modified:   Makefile
+	modified:   README.md
+	modified:   STATUS.md
+	modified:   docs/APAPPLICATION_SPECIFICATION.md
+	modified:   host/mkpfs2_disk.c
+	modified:   include/apapp.h
+	modified:   include/desktop.h
+	modified:   include/gpt.h
+	modified:   include/kernel_storage.h
+	modified:   include/string.h
+	modified:   include/task.h
+	modified:   include/video.h
+	modified:   scripts/build_apapp.py
+	modified:   scripts/build_apdrv.py
+	modified:   scripts/build_uefi_disk.py
+	modified:   scripts/test_qemu_storage.py
+	modified:   scripts/validate_apapp.py
+	modified:   src/drivers/apdrv.c
+	modified:   src/drivers/desktop.c
+	modified:   src/drivers/video.c
+	modified:   src/fs/gpt.c
+	modified:   src/kernel/apapp.c
+	modified:   src/kernel/boot.S
+	modified:   src/kernel/idt.c
+	modified:   src/kernel/main.c
+	modified:   src/kernel/purple_abi.c
+	modified:   src/kernel/shell.c
+	modified:   src/kernel/smp.c
+	modified:   src/kernel/storage.c
+	modified:   src/kernel/string.c
+	modified:   src/kernel/switch.S
+	modified:   src/kernel/task.c
+	modified:   src/security/aegis_detect.c
+	modified:   tests/test_apapp.c
+	modified:   tests/test_native_vlc_app.c
+	modified:   vlc (modified content, untracked content)
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	checkpoints/20261025-omega-baseline/
+	checkpoints/20261025-omega-correction/
+	docs/APEXEC_FORMAT_SPECIFICATION.md
+	docs/PURPLE_OMEGA_BASELINE_AUDIT_REPORT.md
+	docs/PURPLE_OMEGA_FINAL_ACCEPTANCE_REPORT.md
+	docs/PURPLE_OS_PERSISTENT_DESKTOP_REPORT.md
+	docs/PURPLE_OS_REAL_DESKTOP_AND_VLC_REPORT.md
+	include/apexec.h
+	include/gdt.h
+	include/syscall.h
+	scripts/__pycache__/
+	scripts/build_apexec.py
+	scripts/test_sendkey.py
+	scripts/test_user_app.py
+	scripts/verify_desktop_interaction.py
+	scripts/verify_desktop_uefi.py
+	scripts/verify_omega_acceptance.py
+	src/kernel/apexec.c
+	src/kernel/gdt.c
+	src/kernel/syscall.c
+	src/kernel/syscall_entry.S
+	tests/test_apexec.c
+	tests/test_desktop_persistence.c
+	tests/test_ring3_isolation.c
+	tests/test_storage_pfs3.c
+	tools/
+
+no changes added to commit (use "git add" and/or "git commit -a")

@@ -10,6 +10,8 @@
 #include "serial.h"
 #include "io.h"
 #include "spinlock.h"
+#include "gdt.h"
+#include "syscall.h"
 
 extern uint8_t smp_trampoline_start[];
 extern uint8_t smp_trampoline_end[];
@@ -50,10 +52,16 @@ void smp_broadcast_halt(void) {
 }
 
 void smp_ap_entry(void) {
+    /* 0. Load kernel GDT & TSS on this AP core */
+    gdt_ap_init();
+
     /* 1. Load kernel IDT */
     idt_load_current();
 
-    /* 2. Initialize Local APIC on this core */
+    /* 2. Configure Syscall MSRs on this AP core */
+    syscall_ap_init();
+
+    /* 3. Initialize Local APIC on this core */
     apic_init_ap();
 
     /* 3. Determine logical core ID from APIC ID */

@@ -12,9 +12,13 @@ BUILD_DIR = build
 ASM_SRCS = src/kernel/boot.S \
            src/kernel/switch.S \
            src/kernel/interrupt.S \
+           src/kernel/syscall_entry.S \
            src/kernel/smp_trampoline.S
 
 C_SRCS = src/kernel/main.c \
+         src/kernel/gdt.c \
+         src/kernel/syscall.c \
+         src/kernel/apexec.c \
          src/kernel/string.c \
          src/kernel/idt.c \
          src/kernel/pic.c \
@@ -97,18 +101,23 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
 	$(OBJCOPY) -O elf32-i386 $< $@
 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
 
-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path $(BUILD_DIR)/test_keyboard_focus $(BUILD_DIR)/test_gpu $(BUILD_DIR)/test_font $(BUILD_DIR)/test_icons $(BUILD_DIR)/test_gui_widgets $(BUILD_DIR)/test_purple_abi $(BUILD_DIR)/test_native_vlc_app
+test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_pfs3 $(BUILD_DIR)/pfs3_tool $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_desktop_persistence $(BUILD_DIR)/test_ring3_isolation $(BUILD_DIR)/test_apexec $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path $(BUILD_DIR)/test_keyboard_focus $(BUILD_DIR)/test_gpu $(BUILD_DIR)/test_font $(BUILD_DIR)/test_icons $(BUILD_DIR)/test_gui_widgets $(BUILD_DIR)/test_purple_abi $(BUILD_DIR)/test_native_vlc_app
 	@echo "=== Running Host Test Suite ==="
 	./$(BUILD_DIR)/test_pmm
 	./$(BUILD_DIR)/test_vmm
 	./$(BUILD_DIR)/test_scheduler
 	./$(BUILD_DIR)/test_purplefs_v2
 	./$(BUILD_DIR)/test_purplefs_v3
+	./$(BUILD_DIR)/test_storage_pfs3
 	./$(BUILD_DIR)/test_storage_gpt
 	./$(BUILD_DIR)/test_acpi
 	./$(BUILD_DIR)/test_aegis_detect
 	./$(BUILD_DIR)/test_purple_detect
 	./$(BUILD_DIR)/test_desktop
+	./$(BUILD_DIR)/test_desktop_persistence
+	./$(BUILD_DIR)/test_ring3_isolation
+	@$(PYTHON) scripts/build_apexec.py
+	./$(BUILD_DIR)/test_apexec
 	./$(BUILD_DIR)/test_apdrv
 	@$(PYTHON) scripts/build_apapp.py build/apps
 	./$(BUILD_DIR)/test_apapp
@@ -133,6 +142,8 @@ test-asan:
 	./$(BUILD_DIR)/test_purplefs_v2_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_purplefs_v3.c src/fs/purplefs_v3.c src/drivers/block_dev.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_purplefs_v3_asan
 	./$(BUILD_DIR)/test_purplefs_v3_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_storage_pfs3.c src/fs/purplefs_v3.c src/drivers/block_dev.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_storage_pfs3_asan
+	./$(BUILD_DIR)/test_storage_pfs3_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -Iinclude tests/test_storage_gpt.c src/drivers/storage/ata_pio.c src/drivers/block_dev.c src/fs/gpt.c src/fs/partition_dev.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_storage_gpt_asan
 	./$(BUILD_DIR)/test_storage_gpt_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_acpi.c src/kernel/acpi.c src/kernel/cpu.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_acpi_asan
@@ -143,6 +154,13 @@ test-asan:
 	./$(BUILD_DIR)/test_purple_detect_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_asan
 	./$(BUILD_DIR)/test_desktop_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop_persistence.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_persistence_asan
+	./$(BUILD_DIR)/test_desktop_persistence_asan
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_ring3_isolation.c src/kernel/gdt.c src/kernel/syscall.c src/kernel/purple_abi.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/mm/vmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_ring3_isolation_asan
+	./$(BUILD_DIR)/test_ring3_isolation_asan
+	@$(PYTHON) scripts/build_apexec.py
+	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apexec.c src/kernel/apexec.c src/kernel/string.c src/drivers/serial.c src/mm/pmm.c src/mm/vmm.c -o $(BUILD_DIR)/test_apexec_asan
+	./$(BUILD_DIR)/test_apexec_asan
 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
 	./$(BUILD_DIR)/test_apdrv_asan
 	@$(PYTHON) scripts/build_apapp.py build/apps
@@ -180,7 +198,7 @@ $(BUILD_DIR)/test_purple_abi: tests/test_purple_abi.c src/kernel/purple_abi.c sr
 
 $(BUILD_DIR)/test_native_vlc_app: tests/test_native_vlc_app.c src/kernel/purple_abi.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
-	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@ -lm
 
 $(BUILD_DIR)/test_gui_widgets: tests/test_gui_widgets.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)
@@ -230,6 +248,18 @@ $(BUILD_DIR)/test_desktop: tests/test_desktop.c src/drivers/desktop.c src/driver
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
+$(BUILD_DIR)/test_desktop_persistence: tests/test_desktop_persistence.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_ring3_isolation: tests/test_ring3_isolation.c src/kernel/gdt.c src/kernel/syscall.c src/kernel/purple_abi.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/mm/vmm.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_apexec: tests/test_apexec.c src/kernel/apexec.c src/kernel/string.c src/drivers/serial.c src/mm/pmm.c src/mm/vmm.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
 $(BUILD_DIR)/test_keyboard_focus: tests/test_keyboard_focus.c src/drivers/keyboard.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
@@ -261,6 +291,14 @@ $(BUILD_DIR)/test_storage_gpt: tests/test_storage_gpt.c src/drivers/storage/ata_
 $(BUILD_DIR)/test_purplefs_v2: tests/test_purplefs_v2.c src/fs/purplefs_v2.c host/purplefs_v2_host.c src/kernel/string.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -g -Wall -Wextra -Iinclude $^ -o $@
+
+$(BUILD_DIR)/pfs3_tool: tools/pfs3_tool.c src/fs/purplefs_v3.c src/drivers/block_dev.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+
+$(BUILD_DIR)/test_storage_pfs3: tests/test_storage_pfs3.c src/fs/purplefs_v3.c src/drivers/block_dev.c src/kernel/string.c src/drivers/serial.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
 
 $(BUILD_DIR)/test_purplefs_v3: tests/test_purplefs_v3.c src/fs/purplefs_v3.c src/drivers/block_dev.c src/kernel/string.c src/drivers/serial.c
 	@mkdir -p $(BUILD_DIR)

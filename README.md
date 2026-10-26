@@ -1,7 +1,7 @@
 # Purple OS / Aegis64  (Warning!!!- This project is still in development)
 
 **Purple OS** is an independent, native-first 64-bit operating system designed from scratch.
-Its kernel is named **Aegis64**, its scheduler is **AegisSched_64 / PurpleSched**, its native filesystem is **PurpleFS v2**, its native driver package architecture is **APDRV v3**, its application bundle format is **`.apapplications`**, its hardware discovery engine is **PurpleDetect**, and its hardware trust mechanism is **AegisDetect**.
+Its kernel is named **Aegis64**, its scheduler is **AegisSched_64 / PurpleSched**, its native filesystem is **PurpleFS v2**, its native driver package architecture is **APDRV v3**, its application bundle format is **`.apapplication`**, its hardware discovery engine is **PurpleDetect**, and its hardware trust mechanism is **AegisDetect**.
 
 ---
 
@@ -20,7 +20,7 @@ Its kernel is named **Aegis64**, its scheduler is **AegisSched_64 / PurpleSched*
 - **Security & Integrity (AegisDetect):** Hardware Root of Trust authentication using HMAC-SHA256, baseline verification of boot and filesystem components, and tamper detection.
 - **Device & Bus Discovery (PurpleDetect):** Real-time hardware device lifecycle manager covering ISA, PCI, Serial, Timers, and Storage peripherals with background monitoring daemon.
 - **Native Driver Subsystem (APDRV v3 & KSYM):** Dynamic kernel module loading (`.apdrv`), kernel symbol table resolution, relocations (RELOC_64, 32, PC32, PLT32), W^X memory enforcement, and PCI auto-binding.
-- **Application Bundle Runtime (`.apapplications`):** Authenticated application packaging with HMAC-SHA256 signatures, permission-based capabilities, and scheduled concurrent execution.
+- **Application Bundle Runtime (`.apapplication`):** Authenticated application packaging with HMAC-SHA256 signatures, permission-based capabilities, and scheduled concurrent execution.
 - **Desktop Windowing Environment:** Floating window manager, mouse pointer tracking (PS/2 Aux IRQ 12), text window compositor, and dual-output (serial COM1 + GOP / Bochs VBE linear framebuffer).
 - **Command Shell (AegisShell):** Interactive shell with 28+ system management commands (`sysinfo`, `cpuinfo`, `mem`, `tasks`, `smp`, `smptest`, `disks`, `df`, `remount`, `sync`, `touch`, `write`, `peek`, `ls`, `aegisdetect`, `devices`, `lspci`, `desktop`, `mouse`, `ksym`, `insmod`, `lsmod`, `rmmod`, `ifconfig`, `apps`, `app`, `video`, `setmode`).
 

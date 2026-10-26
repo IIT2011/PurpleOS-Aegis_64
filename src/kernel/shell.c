@@ -107,7 +107,9 @@ static void smp_worker_func(void *arg) {
 
 static void shell_print(const char *s) {
     serial_write(s);
-    if (video_is_available() && !desktop_is_active()) {
+    if (desktop_is_active()) {
+        desktop_terminal_write(s);
+    } else if (video_is_available()) {
         video_puts(s);
     }
 }
@@ -136,6 +138,32 @@ static void test_task_worker(void *arg) {
 static void cmd_list_files(void) {
     if (!storage_is_fs_mounted()) {
         shell_print("Error: No PurpleFS volume mounted. Check 'disk status'.\n");
+        return;
+    }
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        shell_print("\nDirectory Listing of / (PurpleFS v3 Root):\n");
+        shell_print("  INODE   TYPE    SIZE (BYTES)  NAME\n");
+        shell_print("  --------------------------------------------------\n");
+        pfs3_dirent_t de;
+        uint32_t idx = 0;
+        uint32_t count = 0;
+        while (pfs3_readdir(fs3, PFS3_ROOT_INODE, idx++, &de) == PFS3_OK) {
+            if (strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;
+            count++;
+            pfs3_inode_t ino;
+            uint64_t size = 0;
+            if (pfs3_read_inode(fs3, de.inode_num, &ino) == PFS3_OK) {
+                size = ino.size_bytes;
+            }
+            kprintf("  %5lu   %s   %10lu   %s\n",
+                    (unsigned long)de.inode_num,
+                    (de.file_type == PFS3_FT_DIR ? "<DIR> " : "<FILE>"),
+                    (unsigned long)size,
+                    de.name);
+        }
+        shell_print("  --------------------------------------------------\n");
+        kprintf("  Total: %u item(s)\n\n", count);
         return;
     }
     pfs2_fs_t *fs = storage_get_fs();
@@ -193,6 +221,39 @@ static void cmd_peek_file(const char *name) {
         kprintf("Error: Invalid or unsupported file path '%s'.\n", name);
         return;
     }
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t ino = 0;
+        if (pfs3_lookup_path(fs3, norm, &ino) != PFS3_OK) {
+            kprintf("Error: File '%s' not found.\n", norm);
+            return;
+        }
+        pfs3_inode_t file_ino;
+        if (pfs3_read_inode(fs3, ino, &file_ino) != PFS3_OK) {
+            kprintf("Error: Failed to read inode for '%s'.\n", norm);
+            return;
+        }
+        size_t to_read = (file_ino.size_bytes > 512) ? 512 : (size_t)file_ino.size_bytes;
+        char buf[513];
+        memset(buf, 0, sizeof(buf));
+        size_t bytes_read = 0;
+        if (to_read > 0) {
+            int rc = pfs3_read_file(fs3, ino, buf, to_read, 0, &bytes_read);
+            if (rc != PFS3_OK) {
+                kprintf("Error: Read failed on file '%s' (code %d).\n", norm, rc);
+                return;
+            }
+        }
+        buf[bytes_read] = '\0';
+        kprintf("\n=== File: %s (%lu bytes", norm, (unsigned long)file_ino.size_bytes);
+        if (file_ino.size_bytes > 512) {
+            shell_print(", preview limited to 512 bytes");
+        }
+        shell_print(") ===\n");
+        shell_print(buf);
+        shell_print("\n=== End of File Preview ===\n\n");
+        return;
+    }
     pfs2_fs_t *fs = storage_get_fs();
     uint32_t ino = 0;
     if (pfs2_lookup(fs, norm, &ino) != PFS2_OK) {
@@ -246,6 +307,37 @@ static void cmd_touch(const char *name) {
         kprintf("Error: Invalid or unsupported file path '%s'.\n", name);
         return;
     }
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t ino = 0;
+        if (pfs3_lookup_path(fs3, norm, &ino) == PFS3_OK) {
+            kprintf("File '%s' already exists (Inode %lu).\n", norm, (unsigned long)ino);
+            return;
+        }
+        char parent[256];
+        char base[64];
+        const char *last_slash = strrchr(norm, '/');
+        uint64_t parent_ino = PFS3_ROOT_INODE;
+        if (last_slash) {
+            size_t plen = (size_t)(last_slash - norm);
+            if (plen == 0) plen = 1;
+            strncpy(parent, norm, plen);
+            parent[plen] = '\0';
+            strncpy(base, last_slash + 1, sizeof(base) - 1);
+            base[sizeof(base) - 1] = '\0';
+            pfs3_lookup_path(fs3, parent, &parent_ino);
+        } else {
+            strncpy(base, norm, sizeof(base) - 1);
+            base[sizeof(base) - 1] = '\0';
+        }
+        int rc = pfs3_create_entry(fs3, parent_ino, base, PFS3_FT_REG, &ino);
+        if (rc != PFS3_OK) {
+            kprintf("Error: Failed to create file '%s' (code %d).\n", norm, rc);
+            return;
+        }
+        kprintf("Successfully created file '%s' (Inode %lu).\n", norm, (unsigned long)ino);
+        return;
+    }
     pfs2_fs_t *fs = storage_get_fs();
     uint32_t ino = 0;
     if (pfs2_lookup(fs, norm, &ino) == PFS2_OK) {
@@ -277,6 +369,41 @@ static void cmd_write_file(const char *name, const char *text) {
     char norm[SHELL_MAX_FILENAME_LEN + 1];
     if (shell_normalize_path(name, norm, sizeof(norm)) != 0) {
         kprintf("Error: Invalid or unsupported file path '%s'.\n", name);
+        return;
+    }
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t ino = 0;
+        if (pfs3_lookup_path(fs3, norm, &ino) != PFS3_OK) {
+            char parent[256];
+            char base[64];
+            const char *last_slash = strrchr(norm, '/');
+            uint64_t parent_ino = PFS3_ROOT_INODE;
+            if (last_slash) {
+                size_t plen = (size_t)(last_slash - norm);
+                if (plen == 0) plen = 1;
+                strncpy(parent, norm, plen);
+                parent[plen] = '\0';
+                strncpy(base, last_slash + 1, sizeof(base) - 1);
+                base[sizeof(base) - 1] = '\0';
+                pfs3_lookup_path(fs3, parent, &parent_ino);
+            } else {
+                strncpy(base, norm, sizeof(base) - 1);
+                base[sizeof(base) - 1] = '\0';
+            }
+            int rc = pfs3_create_entry(fs3, parent_ino, base, PFS3_FT_REG, &ino);
+            if (rc != PFS3_OK) {
+                kprintf("Error: Failed to create file '%s' (code %d).\n", norm, rc);
+                return;
+            }
+        }
+        size_t len = strlen(text);
+        int rc = pfs3_write_file(fs3, ino, text, len, 0);
+        if (rc != PFS3_OK) {
+            kprintf("Error: Failed to write to file '%s' (code %d).\n", norm, rc);
+            return;
+        }
+        kprintf("Successfully wrote %lu bytes to '%s' (Inode %lu).\n", (unsigned long)len, norm, (unsigned long)ino);
         return;
     }
     pfs2_fs_t *fs = storage_get_fs();
@@ -398,8 +525,8 @@ static void execute_command(int argc, char **argv) {
         shell_print("  usb               - Report detected USB host controllers\n");
         shell_print("  audio             - Report detected multimedia audio controllers\n");
         shell_print("  date / time       - Display current RTC CMOS time and date\n");
-        shell_print("  app list / apps   - List active .apapplications application bundles\n");
-        shell_print("  app run <path>    - Launch authenticated .apapplications bundle\n");
+        shell_print("  app list / apps   - List active .apapplication application bundles\n");
+        shell_print("  app run <path>    - Launch authenticated .apapplication bundle\n");
         shell_print("  app kill <id>     - Terminate running application bundle\n");
         shell_print("  video [w h]       - Query or switch video display resolution\n");
         shell_print("  gpu [status|bench]- Report GPU hardware engine or run 2D benchmark\n");
@@ -415,7 +542,7 @@ static void execute_command(int argc, char **argv) {
         shell_print("  Scheduler:    AegisSched_64 / PurpleSched (Round-Robin, 4-tier)\n");
         shell_print("  Filesystem:   PurpleFS v2 / PurpleFS v3 (64-bit Hierarchical)\n");
         shell_print("  Driver Model: APDRV v3 (.apdrv Ring 0 packages)\n");
-        shell_print("  App Format:   .apapplications (Native bundle format)\n");
+        shell_print("  App Format:   .apapplication (Native bundle format)\n");
         shell_print("  Trust Model:  AegisDetect Hardware Baseline\n\n");
     } else if (strcmp(argv[0], "uname") == 0) {
         if (argc > 1 && strcmp(argv[1], "-a") == 0) {
@@ -838,9 +965,12 @@ static void execute_command(int argc, char **argv) {
             kprintf("  Commands:   video [w h] | video test | video bgr | video rgb\n\n");
         }
     } else if (strcmp(argv[0], "clear") == 0) {
-        if (video_is_available()) {
+        if (desktop_is_active()) {
+            desktop_terminal_clear();
+        } else if (video_is_available()) {
             video_clear(COLOR_PURPLE_BG);
         }
+        serial_write("\033[2J\033[H");
     } else if (strcmp(argv[0], "echo") == 0) {
         for (int i = 1; i < argc; i++) {
             shell_print(argv[i]);
@@ -952,6 +1082,13 @@ void shell_step(void) {
         if (c == '\n' || c == '\r') {
             shell_print("\n");
             shell_buf[shell_buf_len] = '\0';
+            if (desktop_is_active() && shell_buf_len > 0) {
+                char echo_cmd[TERM_LINE_LEN];
+                echo_cmd[0] = '>'; echo_cmd[1] = ' ';
+                strncpy(echo_cmd + 2, shell_buf, TERM_LINE_LEN - 3);
+                echo_cmd[TERM_LINE_LEN - 1] = '\0';
+                desktop_terminal_write(echo_cmd);
+            }
             parse_and_execute(shell_buf);
             shell_buf_len = 0;
             shell_prompt();
@@ -960,7 +1097,7 @@ void shell_step(void) {
                 shell_buf_len--;
                 shell_buf[shell_buf_len] = '\0';
                 serial_write("\b \b");
-                if (video_is_available()) {
+                if (video_is_available() && !desktop_is_active()) {
                     video_putc('\b');
                 }
             }
@@ -969,7 +1106,7 @@ void shell_step(void) {
                 shell_buf[shell_buf_len++] = c;
                 shell_buf[shell_buf_len] = '\0';
                 serial_putchar(c);
-                if (video_is_available()) {
+                if (video_is_available() && !desktop_is_active()) {
                     video_putc(c);
                 }
             }

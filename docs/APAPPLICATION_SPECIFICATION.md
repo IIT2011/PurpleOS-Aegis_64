@@ -2,7 +2,7 @@
 
 **Classification:** Native Userland Application Package Specification  
 **Architecture:** Aegis64 / Purple OS  
-**File Extension:** `.apapplication` (or `.apapp`)  
+**File Extension:** `.apapplication` (canonical, mandatory — `.apapp` is prohibited)  
 **Package Magic:** `APAPP100` (8 bytes)  
 **Format Version:** 1  
 **Security Model:** AegisDetect HMAC-SHA256 Integrity Verification with Trust Anchor  

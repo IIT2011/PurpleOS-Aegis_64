@@ -30,6 +30,9 @@ typedef struct gpt_guid {
 /* PurpleFS v2 Partition Type GUID: 4F535046-5332-0001-8000-00A0C911D504 */
 extern const gpt_guid_t GPT_GUID_PURPLEFS_V2;
 
+/* PurpleFS v3 Partition Type GUID: 4F535046-5333-0001-8000-00A0C911D504 */
+extern const gpt_guid_t GPT_GUID_PURPLEFS_V3;
+
 /* EFI System Partition (ESP) GUID: C12A7328-F81F-11D2-BA4B-00A0C93EC93B */
 extern const gpt_guid_t GPT_GUID_ESP;
 

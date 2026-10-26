@@ -421,41 +421,82 @@ int apdrv_load_from_storage(const char *filepath) {
         return -2;
     }
 
-    pfs2_fs_t *fs = storage_get_fs();
-    uint32_t ino = 0;
-    if (pfs2_lookup(fs, filepath, &ino) != PFS2_OK) {
-        kerror("APDRV: File '%s' not found on PurpleFS", filepath);
-        return -3;
-    }
+    uint8_t *buf = NULL;
+    uint32_t file_size = 0;
+    uint32_t pages = 0;
 
-    pfs2_inode_t finode;
-    if (pfs2_read_inode(fs, ino, &finode) != PFS2_OK) {
-        kerror("APDRV: Failed to read inode for '%s'", filepath);
-        return -4;
-    }
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t ino3 = 0;
+        if (pfs3_lookup_path(fs3, filepath, &ino3) != PFS3_OK) {
+            kerror("APDRV: File '%s' not found on PurpleFS v3", filepath);
+            return -3;
+        }
 
-    if (finode.size_bytes < sizeof(apdrv_header_t) || finode.size_bytes > 512 * 1024) {
-        kerror("APDRV: Invalid driver binary size (%u bytes) for '%s'", (uint32_t)finode.size_bytes, filepath);
-        return -5;
-    }
+        pfs3_inode_t finode3;
+        if (pfs3_read_inode(fs3, ino3, &finode3) != PFS3_OK) {
+            kerror("APDRV: Failed to read inode for '%s'", filepath);
+            return -4;
+        }
 
-    uint32_t pages = (finode.size_bytes + 4095) / 4096;
-    void *buf = pmm_alloc_frames(pages);
-    if (!buf) {
-        kerror("APDRV: Out of memory reading '%s'", filepath);
-        return -6;
-    }
+        if (finode3.size_bytes < sizeof(apdrv_header_t) || finode3.size_bytes > 512 * 1024) {
+            kerror("APDRV: Invalid driver binary size (%u bytes) for '%s'", (uint32_t)finode3.size_bytes, filepath);
+            return -5;
+        }
 
-    size_t bytes_read = 0;
-    int rc = pfs2_read_file(fs, ino, buf, finode.size_bytes, 0, &bytes_read);
-    if (rc != PFS2_OK || bytes_read != finode.size_bytes) {
-        pmm_free_frames(buf, pages);
-        kerror("APDRV: Storage read error on '%s' (rc=%d)", filepath, rc);
-        return -7;
+        file_size = (uint32_t)finode3.size_bytes;
+        pages = (file_size + 4095) / 4096;
+        buf = (uint8_t *)pmm_alloc_frames(pages);
+        if (!buf) {
+            kerror("APDRV: Out of memory reading '%s'", filepath);
+            return -6;
+        }
+
+        uint64_t bytes_read = 0;
+        int rc = pfs3_read_file(fs3, ino3, buf, file_size, 0, &bytes_read);
+        if (rc != PFS3_OK || bytes_read != file_size) {
+            pmm_free_frames(buf, pages);
+            kerror("APDRV: Storage read error on '%s' (rc=%d)", filepath, rc);
+            return -7;
+        }
+    } else {
+        pfs2_fs_t *fs = storage_get_fs();
+        uint32_t ino = 0;
+        if (pfs2_lookup(fs, filepath, &ino) != PFS2_OK) {
+            kerror("APDRV: File '%s' not found on PurpleFS v2", filepath);
+            return -3;
+        }
+
+        pfs2_inode_t finode;
+        if (pfs2_read_inode(fs, ino, &finode) != PFS2_OK) {
+            kerror("APDRV: Failed to read inode for '%s'", filepath);
+            return -4;
+        }
+
+        if (finode.size_bytes < sizeof(apdrv_header_t) || finode.size_bytes > 512 * 1024) {
+            kerror("APDRV: Invalid driver binary size (%u bytes) for '%s'", (uint32_t)finode.size_bytes, filepath);
+            return -5;
+        }
+
+        file_size = (uint32_t)finode.size_bytes;
+        pages = (file_size + 4095) / 4096;
+        buf = (uint8_t *)pmm_alloc_frames(pages);
+        if (!buf) {
+            kerror("APDRV: Out of memory reading '%s'", filepath);
+            return -6;
+        }
+
+        size_t bytes_read = 0;
+        int rc = pfs2_read_file(fs, ino, buf, file_size, 0, &bytes_read);
+        if (rc != PFS2_OK || bytes_read != file_size) {
+            pmm_free_frames(buf, pages);
+            kerror("APDRV: Storage read error on '%s' (rc=%d)", filepath, rc);
+            return -7;
+        }
     }
 
     apdrv_module_t *mod = NULL;
-    int load_rc = apdrv_load(buf, finode.size_bytes, &mod);
+    int load_rc = apdrv_load(buf, file_size, &mod);
     pmm_free_frames(buf, pages);
     return load_rc;
 }

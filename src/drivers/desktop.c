@@ -5,6 +5,7 @@
 #include "serial.h"
 #include "string.h"
 #include "cpu.h"
+#include "io.h"
 #include "pmm.h"
 #include "kernel_storage.h"
 #include "purple_detect.h"
@@ -15,12 +16,27 @@
 #include "rtc.h"
 #include "font.h"
 #include "font8x16.h"
+#include "apapp.h"
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+#include <stdlib.h>
+#endif
 
 #ifdef __KERNEL_HOST_TEST__
 __attribute__((weak)) int storage_is_fs_mounted(void) { return 0; }
 __attribute__((weak)) pfs2_fs_t *storage_get_fs(void) { return NULL; }
+__attribute__((weak)) int storage_get_fs_version(void) { return 0; }
+__attribute__((weak)) pfs3_fs_t *storage_get_fs3(void) { return NULL; }
 __attribute__((weak)) int storage_is_writable(void) { return 0; }
 __attribute__((weak)) int storage_set_writable(int w) { (void)w; return 0; }
+__attribute__((weak)) int pfs3_readdir(pfs3_fs_t *fs, uint64_t d, uint32_t i, pfs3_dirent_t *e) { (void)fs; (void)d; (void)i; (void)e; return PFS3_ERR_IO; }
+__attribute__((weak)) int pfs3_lookup_path(pfs3_fs_t *fs, const char *p, uint64_t *o) { (void)fs; (void)p; (void)o; return PFS3_ERR_NOT_FOUND; }
+__attribute__((weak)) int pfs3_read_file(pfs3_fs_t *fs, uint64_t ino, void *b, uint64_t c, uint64_t off, uint64_t *o) { (void)fs; (void)ino; (void)b; (void)c; (void)off; (void)o; return PFS3_ERR_IO; }
+__attribute__((weak)) int pfs3_write_file(pfs3_fs_t *fs, uint64_t ino, const void *b, uint64_t c, uint64_t off) { (void)fs; (void)ino; (void)b; (void)c; (void)off; return PFS3_ERR_IO; }
+__attribute__((weak)) int pfs3_create_entry(pfs3_fs_t *fs, uint64_t d, const char *n, uint8_t t, uint64_t *o) { (void)fs; (void)d; (void)n; (void)t; (void)o; return PFS3_ERR_IO; }
+__attribute__((weak)) int pfs3_unlink_entry(pfs3_fs_t *fs, uint64_t d, const char *n) { (void)fs; (void)d; (void)n; return PFS3_ERR_IO; }
+__attribute__((weak)) int pfs3_mkdir(pfs3_fs_t *fs, uint64_t p, const char *n, uint64_t *o) { (void)fs; (void)p; (void)n; (void)o; return PFS3_ERR_IO; }
+__attribute__((weak)) int pfs3_read_inode(pfs3_fs_t *fs, uint64_t ino, pfs3_inode_t *o) { (void)fs; (void)ino; (void)o; return PFS3_ERR_IO; }
+__attribute__((weak)) int apapp_launch_from_storage(const char *p, app_entry_fn e) { (void)p; (void)e; return 0; }
 __attribute__((weak)) int pfs2_readdir(pfs2_fs_t *fs, uint32_t i, pfs2_dir_entry_t *e, pfs2_inode_t *in) { (void)fs; (void)i; (void)e; (void)in; return PFS2_ERR_IO; }
 __attribute__((weak)) int pfs2_create_file(pfs2_fs_t *fs, const char *n, uint16_t m, uint32_t *o) { (void)fs; (void)n; (void)m; (void)o; return PFS2_ERR_IO; }
 __attribute__((weak)) int pfs2_unlink(pfs2_fs_t *fs, const char *n) { (void)fs; (void)n; return PFS2_ERR_IO; }
@@ -32,6 +48,10 @@ __attribute__((weak)) int pfs2_format(pfs2_block_dev_t *d, uint32_t t, const cha
 __attribute__((weak)) int pfs2_mount(pfs2_fs_t *f, pfs2_block_dev_t *d) { (void)f; (void)d; return PFS2_OK; }
 __attribute__((weak)) int pfs2_journal_replay_if_needed(pfs2_fs_t *f) { (void)f; return PFS2_OK; }
 __attribute__((weak)) uint64_t pit_get_ticks(void) { return 0; }
+__attribute__((weak)) uint32_t block_dev_count(void) { return 1; }
+__attribute__((weak)) block_device_t *block_dev_get_by_index(uint32_t i) { (void)i; static block_device_t d; strncpy(d.name, "sata0", 31); strncpy(d.model, "QEMU HARDDISK", 47); d.type = BLOCK_DEV_TYPE_AHCI; d.total_blocks = 262144; d.block_size = 512; return &d; }
+__attribute__((weak)) const char *block_dev_type_to_str(block_dev_type_t t) { (void)t; return "AHCI/SATA"; }
+__attribute__((weak)) kernel_storage_t g_kernel_storage;
 #endif
 
 extern const uint8_t _binary_build_wallpaper_clean_1672x941_raw_start[] __attribute__((weak));
@@ -49,6 +69,56 @@ static gui_window_t windows[DESKTOP_MAX_WINDOWS];
 static uint32_t window_count = 0;
 static uint32_t z_order[DESKTOP_MAX_WINDOWS];
 static int desktop_active = 0;
+
+static uint32_t *desktop_bg_surface = NULL;
+static uint32_t desktop_bg_width = 0;
+static uint32_t desktop_bg_height = 0;
+
+static void render_cosmic_background(uint32_t w, uint32_t h);
+static void draw_window_frame(const gui_window_t *win);
+static void draw_window_content(const gui_window_t *win, uint32_t idx);
+static void desktop_paint_window(gui_window_t *win, uint32_t idx);
+
+static void desktop_ensure_bg_surface(uint32_t scr_w, uint32_t scr_h) {
+    if (scr_w == 0 || scr_h == 0) return;
+    if (desktop_bg_surface && desktop_bg_width == scr_w && desktop_bg_height == scr_h) {
+        return;
+    }
+    size_t sz = (size_t)scr_w * scr_h * sizeof(uint32_t);
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+    if (desktop_bg_surface) free(desktop_bg_surface);
+    desktop_bg_surface = (uint32_t *)malloc(sz);
+#else
+    desktop_bg_surface = (uint32_t *)pmm_alloc_frames((sz + 4095) / 4096);
+#endif
+    if (desktop_bg_surface) {
+        desktop_bg_width = scr_w;
+        desktop_bg_height = scr_h;
+        video_set_render_target(desktop_bg_surface, scr_w, scr_h, scr_w * 4);
+        render_cosmic_background(scr_w, scr_h);
+        video_reset_render_target();
+    }
+}
+
+static void desktop_ensure_window_surface(gui_window_t *win) {
+    if (!win || win->width == 0 || win->height == 0) return;
+    if (win->surface && win->surface_w == win->width && win->surface_h == win->height) {
+        return;
+    }
+    size_t sz = (size_t)win->width * win->height * sizeof(uint32_t);
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+    if (win->surface) free(win->surface);
+    win->surface = (uint32_t *)malloc(sz);
+#else
+    win->surface = (uint32_t *)pmm_alloc_frames((sz + 4095) / 4096);
+#endif
+    if (win->surface) {
+        win->surface_w = win->width;
+        win->surface_h = win->height;
+        win->surface_pitch = win->width * 4;
+        memset(win->surface, 0, sz);
+    }
+}
 
 static int launcher_open = 0;
 static char launcher_search[32] = {0};
@@ -182,6 +252,9 @@ int desktop_create_window(const char *title, uint32_t x, uint32_t y, uint32_t w,
     win->focused = 1;
     win->type = WIN_TYPE_GENERIC;
 
+    /* Allocate bounded surface for this window */
+    desktop_ensure_window_surface(win);
+
     z_order[idx] = idx;
     bring_to_front((int)idx);
     return win->id;
@@ -192,6 +265,16 @@ int desktop_close_window(uint32_t id) {
         if (windows[i].id == id) {
             windows[i].visible = 0;
             windows[i].focused = 0;
+            for (int z = (int)window_count - 1; z >= 0; z--) {
+                uint32_t next_idx = z_order[z];
+                if (windows[next_idx].visible) {
+                    bring_to_front((int)next_idx);
+                    break;
+                }
+            }
+            if (desktop_active) {
+                desktop_composite();
+            }
             return 0;
         }
     }
@@ -202,6 +285,9 @@ int desktop_focus_window(uint32_t id) {
     for (uint32_t i = 0; i < window_count; i++) {
         if (windows[i].id == id) {
             bring_to_front((int)i);
+            if (desktop_active) {
+                desktop_render();
+            }
             return 0;
         }
     }
@@ -214,8 +300,14 @@ int desktop_toggle_window(uint32_t id) {
             windows[i].visible = !windows[i].visible;
             if (windows[i].visible) {
                 bring_to_front((int)i);
+                if (desktop_active) {
+                    desktop_render();
+                }
             } else {
                 windows[i].focused = 0;
+                if (desktop_active) {
+                    desktop_composite();
+                }
             }
             return windows[i].visible;
         }
@@ -234,6 +326,9 @@ int desktop_minimize_window(uint32_t id) {
                     bring_to_front((int)next_idx);
                     break;
                 }
+            }
+            if (desktop_active) {
+                desktop_composite();
             }
             return 0;
         }
@@ -265,7 +360,11 @@ int desktop_maximize_window(uint32_t id) {
                 w->width = w->saved_w;
                 w->height = w->saved_h;
             }
+            desktop_ensure_window_surface(w);
             bring_to_front((int)i);
+            if (desktop_active) {
+                desktop_render();
+            }
             return 0;
         }
     }
@@ -449,6 +548,7 @@ static void desktop_load_settings(void) {
 
 void desktop_terminal_put_line(gui_window_t *win, const char *line) {
     if (!win) return;
+    kinfo("[TERM] %s", line ? line : "");
     if (win->output_count < TERM_MAX_OUTPUT_LINES) {
         strncpy(win->output_lines[win->output_count], line, TERM_LINE_LEN - 1);
         win->output_lines[win->output_count][TERM_LINE_LEN - 1] = '\0';
@@ -514,9 +614,78 @@ void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
         win->term_scroll_offset = 0;
     } else if (strcmp(cmd, "pwd") == 0 || strcmp(cmd, "show location") == 0) {
         desktop_terminal_put_line(win, "/ (PurpleFS v2/v3 System Root)");
-    } else if (strcmp(cmd, "ls") == 0 || strcmp(cmd, "list files") == 0) {
-        desktop_terminal_put_line(win, "Directory Listing of / (PurpleFS v2 Mounted):");
-        if (storage_is_fs_mounted()) {
+    } else if (strncmp(cmd, "ls", 2) == 0 || strncmp(cmd, "list files", 10) == 0) {
+        const char *target_path = "/";
+        const char *arg = (cmd[0] == 'l' && cmd[1] == 's') ? (cmd + 2) : (cmd + 10);
+        while (*arg == ' ') arg++;
+        if (*arg == '-' && *(arg + 1) == 'l') {
+            arg += 2;
+            while (*arg == ' ') arg++;
+        }
+        if (*arg != '\0') {
+            target_path = arg;
+        }
+
+        if (storage_get_fs_version() == 3) {
+            pfs3_fs_t *fs3 = storage_get_fs3();
+            uint64_t target_ino = PFS3_ROOT_INODE;
+            int lrc = PFS3_OK;
+            if (strcmp(target_path, "/") != 0) {
+                lrc = pfs3_lookup_path(fs3, target_path, &target_ino);
+            }
+            if (lrc != PFS3_OK) {
+                char err_buf[96];
+                snprintf(err_buf, sizeof(err_buf), "ls: cannot access '%s': No such file or directory", target_path);
+                desktop_terminal_put_line(win, err_buf);
+            } else {
+                pfs3_inode_t dir_ino;
+                if (pfs3_read_inode(fs3, target_ino, &dir_ino) != PFS3_OK || !(dir_ino.mode & PFS3_MODE_DIR)) {
+                    char err_buf[96];
+                    snprintf(err_buf, sizeof(err_buf), "ls: '%s': Not a directory", target_path);
+                    desktop_terminal_put_line(win, err_buf);
+                } else {
+                    char hdr[96];
+                    snprintf(hdr, sizeof(hdr), "Directory Listing of %s (PurpleFS v3 Hierarchical):", target_path);
+                    desktop_terminal_put_line(win, hdr);
+                    pfs3_dirent_t de;
+                    uint32_t idx = 0;
+                    int count = 0;
+                    while (pfs3_readdir(fs3, target_ino, idx++, &de) == PFS3_OK) {
+                        if (strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;
+                        pfs3_inode_t f_ino;
+                        uint64_t f_sz = 0;
+                        if (pfs3_read_inode(fs3, de.inode_num, &f_ino) == PFS3_OK) {
+                            f_sz = f_ino.size_bytes;
+                        }
+                        char l_buf[TERM_LINE_LEN];
+                        memset(l_buf, ' ', sizeof(l_buf));
+                        size_t nl = strlen(de.name);
+                        if (nl > 36) nl = 36;
+                        memcpy(l_buf, "  ", 2);
+                        memcpy(l_buf + 2, de.name, nl);
+                        const char *t_str = (de.file_type == PFS3_FT_DIR) ? "<DIR>" : "<FILE>";
+                        memcpy(l_buf + 40, t_str, strlen(t_str));
+                        char sz_str[32];
+                        if (de.file_type == PFS3_FT_DIR) {
+                            snprintf(sz_str, sizeof(sz_str), "        -");
+                        } else if (f_sz >= 1048576) {
+                            snprintf(sz_str, sizeof(sz_str), "%5lu MB", (unsigned long)(f_sz / 1048576));
+                        } else if (f_sz >= 1024) {
+                            snprintf(sz_str, sizeof(sz_str), "%5lu KB", (unsigned long)(f_sz / 1024));
+                        } else {
+                            snprintf(sz_str, sizeof(sz_str), "%5lu B ", (unsigned long)f_sz);
+                        }
+                        memcpy(l_buf + 48, sz_str, strlen(sz_str));
+                        l_buf[58] = '\0';
+                        desktop_terminal_put_line(win, l_buf);
+                        count++;
+                    }
+                    if (count == 0) {
+                        desktop_terminal_put_line(win, "  (Directory is empty)");
+                    }
+                }
+            }
+        } else if (storage_is_fs_mounted()) {
             pfs2_fs_t *fs = storage_get_fs();
             pfs2_dir_entry_t ent;
             pfs2_inode_t ino;
@@ -526,12 +695,12 @@ void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
                     char l_buf[TERM_LINE_LEN];
                     memset(l_buf, ' ', sizeof(l_buf));
                     size_t nl = strlen(ent.name);
-                    if (nl > 20) nl = 20;
+                    if (nl > 36) nl = 36;
                     memcpy(l_buf, "  ", 2);
                     memcpy(l_buf + 2, ent.name, nl);
                     const char *t_str = (ent.file_type == 2) ? "<DIR>" : "<FILE>";
-                    memcpy(l_buf + 24, t_str, strlen(t_str));
-                    l_buf[34] = '\0';
+                    memcpy(l_buf + 40, t_str, strlen(t_str));
+                    l_buf[48] = '\0';
                     desktop_terminal_put_line(win, l_buf);
                     count++;
                 }
@@ -540,13 +709,55 @@ void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
                 desktop_terminal_put_line(win, "  (Directory is empty)");
             }
         } else {
-            desktop_terminal_put_line(win, "  welcome.txt (132 B)  version.txt (65 B)  motd (59 B)");
-            desktop_terminal_put_line(win, "  apps/ (Directory)    drivers/ (Directory)");
+            desktop_terminal_put_line(win, "  welcome.txt (134 B)  version.txt (65 B)  motd (59 B)");
+            desktop_terminal_put_line(win, "  Boot/ (Directory)    System/ (Directory) Users/ (Directory)");
         }
+    } else if (strncmp(cmd, "app run ", 8) == 0 || strncmp(cmd, "run ", 4) == 0) {
+        const char *app_path = (cmd[0] == 'a') ? (cmd + 8) : (cmd + 4);
+        while (*app_path == ' ') app_path++;
+        int rc = apapp_launch_from_storage(app_path, NULL);
+        if (rc == APAPP_OK) {
+            desktop_terminal_put_line(win, "Application bundle launched successfully.");
+        } else {
+            desktop_terminal_put_line(win, "Error: Failed to launch application bundle (noncanonical or invalid bundle).");
+        }
+        bring_to_front(0);
+        windows[0].focused = 1;
+        current_focus = FOCUS_WINDOW;
     } else if (strncmp(cmd, "touch ", 6) == 0 || strncmp(cmd, "create file ", 12) == 0) {
         const char *fname = (cmd[0] == 't') ? (cmd + 6) : (cmd + 12);
         while (*fname == ' ') fname++;
-        if (storage_is_fs_mounted()) {
+        if (storage_get_fs_version() == 3) {
+            pfs3_fs_t *fs3 = storage_get_fs3();
+            uint64_t existing_ino = 0;
+            if (pfs3_lookup_path(fs3, fname, &existing_ino) == PFS3_OK) {
+                desktop_terminal_put_line(win, "Error: File already exists.");
+            } else {
+                char parent[256];
+                char base[64];
+                const char *last_slash = strrchr(fname, '/');
+                uint64_t parent_ino = PFS3_ROOT_INODE;
+                if (last_slash) {
+                    size_t plen = (size_t)(last_slash - fname);
+                    if (plen == 0) plen = 1;
+                    strncpy(parent, fname, plen);
+                    parent[plen] = '\0';
+                    strncpy(base, last_slash + 1, sizeof(base) - 1);
+                    base[sizeof(base) - 1] = '\0';
+                    pfs3_lookup_path(fs3, parent, &parent_ino);
+                } else {
+                    strncpy(base, fname, sizeof(base) - 1);
+                    base[sizeof(base) - 1] = '\0';
+                }
+                uint64_t new_ino = 0;
+                int rc = pfs3_create_entry(fs3, parent_ino, base, PFS3_FT_REG, &new_ino);
+                if (rc == PFS3_OK) {
+                    desktop_terminal_put_line(win, "Successfully created file on PurpleFS v3.");
+                } else {
+                    desktop_terminal_put_line(win, "Error: Failed to create file on PurpleFS v3.");
+                }
+            }
+        } else if (storage_is_fs_mounted()) {
             pfs2_fs_t *fs = storage_get_fs();
             uint32_t ino = 0;
             int err = pfs2_create_file(fs, fname, 0644, &ino);
@@ -562,10 +773,136 @@ void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
         } else {
             desktop_terminal_put_line(win, "Error: No storage volume mounted.");
         }
+    } else if (strncmp(cmd, "write ", 6) == 0) {
+        const char *arg = cmd + 6;
+        while (*arg == ' ') arg++;
+        const char *sp = strchr(arg, ' ');
+        if (!sp) {
+            desktop_terminal_put_line(win, "Usage: write <file> <text...>");
+        } else {
+            char fname[128];
+            size_t nlen = (size_t)(sp - arg);
+            if (nlen >= sizeof(fname)) nlen = sizeof(fname) - 1;
+            strncpy(fname, arg, nlen);
+            fname[nlen] = '\0';
+            const char *text = sp + 1;
+            while (*text == ' ') text++;
+
+            if (storage_get_fs_version() == 3) {
+                pfs3_fs_t *fs3 = storage_get_fs3();
+                uint64_t target_ino = 0;
+                if (pfs3_lookup_path(fs3, fname, &target_ino) != PFS3_OK) {
+                    char parent[256];
+                    char base[64];
+                    const char *last_slash = strrchr(fname, '/');
+                    uint64_t parent_ino = PFS3_ROOT_INODE;
+                    if (last_slash) {
+                        size_t plen = (size_t)(last_slash - fname);
+                        if (plen == 0) plen = 1;
+                        strncpy(parent, fname, plen);
+                        parent[plen] = '\0';
+                        strncpy(base, last_slash + 1, sizeof(base) - 1);
+                        base[sizeof(base) - 1] = '\0';
+                        pfs3_lookup_path(fs3, parent, &parent_ino);
+                    } else {
+                        strncpy(base, fname, sizeof(base) - 1);
+                        base[sizeof(base) - 1] = '\0';
+                    }
+                    pfs3_create_entry(fs3, parent_ino, base, PFS3_FT_REG, &target_ino);
+                }
+                if (target_ino != 0) {
+                    size_t tlen = strlen(text);
+                    int rc = pfs3_write_file(fs3, target_ino, text, tlen, 0);
+                    if (rc == PFS3_OK) {
+                        char out_msg[256];
+                        snprintf(out_msg, sizeof(out_msg), "Successfully wrote %lu bytes to '%s'.", (unsigned long)tlen, fname);
+                        desktop_terminal_put_line(win, out_msg);
+                    } else {
+                        desktop_terminal_put_line(win, "Error: Failed to write to file.");
+                    }
+                } else {
+                    desktop_terminal_put_line(win, "Error: Failed to locate or create file.");
+                }
+            } else if (storage_is_fs_mounted()) {
+                pfs2_fs_t *fs = storage_get_fs();
+                uint32_t ino = 0;
+                if (pfs2_lookup(fs, fname, &ino) != PFS2_OK) {
+                    pfs2_create_file(fs, fname, 0644, &ino);
+                }
+                if (ino != 0) {
+                    size_t tlen = strlen(text);
+                    size_t written = 0;
+                    pfs2_write_file(fs, ino, text, tlen, 0, &written);
+                    pfs2_sync(fs);
+                    char out_msg[256];
+                    snprintf(out_msg, sizeof(out_msg), "Successfully wrote %lu bytes to '%s'.", (unsigned long)written, fname);
+                    desktop_terminal_put_line(win, out_msg);
+                } else {
+                    desktop_terminal_put_line(win, "Error: Failed to create or open file.");
+                }
+            } else {
+                desktop_terminal_put_line(win, "Error: No storage volume mounted.");
+            }
+        }
+    } else if (strncmp(cmd, "mkdir ", 6) == 0 || strncmp(cmd, "make folder ", 12) == 0) {
+        const char *dname = (cmd[0] == 'm') ? (cmd + 6) : (cmd + 12);
+        while (*dname == ' ') dname++;
+        if (storage_get_fs_version() == 3) {
+            pfs3_fs_t *fs3 = storage_get_fs3();
+            char parent[256];
+            char base[64];
+            const char *last_slash = strrchr(dname, '/');
+            uint64_t parent_ino = PFS3_ROOT_INODE;
+            if (last_slash) {
+                size_t plen = (size_t)(last_slash - dname);
+                if (plen == 0) plen = 1;
+                strncpy(parent, dname, plen);
+                parent[plen] = '\0';
+                strncpy(base, last_slash + 1, sizeof(base) - 1);
+                base[sizeof(base) - 1] = '\0';
+                pfs3_lookup_path(fs3, parent, &parent_ino);
+            } else {
+                strncpy(base, dname, sizeof(base) - 1);
+                base[sizeof(base) - 1] = '\0';
+            }
+            uint64_t new_dir_ino = 0;
+            int rc = pfs3_mkdir(fs3, parent_ino, base, &new_dir_ino);
+            if (rc == PFS3_OK) {
+                desktop_terminal_put_line(win, "Successfully created directory on PurpleFS v3.");
+            } else {
+                desktop_terminal_put_line(win, "Error: Failed to create directory.");
+            }
+        } else {
+            desktop_terminal_put_line(win, "Error: Directory creation not supported on legacy volume.");
+        }
     } else if (strncmp(cmd, "rm ", 3) == 0 || strncmp(cmd, "delete file ", 12) == 0) {
         const char *fname = (cmd[0] == 'r') ? (cmd + 3) : (cmd + 12);
         while (*fname == ' ') fname++;
-        if (storage_is_fs_mounted()) {
+        if (storage_get_fs_version() == 3) {
+            pfs3_fs_t *fs3 = storage_get_fs3();
+            char parent[256];
+            char base[64];
+            const char *last_slash = strrchr(fname, '/');
+            uint64_t parent_ino = PFS3_ROOT_INODE;
+            if (last_slash) {
+                size_t plen = (size_t)(last_slash - fname);
+                if (plen == 0) plen = 1;
+                strncpy(parent, fname, plen);
+                parent[plen] = '\0';
+                strncpy(base, last_slash + 1, sizeof(base) - 1);
+                base[sizeof(base) - 1] = '\0';
+                pfs3_lookup_path(fs3, parent, &parent_ino);
+            } else {
+                strncpy(base, fname, sizeof(base) - 1);
+                base[sizeof(base) - 1] = '\0';
+            }
+            int err = pfs3_unlink_entry(fs3, parent_ino, base);
+            if (err == PFS3_OK) {
+                desktop_terminal_put_line(win, "Successfully unlinked file from PurpleFS v3.");
+            } else {
+                desktop_terminal_put_line(win, "Error: File not found or failed to unlink.");
+            }
+        } else if (storage_is_fs_mounted()) {
             pfs2_fs_t *fs = storage_get_fs();
             int err = pfs2_unlink(fs, fname);
             if (err == PFS2_OK) {
@@ -608,7 +945,20 @@ void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
         }
         desktop_terminal_put_line(win, "Document opened in Text Editor.");
     } else if (strcmp(cmd, "df") == 0 || strcmp(cmd, "show disk usage") == 0) {
-        if (storage_is_fs_mounted()) {
+        if (storage_get_fs_version() == 3) {
+            pfs3_fs_t *fs3 = storage_get_fs3();
+            desktop_terminal_put_line(win, "Filesystem     Total Blocks  Used Blocks  Free Blocks  Capacity");
+            char df_buf[192];
+            uint64_t total = fs3 ? fs3->sb.total_blocks : 0;
+            uint64_t free_b = fs3 ? fs3->sb.free_blocks : 0;
+            uint64_t used_b = (total > free_b) ? (total - free_b) : 0;
+            snprintf(df_buf, sizeof(df_buf), "PurpleSystem   %lu (%lu MB)  %lu (%lu KB) %lu (%lu MB) %lu%% Free",
+                     (unsigned long)total, (unsigned long)(total * 4 / 1024),
+                     (unsigned long)used_b, (unsigned long)(used_b * 4),
+                     (unsigned long)free_b, (unsigned long)(free_b * 4 / 1024),
+                     (unsigned long)(total ? (free_b * 100 / total) : 0));
+            desktop_terminal_put_line(win, df_buf);
+        } else if (storage_is_fs_mounted()) {
             desktop_terminal_put_line(win, "Filesystem     Total Blocks  Used Blocks  Free Blocks  Capacity");
             desktop_terminal_put_line(win, "PurpleSystem   4096 (16 MB)  25 (100 KB)  4071 (15 MB) 99% Free");
         } else {
@@ -616,14 +966,66 @@ void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
         }
     } else if (strcmp(cmd, "disks") == 0 || strcmp(cmd, "list disks") == 0) {
         desktop_terminal_put_line(win, "Discovered Block Devices:");
-        desktop_terminal_put_line(win, "  [ata1] ATA/IDE Primary Slave: Model='QEMU HARDDISK' (32 MiB, 65536 blks)");
+        uint32_t bcnt = block_dev_count();
+        if (bcnt == 0) {
+            desktop_terminal_put_line(win, "  (No block devices registered)");
+        } else {
+            for (uint32_t b = 0; b < bcnt; b++) {
+                block_device_t *bd = block_dev_get_by_index(b);
+                if (bd) {
+                    char b_buf[192];
+                    uint32_t sz_mb = (uint32_t)(bd->total_blocks * bd->block_size / (1024 * 1024));
+                    snprintf(b_buf, sizeof(b_buf), "  [%s] %s: '%s' (%u MiB, %lu blks)",
+                             bd->name, block_dev_type_to_str(bd->type), bd->model, sz_mb, (unsigned long)bd->total_blocks);
+                    desktop_terminal_put_line(win, b_buf);
+                }
+            }
+        }
     } else if (strcmp(cmd, "partitions") == 0) {
-        desktop_terminal_put_line(win, "GPT Partitions on [ata1]:");
-        desktop_terminal_put_line(win, "  Part 0: 'PurpleRootFS' [2048..34815, 32768 sectors, 16 MiB] (PurpleFS v2)");
+        int didx = g_kernel_storage.active_device_idx;
+        if (didx >= 0 && g_kernel_storage.gpt[didx].valid_header) {
+            gpt_info_t *gpt = &g_kernel_storage.gpt[didx];
+            desktop_terminal_put_line(win, "GPT Partitions on Active Device:");
+            for (uint32_t p = 0; p < gpt->partition_count; p++) {
+                char p_buf[192];
+                uint64_t sc = gpt->partitions[p].sector_count;
+                uint32_t mb = (uint32_t)(sc * 512 / (1024 * 1024));
+                snprintf(p_buf, sizeof(p_buf), "  Part %u: '%s' [%lu..%lu, %u MiB] (%s)",
+                         p, gpt->partitions[p].name,
+                         (unsigned long)gpt->partitions[p].start_lba,
+                         (unsigned long)(gpt->partitions[p].start_lba + sc - 1),
+                         mb, (p == (uint32_t)g_kernel_storage.active_part_idx) ? "PurpleFS System" : "ESP");
+                desktop_terminal_put_line(win, p_buf);
+            }
+        } else {
+            desktop_terminal_put_line(win, "No active GPT partition table found on storage.");
+        }
     } else if (strncmp(cmd, "peek ", 5) == 0 || strncmp(cmd, "cat ", 4) == 0 || strncmp(cmd, "view file ", 10) == 0) {
         const char *fname = (cmd[0] == 'p') ? (cmd + 5) : ((cmd[0] == 'c') ? (cmd + 4) : (cmd + 10));
-        while (*fname == ' ' || *fname == '.' || *fname == '/') fname++;
-        if (storage_is_fs_mounted()) {
+        while (*fname == ' ') fname++;
+        if (storage_get_fs_version() == 3) {
+            pfs3_fs_t *fs3 = storage_get_fs3();
+            uint64_t ino3 = 0;
+            if (pfs3_lookup_path(fs3, fname, &ino3) == PFS3_OK) {
+                char buf[512];
+                memset(buf, 0, sizeof(buf));
+                uint64_t br = 0;
+                if (pfs3_read_file(fs3, ino3, buf, sizeof(buf) - 1, 0, &br) == PFS3_OK && br > 0) {
+                    char *line_p = buf;
+                    while (*line_p && line_p < buf + br) {
+                        char *next_nl = strstr(line_p, "\n");
+                        if (next_nl) *next_nl = '\0';
+                        desktop_terminal_put_line(win, line_p);
+                        if (!next_nl) break;
+                        line_p = next_nl + 1;
+                    }
+                } else {
+                    desktop_terminal_put_line(win, "(Empty file)");
+                }
+            } else {
+                desktop_terminal_put_line(win, "Error: File not found on PurpleFS v3 volume.");
+            }
+        } else if (storage_is_fs_mounted()) {
             pfs2_fs_t *fs = storage_get_fs();
             uint32_t ino = 0;
             if (pfs2_lookup(fs, fname, &ino) == PFS2_OK) {
@@ -649,7 +1051,7 @@ void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
         } else {
             if (strcmp(fname, "welcome.txt") == 0) {
                 desktop_terminal_put_line(win, "Welcome to Purple OS / Aegis64 Native Filesystem!");
-                desktop_terminal_put_line(win, "Architecture: x86-64 | Filesystem: PurpleFS v2");
+                desktop_terminal_put_line(win, "Architecture: x86-64 | Filesystem: PurpleFS v3");
             } else if (strcmp(fname, "version.txt") == 0) {
                 desktop_terminal_put_line(win, "Aegis64 Kernel v0.4.0 (Safe Storage Integration)");
             } else if (strcmp(fname, "motd") == 0) {
@@ -698,6 +1100,11 @@ void desktop_terminal_execute(gui_window_t *win, const char *cmd) {
         g->ops->get_status(g, stat, sizeof(stat));
         desktop_terminal_put_line(win, g->name);
         desktop_terminal_put_line(win, stat);
+        if (g->arch == GPU_ARCH_SW_FALLBACK) {
+            desktop_terminal_put_line(win, "Hardware Acceleration: NOT IMPLEMENTED (Software 32bpp Fallback Active)");
+        } else {
+            desktop_terminal_put_line(win, "Hardware Acceleration: ACTIVE");
+        }
     } else if (strcmp(cmd, "gpu bench") == 0) {
         desktop_terminal_put_line(win, "Running GPU Benchmark (500 Fills, 3.2 Mpx)...");
         gpu_run_benchmark();
@@ -934,8 +1341,8 @@ void desktop_handle_key(char c, uint8_t scancode, int pressed, uint8_t modifiers
         }
     }
 
-    /* 2. Otherwise, if launcher search is focused or open without an active window */
-    if (launcher_open) {
+    /* 2. Route to launcher search ONLY if launcher search is explicitly focused */
+    if (launcher_open && current_focus == FOCUS_LAUNCHER_SEARCH) {
         if (c == 27) { // ESC: Close launcher
             launcher_open = 0;
             current_focus = FOCUS_DESKTOP;
@@ -957,6 +1364,86 @@ void desktop_handle_key(char c, uint8_t scancode, int pressed, uint8_t modifiers
             }
             return;
         }
+    }
+
+    /* 3. Fallback: If no window or launcher consumed the key, route to Terminal (Window 0) */
+    if (windows[0].visible) {
+        gui_window_t *win = &windows[0];
+        windows[0].focused = 1;
+        current_focus = FOCUS_WINDOW;
+        if (c == '\t') {
+            desktop_terminal_tab_complete(win);
+            desktop_render();
+            return;
+        } else if (scancode == 0x49) { // Page Up
+            if (win->term_scroll_offset + 7 < win->output_count) {
+                win->term_scroll_offset += 4;
+                desktop_render();
+            }
+            return;
+        } else if (scancode == 0x51) { // Page Down
+            if (win->term_scroll_offset >= 4) {
+                win->term_scroll_offset -= 4;
+            } else {
+                win->term_scroll_offset = 0;
+            }
+            desktop_render();
+            return;
+        } else if (scancode == 0x48) { // Up Arrow
+            if (win->history_count > 0 && win->history_idx > 0) {
+                win->history_idx--;
+                int h_idx = win->history_idx % 32;
+                strncpy(win->input_line, win->history[h_idx], sizeof(win->input_line) - 1);
+                win->input_cursor = strlen(win->input_line);
+                desktop_render();
+            }
+            return;
+        } else if (scancode == 0x50) { // Down Arrow
+            if (win->history_idx + 1 < win->history_count) {
+                win->history_idx++;
+                int h_idx = win->history_idx % 32;
+                strncpy(win->input_line, win->history[h_idx], sizeof(win->input_line) - 1);
+                win->input_cursor = strlen(win->input_line);
+            } else {
+                win->history_idx = win->history_count;
+                win->input_line[0] = '\0';
+                win->input_cursor = 0;
+            }
+            desktop_render();
+            return;
+        } else if (scancode == 0x4B) { // Left Arrow
+            if (win->input_cursor > 0) {
+                win->input_cursor--;
+                desktop_render();
+            }
+            return;
+        } else if (scancode == 0x4D) { // Right Arrow
+            if (win->input_cursor < strlen(win->input_line)) {
+                win->input_cursor++;
+                desktop_render();
+            }
+            return;
+        }
+
+        if (c == '\n' || c == '\r') {
+            desktop_terminal_execute(win, win->input_line);
+            win->input_line[0] = '\0';
+            win->input_cursor = 0;
+            desktop_render();
+        } else if (c == '\b') {
+            if (win->input_cursor > 0) {
+                win->input_cursor--;
+                win->input_line[win->input_cursor] = '\0';
+                desktop_render();
+            }
+        } else if (c >= 32 && c <= 126) {
+            if (win->input_cursor + 1 < sizeof(win->input_line)) {
+                win->input_line[win->input_cursor++] = c;
+                win->input_line[win->input_cursor] = '\0';
+                desktop_render();
+            }
+        }
+        return;
     }
 }
 
@@ -1562,7 +2049,10 @@ static void draw_window_frame(const gui_window_t *win) {
     if (!video_is_available() || !win->visible) return;
 
     uint32_t outline_color = win->focused ? 0x9D4EDD : 0x4A2574;
-    video_draw_rect(win->x - 1, win->y - 1, win->width + 2, win->height + 2, outline_color);
+    video_draw_rect(win->x, win->y, win->width, 1, outline_color);
+    video_draw_rect(win->x, win->y + win->height - 1, win->width, 1, outline_color);
+    video_draw_rect(win->x, win->y, 1, win->height, outline_color);
+    video_draw_rect(win->x + win->width - 1, win->y, 1, win->height, outline_color);
 
     /* Title bar */
     video_draw_rect(win->x, win->y, win->width, 24, win->title_bg);
@@ -1620,9 +2110,13 @@ static void draw_window_content(const gui_window_t *win, uint32_t idx) {
                          "Purple OS / Aegis64 Interactive Shell Terminal", 0xC77DFF, &clip);
 
         /* Scrollback Output Lines */
-        for (int i = 0; i < win->output_count && i < 7; i++) {
+        int visible_lines = 7;
+        int max_start = (win->output_count > visible_lines) ? (win->output_count - visible_lines) : 0;
+        int start = max_start - win->term_scroll_offset;
+        if (start < 0) start = 0;
+        for (int i = 0; i < visible_lines && (start + i) < win->output_count; i++) {
             font_draw_string(f_mono_reg, (int32_t)win->x + 12, (int32_t)(win->y + 50 + i * 18),
-                             win->output_lines[i], COLOR_WHITE, &clip);
+                             win->output_lines[start + i], COLOR_WHITE, &clip);
         }
 
         /* Active prompt and input line */
@@ -2121,8 +2615,16 @@ static void draw_window_content(const gui_window_t *win, uint32_t idx) {
     } else if (win->type == WIN_TYPE_DISKMGR) {
         /* Purple Partition Manager & Disk Utility */
         video_draw_rect(win->x + 10, win->y + 28, win->width - 20, 24, 0x1F0B38);
-        font_draw_string(f_ui_bold, (int32_t)win->x + 16, (int32_t)win->y + 32,
-                         "Drive: [ata1 - QEMU HARDDISK (32 MiB, 65536 Sectors)]", COLOR_GOLD, &clip);
+        block_device_t *bd = block_dev_get_by_index(0);
+        char dtitle[160];
+        if (bd) {
+            uint32_t sz_mb = (uint32_t)(bd->total_blocks * bd->block_size / (1024 * 1024));
+            snprintf(dtitle, sizeof(dtitle), "Drive: [%s - %s (%u MiB, %lu Sectors)]",
+                     bd->name, bd->model, sz_mb, (unsigned long)bd->total_blocks);
+        } else {
+            snprintf(dtitle, sizeof(dtitle), "Drive: [sata0 - QEMU HARDDISK (128 MiB, 262144 Sectors)]");
+        }
+        font_draw_string(f_ui_bold, (int32_t)win->x + 16, (int32_t)win->y + 32, dtitle, COLOR_GOLD, &clip);
 
         uint32_t bar_y = win->y + 56;
         uint32_t bar_w = win->width - 20;
@@ -2130,18 +2632,21 @@ static void draw_window_content(const gui_window_t *win, uint32_t idx) {
         video_draw_rect(win->x + 10, bar_y, part0_w, 24, 0x4A1E7A);
         video_draw_rect(win->x + 10, bar_y, part0_w, 1, 0x9D4EDD);
         font_draw_string(f_ui_bold, (int32_t)win->x + 18, (int32_t)bar_y + 4,
-                         "Part 0: PurpleRootFS (16 MiB) - PurpleFS v2", COLOR_WHITE, &clip);
+                         "Part 0: ESP (64 MiB) - FAT32", COLOR_WHITE, &clip);
 
-        video_draw_rect(win->x + 10 + part0_w, bar_y, bar_w - part0_w, 24, 0x1A0930);
-        font_draw_string(f_ui_reg, (int32_t)win->x + 18 + part0_w, (int32_t)bar_y + 4,
-                         "Unallocated Space (15 MiB)", 0xC77DFF, &clip);
+        video_draw_rect(win->x + 10 + part0_w, bar_y, bar_w - part0_w, 24, 0x2A1050);
+        video_draw_rect(win->x + 10 + part0_w, bar_y, bar_w - part0_w, 1, 0xC77DFF);
+        font_draw_string(f_ui_bold, (int32_t)win->x + 18 + part0_w, (int32_t)bar_y + 4,
+                         "Part 1: PurpleSystem (62 MiB) - PurpleFS v3", 0xC77DFF, &clip);
 
         uint32_t dt_y = bar_y + 32;
         video_draw_rect(win->x + 10, dt_y, win->width - 20, 20, 0x2A1245);
         font_draw_string(f_ui_bold, (int32_t)win->x + 16, (int32_t)dt_y + 2, "Part#  Name          Start    End      Size     FS        Status", COLOR_GOLD, &clip);
 
         font_draw_string(f_mono_reg, (int32_t)win->x + 16, (int32_t)dt_y + 24,
-                         "0      PurpleRootFS  2048     34815    16 MiB   PurpleFS  MOUNTED (Read-Only)", COLOR_WHITE, &clip);
+                         "0      ESP (EFI)     2048     133119   64 MiB   FAT32     ONLINE", COLOR_WHITE, &clip);
+        font_draw_string(f_mono_reg, (int32_t)win->x + 16, (int32_t)dt_y + 42,
+                         "1      PurpleSystem  133120   262110   62 MiB   PurpleFS3 MOUNTED (RW)", COLOR_WHITE, &clip);
 
         uint32_t act_y = win->y + win->height - 40;
         video_draw_rect(win->x + 12, act_y, 110, 24, 0x4A1020);
@@ -2159,7 +2664,7 @@ static void draw_window_content(const gui_window_t *win, uint32_t idx) {
             font_draw_string(f_ui_bold, (int32_t)win->x + 30, (int32_t)win->y + 118,
                              "CONFIRM DESTRUCTIVE OPERATION:", COLOR_WHITE, &clip);
             font_draw_string(f_ui_reg, (int32_t)win->x + 30, (int32_t)win->y + 136,
-                             "Format ata1 Partition 0 with PurpleFS v2?", 0xFFDDDD, &clip);
+                             "Format PurpleFS v3 System Volume?", 0xFFDDDD, &clip);
 
             video_draw_rect(win->x + 30, win->y + 156, 80, 24, 0x880000);
             font_draw_string(f_ui_bold, (int32_t)win->x + 42, (int32_t)win->y + 160, "CONFIRM", COLOR_WHITE, &clip);
@@ -2170,7 +2675,19 @@ static void draw_window_content(const gui_window_t *win, uint32_t idx) {
     }
 }
 
-void desktop_render(void) {
+static void desktop_paint_window(gui_window_t *win, uint32_t idx) {
+    if (!win || !win->visible) return;
+    desktop_ensure_window_surface(win);
+    if (!win->surface) return;
+
+    video_set_render_target_offset(win->surface, win->width, win->height, win->surface_pitch,
+                                   (int32_t)win->x, (int32_t)win->y);
+    draw_window_frame(win);
+    draw_window_content(win, idx);
+    video_reset_render_target();
+}
+
+void desktop_composite(void) {
     desktop_active = 1;
     if (!video_is_available()) {
         desktop_render_preview();
@@ -2180,8 +2697,14 @@ void desktop_render(void) {
     uint32_t scr_w = video_get_width();
     uint32_t scr_h = video_get_height();
 
-    /* 1. Clean Anime Cosmic Fantasy Wallpaper (Pure Vista, ZERO UI Baked In) */
-    render_cosmic_background(scr_w, scr_h);
+    desktop_ensure_bg_surface(scr_w, scr_h);
+
+    /* 1. Fast Blit of persistent desktop background */
+    if (desktop_bg_surface && desktop_bg_width == scr_w && desktop_bg_height == scr_h) {
+        video_blit(0, 0, desktop_bg_surface, scr_w, scr_h, scr_w * 4);
+    } else {
+        render_cosmic_background(scr_w, scr_h);
+    }
 
     /* 2. Dynamically Composite All Native Desktop UI Elements Independently */
     render_top_bar(scr_w);
@@ -2195,12 +2718,12 @@ void desktop_render(void) {
     render_bottom_dock(scr_w, scr_h);
     render_welcome_toast(scr_w, scr_h);
 
-    /* 3. Draw Windows in z-order (only visible windows) */
+    /* 3. Composite visible windows from their bounded surfaces in z-order */
     for (uint32_t i = 0; i < window_count; i++) {
         uint32_t idx = z_order[i];
-        if (windows[idx].visible) {
-            draw_window_frame(&windows[idx]);
-            draw_window_content(&windows[idx], idx);
+        gui_window_t *w = &windows[idx];
+        if (w->visible && w->surface) {
+            video_blit(w->x, w->y, w->surface, w->width, w->height, w->surface_pitch);
         }
     }
 
@@ -2210,7 +2733,89 @@ void desktop_render(void) {
     int32_t my = mouse_get_y();
     desktop_move_cursor(mx, my);
 
-    kinfo("Desktop: Graphical desktop frame rendered to framebuffer (%ux%u)", scr_w, scr_h);
+    static int first_composite = 1;
+    if (first_composite) {
+        kinfo("Desktop: Graphical desktop frame composited to framebuffer (%ux%u)", scr_w, scr_h);
+        first_composite = 0;
+    }
+}
+
+void desktop_render(void) {
+    desktop_active = 1;
+    if (!video_is_available()) {
+        desktop_render_preview();
+        return;
+    }
+
+    /* Repaint each visible window into its bounded drawing surface */
+    for (uint32_t i = 0; i < window_count; i++) {
+        uint32_t idx = z_order[i];
+        if (windows[idx].visible) {
+            desktop_paint_window(&windows[idx], idx);
+        }
+    }
+
+    desktop_composite();
+}
+
+void desktop_terminal_write(const char *s) {
+    if (!s) return;
+    gui_window_t *w = NULL;
+    uint32_t w_idx = 0;
+    for (uint32_t i = 0; i < window_count; i++) {
+        if (windows[i].type == WIN_TYPE_TERMINAL) {
+            w = &windows[i];
+            w_idx = i;
+            break;
+        }
+    }
+    if (!w) return;
+
+    const char *p = s;
+    char line_buf[TERM_LINE_LEN];
+    int li = 0;
+    while (*p) {
+        if (*p == '\n') {
+            line_buf[li] = '\0';
+            desktop_terminal_put_line(w, line_buf);
+            li = 0;
+        } else if (*p != '\r') {
+            if (li < TERM_LINE_LEN - 1) {
+                line_buf[li++] = *p;
+            }
+        }
+        p++;
+    }
+    if (li > 0) {
+        line_buf[li] = '\0';
+        desktop_terminal_put_line(w, line_buf);
+    }
+
+    if (desktop_active && w->visible) {
+        desktop_paint_window(w, w_idx);
+        desktop_composite();
+    }
+}
+
+void desktop_terminal_clear(void) {
+    gui_window_t *w = NULL;
+    uint32_t w_idx = 0;
+    for (uint32_t i = 0; i < window_count; i++) {
+        if (windows[i].type == WIN_TYPE_TERMINAL) {
+            w = &windows[i];
+            w_idx = i;
+            break;
+        }
+    }
+    if (!w) return;
+
+    w->output_count = 0;
+    w->term_scroll_offset = 0;
+
+    if (desktop_active && w->visible) {
+        desktop_paint_window(w, w_idx);
+        desktop_composite();
+    }
 }
 
 int desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons) {
@@ -2589,6 +3194,14 @@ static void desktop_mouse_event_callback(int32_t x, int32_t y, uint8_t buttons) 
 
 int desktop_init(void) {
     font_init();
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+    for (uint32_t i = 0; i < window_count; i++) {
+        if (windows[i].surface) {
+            free(windows[i].surface);
+            windows[i].surface = NULL;
+        }
+    }
+#endif
     window_count = 0;
     cursor_drawn = 0;
     desktop_active = 0;
@@ -2608,13 +3221,8 @@ int desktop_init(void) {
             w->icon_id = ICON_APP_TERMINAL;
             desktop_terminal_put_line(w, "Purple OS / Aegis64 Shell Terminal v1.0.0");
             desktop_terminal_put_line(w, "Type 'help' for available terminal commands.");
-#ifndef __KERNEL_HOST_TEST__
-            w->visible = 0;
-            w->focused = 0;
-#else
             w->visible = 1;
             w->focused = 1;
-#endif
         }
     }
 
@@ -2627,7 +3235,7 @@ int desktop_init(void) {
             w->icon_id = ICON_APP_FILES;
             strncpy(w->files_current_path, "/", sizeof(w->files_current_path) - 1);
             w->files_selected_idx = 0;
-            w->visible = 0;
+            w->visible = 1;
             w->focused = 0;
         }
     }
@@ -2639,7 +3247,7 @@ int desktop_init(void) {
         if (w) {
             w->type = WIN_TYPE_SYSMON;
             w->icon_id = ICON_APP_SYSMON;
-            w->visible = 0;
+            w->visible = 1;
             w->focused = 0;
         }
     }
@@ -2788,7 +3396,23 @@ int desktop_init(void) {
     desktop_load_settings();
 
     mouse_set_callback(desktop_mouse_event_callback);
-    kinfo("Desktop: Graphical workspace online with 11 application windows");
+
+    if (window_count > 0) {
+        bring_to_front(0);
+        windows[0].focused = 1;
+        windows[0].visible = 1;
+        current_focus = FOCUS_WINDOW;
+    }
+
+    if (video_is_available()) {
+        uint32_t scr_w = video_get_width();
+        uint32_t scr_h = video_get_height();
+        desktop_ensure_bg_surface(scr_w, scr_h);
+        desktop_active = 1;
+        desktop_render();
+    }
+
+    kinfo("Desktop: Graphical workspace online with %u application windows", window_count);
     return 0;
 }
 
@@ -2802,13 +3426,15 @@ static int __attribute__((unused)) is_any_window_focused(void) {
 void desktop_run_session(void) {
     desktop_active = 1;
     desktop_render();
-    kinfo("Desktop: Interactive session online. Type directly or move mouse, press 'q' to exit.");
+    kinfo("Desktop: Interactive session online.");
     int running = 1;
     int32_t lx = mouse_get_x();
     int32_t ly = mouse_get_y();
     uint8_t lb = mouse_get_buttons();
 
     while (running) {
+        int has_activity = 0;
+        (void)has_activity;
         int32_t cx = mouse_get_x();
         int32_t cy = mouse_get_y();
         uint8_t cb = mouse_get_buttons();
@@ -2817,35 +3443,43 @@ void desktop_run_session(void) {
             lx = cx;
             ly = cy;
             lb = cb;
+            has_activity = 1;
         }
 
 #ifndef __KERNEL_HOST_TEST__
         key_event_t ev;
-        if (keyboard_poll_event(&ev)) {
+        while (keyboard_poll_event(&ev)) {
+            has_activity = 1;
             if (ev.pressed) {
-                if ((ev.key_code == 'q' || ev.key_code == 'Q') && !is_any_window_focused() && !launcher_open) {
-                    running = 0;
-                } else if (ev.key_code == 27) {
+                if (ev.key_code == 27) {
                     if (launcher_open || system_panel_open) {
                         launcher_open = 0;
                         system_panel_open = 0;
                         desktop_render();
-                    } else if (!is_any_window_focused()) {
-                        running = 0;
                     }
                 } else {
                     desktop_handle_key((char)ev.key_code, ev.scancode, ev.pressed, ev.modifiers);
                 }
             }
-        } else if (serial_has_char()) {
+        }
+
+        while (serial_has_char()) {
+            has_activity = 1;
             char sc = serial_getchar();
-            if (sc == 'q' || sc == 'Q' || sc == 27) {
-                running = 0;
+            if (sc == 27) {
+                if (launcher_open || system_panel_open) {
+                    launcher_open = 0;
+                    system_panel_open = 0;
+                    desktop_render();
+                }
             } else {
                 desktop_handle_key(sc, 0, 1, 0);
             }
         }
-        __asm__ volatile("pause");
+
+        if (!has_activity) {
+            hlt();
+        }
 #else
         running = 0;
 #endif

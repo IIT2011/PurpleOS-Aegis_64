@@ -7,6 +7,9 @@
 #define APAPP_MAGIC          "APAPP100"
 #define APAPP_MAGIC_LEN      8
 #define APAPP_VERSION        1
+#define APAPP_EXTENSION      ".apapplication"
+#define APAPP_SYSTEM_DIR     "/System/Applications"
+#define APAPP_USER_DIR       "/Users/aegis/Applications"
 
 #define APAPP_MAX_NAME       32
 #define APAPP_MAX_AUTHOR     32
@@ -37,7 +40,7 @@ typedef struct {
     uint8_t  magic[8];          /* "APAPP100" */
     uint32_t version;           /* 1 */
     uint32_t manifest_size;     /* sizeof(apapp_manifest_t) */
-    char     app_id[APAPP_MAX_NAME];         /* e.g. "sysmon.apapplications" */
+    char     app_id[APAPP_MAX_NAME];         /* e.g. "sysmon.apapplication" */
     char     app_name[APAPP_MAX_NAME];       /* e.g. "Aegis System Monitor" */
     char     version_str[APAPP_MAX_VERSION]; /* "1.0.0" */
     char     author[APAPP_MAX_AUTHOR];       /* "Purple OS Team" */
@@ -91,6 +94,7 @@ int apapp_terminate(const char *app_id);
 uint32_t apapp_get_count(void);
 const apapp_instance_t *apapp_get_instance(uint32_t index);
 const apapp_instance_t *apapp_find(const char *app_id);
+int apapp_has_canonical_extension(const char *path);
 void apapp_dump(void);
 
 #endif /* APAPP_H */

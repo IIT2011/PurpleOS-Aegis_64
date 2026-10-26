@@ -30,6 +30,8 @@
 #include "e1000.h"
 #include "audio.h"
 #include "io.h"
+#include "gdt.h"
+#include "syscall.h"
 
 extern char _kernel_start[];
 extern char _kernel_end[];
@@ -83,8 +85,12 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
     /* Step 2: Virtual Memory Manager */
     vmm_init();
 
-    /* Step 3: Interrupts and Drivers */
+    /* Step 3: GDT & Hardware Privilege Separation */
+    gdt_init();
+
+    /* Step 4: Interrupts and Drivers */
     idt_init();
+    syscall_init();
     pic_init();
     pit_init(100);       // 100 Hz = 10 ms per tick
     keyboard_init();
@@ -146,10 +152,14 @@ void kernel_main_64(struct multiboot_info *mbi, uint32_t magic) {
 
     /* Enable Interrupts */
     sti();
-    kinfo("Interrupts enabled, entering AegisShell...");
+    kinfo("Interrupts enabled, entering AegisDesktop interactive session...");
 
-    /* Step 6: Command Shell */
-    shell_run();
+    /* Step 6: Primary Graphical Desktop Session */
+    if (video_is_available()) {
+        desktop_run_session();
+    } else {
+        shell_run();
+    }
 
     /* Halt if shell ever exits */
     while (1) {

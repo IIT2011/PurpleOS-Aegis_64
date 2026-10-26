@@ -28,6 +28,10 @@ PERM_NAMES = {
 }
 
 def validate_apapp(filepath):
+    if not filepath.endswith(".apapplication"):
+        print(f"[FAIL] Invalid application bundle extension in '{filepath}' (expected '.apapplication')")
+        return False
+
     if not os.path.exists(filepath):
         print(f"[FAIL] File not found: {filepath}")
         return False

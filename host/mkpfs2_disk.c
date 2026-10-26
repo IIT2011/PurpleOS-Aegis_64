@@ -192,16 +192,16 @@ int main(int argc, char **argv) {
     size_t w4 = 0;
     pfs2_write_file(&fs, ino4, drv_buf, sizeof(apdrv_header_t) + 256, 0, &w4);
 
-    // 5. Create sample application bundle: sysmon.apapplications
+    // 5. Create sample application bundle: sysmon.apapplication
     uint32_t ino5 = 0;
-    pfs2_create_file(&fs, "sysmon.apapplications", 0644, &ino5);
+    pfs2_create_file(&fs, "sysmon.apapplication", 0644, &ino5);
     uint8_t app_buf[1024];
     memset(app_buf, 0, sizeof(app_buf));
     apapp_manifest_t *am = (apapp_manifest_t *)app_buf;
     memcpy(am->magic, APAPP_MAGIC, APAPP_MAGIC_LEN);
     am->version = APAPP_VERSION;
     am->manifest_size = sizeof(apapp_manifest_t);
-    strcpy(am->app_id, "sysmon.apapplications");
+    strcpy(am->app_id, "sysmon.apapplication");
     strcpy(am->app_name, "Aegis System Monitor");
     strcpy(am->version_str, "1.0.0");
     strcpy(am->author, "Purple OS Desktop Team");

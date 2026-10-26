@@ -62,7 +62,7 @@ def main():
             "insmod e1000.apdrv\n",
             "lsmod\n",
             "ifconfig\n",
-            "app run sysmon.apapplications\n",
+            "app run sysmon.apapplication\n",
             "apps\n",
             "video\n"
         ]
@@ -97,7 +97,7 @@ def main():
             ("List Files Version File", "version.txt"),
             ("List Files MOTD", "motd"),
             ("List Files APDRV Module", "e1000.apdrv"),
-            ("List Files App Bundle", "sysmon.apapplications"),
+            ("List Files App Bundle", "sysmon.apapplication"),
             ("Peek Content Welcome", "Welcome to Purple OS / Aegis64 Native Filesystem!"),
             ("Peek Path Normalization Leading Dot-Slash", "=== File: welcome.txt"),
             ("Peek Path Normalization Leading Slash", "=== File: welcome.txt"),
@@ -126,10 +126,10 @@ def main():
             ("APDRV Loaded Modules List", "APDRV v3 Loaded Native Modules"),
             ("APDRV e1000 in Mod List", "e1000"),
             ("Network Subsystem Output", "Network Interface Configuration"),
-            ("App Bundle Authenticated", "AegisDetect: Application bundle 'sysmon.apapplications' AUTHENTICATED"),
-            ("App Bundle Launched", "APAPP: Application 'sysmon.apapplications' ('Aegis System Monitor' v1.0.0) launched"),
-            ("Active App Bundles List", "Active .apapplications Native Application Bundles"),
-            ("Active Sysmon App Running", "sysmon.apapplications"),
+            ("App Bundle Authenticated", "AegisDetect: Application bundle 'sysmon.apapplication' AUTHENTICATED"),
+            ("App Bundle Launched", "APAPP: Application 'sysmon.apapplication' ('Aegis System Monitor' v1.0.0) launched"),
+            ("Active App Bundles List", "Active .apapplication Native Application Bundles"),
+            ("Active Sysmon App Running", "sysmon.apapplication"),
             ("Video Configuration Output", "Video Display Configuration"),
             ("Bochs VBE Support", "Bochs VBE:  Supported")
         ]

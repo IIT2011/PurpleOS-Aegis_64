@@ -6,6 +6,10 @@
 #include "cpu.h"
 #include "spinlock.h"
 #include "smp.h"
+#include "gdt.h"
+
+extern void task_trampoline(void);
+extern void user_trampoline(void);
 
 static task_t task_table[MAX_TASKS];
 static task_t *current_tasks[MAX_CPUS];
@@ -126,6 +130,85 @@ task_t *task_create(const char *name, void (*entry_point)(void *), void *arg, ta
     return task_create_affined(name, entry_point, arg, priority, ~0ULL);
 }
 
+task_t *task_create_user(const char *name, uint64_t entry_point, uint64_t user_rsp, task_priority_t priority) {
+    uint64_t rflags;
+    spinlock_acquire_irqsave(&sched_lock, &rflags);
+
+    task_t *t = NULL;
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (task_table[i].state == TASK_TERMINATED || task_table[i].id == 0) {
+            t = &task_table[i];
+            break;
+        }
+    }
+
+    if (!t) {
+        kerror("Scheduler: Maximum task limit reached (%d)", MAX_TASKS);
+        spinlock_release_irqrestore(&sched_lock, rflags);
+        return NULL;
+    }
+
+    /* Allocate 16 KiB kernel stack for Ring 3 transitions */
+    void *stack = pmm_alloc_frames(TASK_STACK_SIZE / PMM_PAGE_SIZE);
+    if (!stack) {
+        kerror("Scheduler: Failed to allocate kernel stack for user task %s", name);
+        spinlock_release_irqrestore(&sched_lock, rflags);
+        return NULL;
+    }
+
+    t->id = next_task_id++;
+    strncpy(t->name, name, sizeof(t->name) - 1);
+    t->name[sizeof(t->name) - 1] = '\0';
+    t->priority = priority;
+    t->time_slice_ticks = get_slice_for_priority(priority);
+    t->ticks_remaining = t->time_slice_ticks;
+    t->sleep_until_ticks = 0;
+    t->stack_base = stack;
+    t->cpu_affinity = 1ULL; /* User applications run on BSP (CPU 0) where primary TSS and GUI are bound */
+    t->last_cpu = 0;
+    t->is_user = 1;
+    t->user_rsp = user_rsp;
+    t->user_rip = entry_point;
+
+    /* Setup initial kernel stack for switch_context and user_trampoline */
+    uint64_t *sp = (uint64_t *)((uintptr_t)stack + TASK_STACK_SIZE);
+
+    /* Push iretq frame onto kernel stack:
+       [sp+32]: SS     = 0x1B (GDT_USER_DS: DPL 3, RPL 3)
+       [sp+24]: RSP    = user_rsp
+       [sp+16]: RFLAGS = 0x202 (IF enabled)
+       [sp+8]:  CS     = 0x23 (GDT_USER_CS: DPL 3, RPL 3)
+       [sp+0]:  RIP    = entry_point
+    */
+    *(--sp) = 0x1B;             // SS
+    *(--sp) = user_rsp;         // RSP
+    *(--sp) = 0x202;            // RFLAGS
+    *(--sp) = 0x23;             // CS
+    *(--sp) = entry_point;      // RIP
+
+    /* switch_context will pop:
+       rip (user_trampoline), rflags, rbx, rbp, r12, r13, r14, r15
+    */
+    *(--sp) = (uint64_t)user_trampoline; // RIP
+    *(--sp) = 0x202;                     // RFLAGS (IF enabled)
+    *(--sp) = 0;                         // RBX
+    *(--sp) = 0;                         // RBP
+    *(--sp) = 0;                         // R12
+    *(--sp) = 0;                         // R13
+    *(--sp) = 0;                         // R14
+    *(--sp) = 0;                         // R15
+
+    t->rsp = (uint64_t)sp;
+    t->state = TASK_READY;
+
+    kinfo("Scheduler: Created Ring 3 user task %u ('%s') RIP=%p, RSP=%p, kstack=%p",
+          t->id, t->name, (void *)entry_point, (void *)user_rsp, stack);
+
+    spinlock_release_irqrestore(&sched_lock, rflags);
+    smp_broadcast_resched();
+    return t;
+}
+
 void task_exit(void) {
     uint32_t cpu_id = cpu_get_current_id();
     if (cpu_id >= MAX_CPUS) cpu_id = 0;
@@ -140,12 +223,6 @@ void task_exit(void) {
 
     kinfo("Scheduler: Task %u ('%s') exiting on CPU %u", cur->id, cur->name, cpu_id);
     cur->state = TASK_TERMINATED;
-
-    /* Free stack if not idle task */
-    if (cur != idle_tasks[cpu_id] && cur->stack_base) {
-        pmm_free_frames(cur->stack_base, TASK_STACK_SIZE / PMM_PAGE_SIZE);
-        cur->stack_base = NULL;
-    }
 
     spinlock_release_irqrestore(&sched_lock, rflags);
     schedule();
@@ -248,6 +325,11 @@ void schedule(void) {
         next->state = TASK_RUNNING;
         next->ticks_remaining = next->time_slice_ticks;
         next->last_cpu = cpu_id;
+#ifndef __KERNEL_HOST_TEST__
+        if (next->is_user && next->stack_base) {
+            gdt_set_kernel_stack((uint64_t)(uintptr_t)next->stack_base + TASK_STACK_SIZE);
+        }
+#endif
     }
     current_tasks[cpu_id] = next;
 

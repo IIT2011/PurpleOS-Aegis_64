@@ -148,7 +148,7 @@ static void sw_wait_idle(gpu_device_t *dev) {
 
 static void sw_get_status(gpu_device_t *dev, char *buf, size_t max_len) {
     buf[0] = '\0';
-    append_str(buf, max_len, "Software 32bpp Fallback Engine | Fills: ");
+    append_str(buf, max_len, "Software 32bpp Fallback Engine (Hardware acceleration: NOT IMPLEMENTED) | Fills: ");
     append_uint(buf, max_len, (uint32_t)dev->ops_fill_count);
     append_str(buf, max_len, " | Copies: ");
     append_uint(buf, max_len, (uint32_t)dev->ops_copy_count);

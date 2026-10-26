@@ -9,6 +9,7 @@
 #include "gpt.h"
 #include "partition_dev.h"
 #include "purplefs_v2.h"
+#include "purplefs_v3.h"
 
 #define MAX_ATA_DEVICES 4
 
@@ -18,6 +19,8 @@ typedef struct kernel_storage {
     gpt_info_t      gpt[MAX_BLOCK_DEVICES];
     partition_dev_t part_dev;
     pfs2_fs_t       fs;
+    pfs3_fs_t       fs3;
+    int             fs_version;     /* 3 for PFS3, 2 for PFS2, 0 for none */
     int             devices_count;
     int             fs_mounted;
     int             active_device_idx;
@@ -29,6 +32,8 @@ extern kernel_storage_t g_kernel_storage;
 void storage_init(void);
 int storage_is_fs_mounted(void);
 pfs2_fs_t *storage_get_fs(void);
+pfs3_fs_t *storage_get_fs3(void);
+int storage_get_fs_version(void);
 int storage_is_writable(void);
 int storage_set_writable(int writable);
 

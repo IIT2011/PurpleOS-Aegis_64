@@ -10,6 +10,14 @@ const gpt_guid_t GPT_GUID_PURPLEFS_V2 = {
     .data4 = { 0x80, 0x00, 0x00, 0xA0, 0xC9, 0x11, 0xD5, 0x04 }
 };
 
+/* PurpleFS v3 Partition Type GUID: 4F535046-5333-0001-8000-00A0C911D504 */
+const gpt_guid_t GPT_GUID_PURPLEFS_V3 = {
+    .data1 = 0x4F535046,
+    .data2 = 0x5333,
+    .data3 = 0x0001,
+    .data4 = { 0x80, 0x00, 0x00, 0xA0, 0xC9, 0x11, 0xD5, 0x04 }
+};
+
 /* EFI System Partition (ESP) GUID: C12A7328-F81F-11D2-BA4B-00A0C93EC93B */
 const gpt_guid_t GPT_GUID_ESP = {
     .data1 = 0xC12A7328,
@@ -248,8 +256,9 @@ int gpt_parse_block_dev(block_device_t *bdev, gpt_info_t *out_info) {
             }
             part->name[36] = '\0';
 
-            // Check for PurpleFS v2 partition type GUID
-            if (gpt_guid_equal(&part->type_guid, &GPT_GUID_PURPLEFS_V2)) {
+            // Check for PurpleFS partition type GUID (v2 or v3)
+            if (gpt_guid_equal(&part->type_guid, &GPT_GUID_PURPLEFS_V2) ||
+                gpt_guid_equal(&part->type_guid, &GPT_GUID_PURPLEFS_V3)) {
                 part->is_purplefs = 1;
                 if (out_info->purplefs_part_index < 0) {
                     out_info->purplefs_part_index = (int)parsed_count;

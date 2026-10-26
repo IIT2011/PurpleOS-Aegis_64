@@ -134,8 +134,8 @@ int aegis_detect_load_default_manifest(void) {
     /* Entry 0: welcome.txt (SYSTEM) */
     strncpy(m.entries[0].name, "welcome.txt", AEGIS_MAX_NAME_LEN - 1);
     m.entries[0].flags = AEGIS_FLAG_SYSTEM;
-    m.entries[0].expected_size = 132;
-    hex_to_bytes("7b53db00c70da148c6dcb721bfbe5852696fc6b520a8e52a27c735d0a179ede8", m.entries[0].sha256, 32);
+    m.entries[0].expected_size = 134;
+    hex_to_bytes("7ceef99527040b8ea7ab57781fd5af2eb50400a0e516d111a9d07c0b8139b98c", m.entries[0].sha256, 32);
 
     /* Entry 1: version.txt (CRITICAL) */
     strncpy(m.entries[1].name, "version.txt", AEGIS_MAX_NAME_LEN - 1);
@@ -240,29 +240,55 @@ int aegis_detect_verify_storage(void) {
         return -2;
     }
 
-    pfs2_fs_t *fs = storage_get_fs();
     kinfo("AegisDetect: Starting storage file integrity verification...");
 
-    for (uint32_t i = 0; i < current_manifest.entry_count; i++) {
-        const char *fname = current_manifest.entries[i].name;
-        uint32_t ino = 0;
-        if (pfs2_lookup(fs, fname, &ino) != PFS2_OK) {
-            aegis_detect_verify_component(fname, NULL, 0); // Missing
-            continue;
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        for (uint32_t i = 0; i < current_manifest.entry_count; i++) {
+            const char *fname = current_manifest.entries[i].name;
+            uint64_t ino3 = 0;
+            if (pfs3_lookup_path(fs3, fname, &ino3) != PFS3_OK) {
+                aegis_detect_verify_component(fname, NULL, 0); // Missing
+                continue;
+            }
+
+            pfs3_inode_t node3;
+            if (pfs3_read_inode(fs3, ino3, &node3) != PFS3_OK) {
+                continue;
+            }
+
+            uint8_t buf[4096];
+            uint64_t read_bytes = 0;
+            uint64_t count = node3.size_bytes;
+            if (count > sizeof(buf)) count = sizeof(buf);
+
+            if (pfs3_read_file(fs3, ino3, buf, count, 0, &read_bytes) == PFS3_OK) {
+                aegis_detect_verify_component(fname, buf, (size_t)read_bytes);
+            }
         }
+    } else {
+        pfs2_fs_t *fs = storage_get_fs();
+        for (uint32_t i = 0; i < current_manifest.entry_count; i++) {
+            const char *fname = current_manifest.entries[i].name;
+            uint32_t ino = 0;
+            if (pfs2_lookup(fs, fname, &ino) != PFS2_OK) {
+                aegis_detect_verify_component(fname, NULL, 0); // Missing
+                continue;
+            }
 
-        pfs2_inode_t node;
-        if (pfs2_read_inode(fs, ino, &node) != PFS2_OK) {
-            continue;
-        }
+            pfs2_inode_t node;
+            if (pfs2_read_inode(fs, ino, &node) != PFS2_OK) {
+                continue;
+            }
 
-        uint8_t buf[4096];
-        size_t read_bytes = 0;
-        size_t count = (size_t)node.size_bytes;
-        if (count > sizeof(buf)) count = sizeof(buf);
+            uint8_t buf[4096];
+            size_t read_bytes = 0;
+            size_t count = (size_t)node.size_bytes;
+            if (count > sizeof(buf)) count = sizeof(buf);
 
-        if (pfs2_read_file(fs, ino, buf, count, 0, &read_bytes) == PFS2_OK) {
-            aegis_detect_verify_component(fname, buf, read_bytes);
+            if (pfs2_read_file(fs, ino, buf, count, 0, &read_bytes) == PFS2_OK) {
+                aegis_detect_verify_component(fname, buf, read_bytes);
+            }
         }
     }
 

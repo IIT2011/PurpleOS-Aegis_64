@@ -69,25 +69,41 @@ void storage_init(void) {
                       (uint32_t)part->sector_count, part->is_purplefs);
             }
 
-            // Attempt to mount PurpleFS v2 partition if not already mounted
+            // Attempt to mount PurpleFS partition (preferring v3 hierarchical) if not already mounted
             if (!g_kernel_storage.fs_mounted && gpt->purplefs_part_index >= 0) {
                 uint32_t pidx = (uint32_t)gpt->purplefs_part_index;
-                kinfo("Storage: Found PurpleFS v2 partition at index %u on [%s]", pidx, bdev->name);
+                kinfo("Storage: Found PurpleFS partition at index %u on [%s]", pidx, bdev->name);
 
                 int pinit = partition_dev_init_bdev(&g_kernel_storage.part_dev, bdev, &gpt->partitions[pidx]);
                 if (pinit == PART_DEV_OK) {
-                    int mrc = pfs2_mount(&g_kernel_storage.fs, &g_kernel_storage.part_dev.base);
-                    if (mrc == PFS2_OK) {
+                    // Try PurpleFS v3 first directly on block device at partition start LBA
+                    int mrc3 = pfs3_mount(&g_kernel_storage.fs3, bdev, gpt->partitions[pidx].start_lba, gpt->partitions[pidx].sector_count);
+                    if (mrc3 == PFS3_OK) {
                         g_kernel_storage.fs_mounted = 1;
+                        g_kernel_storage.fs_version = 3;
                         g_kernel_storage.active_device_idx = (int)i;
                         g_kernel_storage.active_part_idx = (int)pidx;
-                        kinfo("PurpleFS: Mounted volume '%s' (%u blocks, %u free, read-only) from [%s]",
-                              g_kernel_storage.fs.sb.volume_label,
-                              g_kernel_storage.fs.sb.total_blocks,
-                              g_kernel_storage.fs.sb.free_blocks,
+                        kinfo("PurpleFS: Mounted volume '%s' (PurpleFS v3 Hierarchical, %u blocks, %u free) from [%s]",
+                              g_kernel_storage.fs3.sb.volume_label,
+                              (uint32_t)g_kernel_storage.fs3.sb.total_blocks,
+                              (uint32_t)g_kernel_storage.fs3.sb.free_blocks,
                               bdev->name);
                     } else {
-                        kwarn("PurpleFS: Mount failed on partition %u of [%s] (code %d)", pidx, bdev->name, mrc);
+                        // Fallback to PurpleFS v2
+                        int mrc2 = pfs2_mount(&g_kernel_storage.fs, &g_kernel_storage.part_dev.base);
+                        if (mrc2 == PFS2_OK) {
+                            g_kernel_storage.fs_mounted = 1;
+                            g_kernel_storage.fs_version = 2;
+                            g_kernel_storage.active_device_idx = (int)i;
+                            g_kernel_storage.active_part_idx = (int)pidx;
+                            kinfo("PurpleFS: Mounted volume '%s' (PurpleFS v2 Flat, %u blocks, %u free, read-only) from [%s]",
+                                  g_kernel_storage.fs.sb.volume_label,
+                                  g_kernel_storage.fs.sb.total_blocks,
+                                  g_kernel_storage.fs.sb.free_blocks,
+                                  bdev->name);
+                        } else {
+                            kwarn("PurpleFS: Mount failed on partition %u of [%s] (v3 code %d, v2 code %d)", pidx, bdev->name, mrc3, mrc2);
+                        }
                     }
                 } else {
                     kwarn("Storage: Failed to initialize partition device for [%s] (code %d)", bdev->name, pinit);
@@ -101,7 +117,7 @@ void storage_init(void) {
     if (bdev_total == 0) {
         kinfo("Storage: No storage devices detected on any bus (ATA, SATA, NVMe)");
     } else if (!g_kernel_storage.fs_mounted) {
-        kinfo("Storage: No mountable PurpleFS v2 partition detected on any device");
+        kinfo("Storage: No mountable PurpleFS partition detected on any device");
     }
 }
 
@@ -110,17 +126,32 @@ int storage_is_fs_mounted(void) {
 }
 
 pfs2_fs_t *storage_get_fs(void) {
-    return g_kernel_storage.fs_mounted ? &g_kernel_storage.fs : NULL;
+    return (g_kernel_storage.fs_mounted && g_kernel_storage.fs_version == 2) ? &g_kernel_storage.fs : NULL;
+}
+
+pfs3_fs_t *storage_get_fs3(void) {
+    return (g_kernel_storage.fs_mounted && g_kernel_storage.fs_version == 3) ? &g_kernel_storage.fs3 : NULL;
+}
+
+int storage_get_fs_version(void) {
+    return g_kernel_storage.fs_mounted ? g_kernel_storage.fs_version : 0;
 }
 
 int storage_is_writable(void) {
     if (!g_kernel_storage.fs_mounted) return 0;
+    if (g_kernel_storage.fs_version == 3) {
+        return partition_dev_is_writable(&g_kernel_storage.part_dev) && !g_kernel_storage.fs3.read_only;
+    }
     return partition_dev_is_writable(&g_kernel_storage.part_dev) && !g_kernel_storage.fs.read_only;
 }
 
 int storage_set_writable(int writable) {
     if (!g_kernel_storage.fs_mounted) return -1;
     partition_dev_set_writable(&g_kernel_storage.part_dev, writable);
-    g_kernel_storage.fs.read_only = writable ? 0 : 1;
+    if (g_kernel_storage.fs_version == 3) {
+        g_kernel_storage.fs3.read_only = writable ? 0 : 1;
+    } else {
+        g_kernel_storage.fs.read_only = writable ? 0 : 1;
+    }
     return 0;
 }

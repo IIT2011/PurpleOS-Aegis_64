@@ -11,6 +11,10 @@ import hmac
 import hashlib
 import binascii
 
+# Add scripts directory to path to import build_apexec
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from build_apexec import build_native_apexec, build_fault_test_apexec
+
 # Manifest format string:
 # 8s: magic
 # I: version
@@ -90,138 +94,170 @@ def build_apapp(out_path, app_id, app_name, version, author, desc, perms, width,
 def generate_default_apps(output_dir):
     os.makedirs(output_dir, exist_ok=True)
 
-    # Minimal x86-64 executable payload:
-    # entry(): xor eax, eax; ret (31 c0 c3)
-    dummy_code = bytearray([0x31, 0xC0, 0xC3, 0x90] * 16) # 64 bytes
-
     apps = [
         {
-            "filename": "terminal.apapplication",
-            "id": "terminal.apapplications",
+            "filename": "PurpleTerminal.apapplication",
+            "alias": "terminal.apapplication",
+            "id": "terminal.apapplication",
             "name": "Purple Terminal",
             "version": "1.0.0",
             "author": "Purple OS Team",
             "desc": "Native interactive command shell for Purple OS",
             "perms": PERM_CONSOLE | PERM_GUI | PERM_STORAGE,
             "width": 640,
-            "height": 400
+            "height": 400,
+            "file": "/welcome.txt"
         },
         {
-            "filename": "sysmon.apapplication",
-            "id": "sysmon.apapplications",
-            "name": "Aegis System Monitor",
-            "version": "1.2.0",
-            "author": "Aegis Security Lab",
-            "desc": "Real-time task monitor and memory usage analyzer",
-            "perms": PERM_CONSOLE | PERM_GUI | PERM_SYSADMIN,
-            "width": 500,
-            "height": 350
-        },
-        {
-            "filename": "files.apapplication",
-            "id": "files.apapplications",
+            "filename": "PurpleFiles.apapplication",
+            "alias": "files.apapplication",
+            "id": "files.apapplication",
             "name": "Purple File Manager",
             "version": "1.0.0",
             "author": "Purple OS Team",
             "desc": "PurpleFS v3 hierarchical filesystem browser",
             "perms": PERM_GUI | PERM_STORAGE,
             "width": 560,
-            "height": 380
+            "height": 380,
+            "file": "/"
         },
         {
-            "filename": "calculator.apapplication",
-            "id": "calculator.apapplications",
-            "name": "Desktop Calculator",
-            "version": "1.0.1",
-            "author": "Purple OS Team",
-            "desc": "Standard scientific desktop calculator",
-            "perms": PERM_GUI,
-            "width": 280,
-            "height": 340
-        },
-        {
-            "filename": "settings.apapplication",
-            "id": "settings.apapplications",
-            "name": "Settings & Preferences",
-            "version": "1.1.0",
-            "author": "Purple OS Team",
-            "desc": "System preferences, theme, audio, and display settings",
-            "perms": PERM_GUI | PERM_SYSADMIN,
-            "width": 480,
-            "height": 320
-        },
-        {
-            "filename": "appmgr.apapplication",
-            "id": "appmgr.apapplications",
-            "name": "Application Manager",
-            "version": "1.0.0",
-            "author": "Aegis Security Lab",
-            "desc": "Package manager and HMAC signature validator",
-            "perms": PERM_GUI | PERM_SYSADMIN | PERM_STORAGE,
-            "width": 520,
-            "height": 340
-        },
-        {
-            "filename": "editor.apapplication",
-            "id": "editor.apapplications",
-            "name": "Aegis Text Editor",
-            "version": "1.0.0",
-            "author": "Purple OS Team",
-            "desc": "Full-screen native text editor and document creator",
-            "perms": PERM_GUI | PERM_STORAGE,
-            "width": 560,
-            "height": 360
-        },
-        {
-            "filename": "help.apapplication",
-            "id": "help.apapplications",
-            "name": "Help & Documentation Center",
-            "version": "1.0.0",
-            "author": "Purple OS Documentation Team",
-            "desc": "Interactive OS guide, shortcuts, and manual",
-            "perms": PERM_GUI,
-            "width": 580,
-            "height": 380
-        },
-        {
-            "filename": "vlc.apapplication",
-            "id": "vlc.apapplications",
-            "name": "VLC Media Player",
-            "version": "3.0.21-purple",
-            "author": "VideoLAN / Purple OS Team",
-            "desc": "Default media player and streaming media engine",
-            "perms": PERM_GUI | PERM_STORAGE | PERM_NETWORK,
-            "width": 620,
-            "height": 420
-        },
-        {
-            "filename": "viewer.apapplication",
-            "id": "viewer.apapplications",
+            "filename": "PurpleViewer.apapplication",
+            "alias": "viewer.apapplication",
+            "id": "viewer.apapplication",
             "name": "Purple View",
             "version": "1.0.0",
             "author": "Purple OS Team",
             "desc": "Document viewer for .txt, .md Markdown, and .pdf files",
             "perms": PERM_GUI | PERM_STORAGE,
             "width": 600,
-            "height": 440
+            "height": 440,
+            "file": "/desktop.cfg"
+        },
+        {
+            "filename": "PurpleSettings.apapplication",
+            "alias": "settings.apapplication",
+            "id": "settings.apapplication",
+            "name": "Settings & Preferences",
+            "version": "1.1.0",
+            "author": "Purple OS Team",
+            "desc": "System preferences, theme, audio, and display settings",
+            "perms": PERM_GUI | PERM_SYSADMIN,
+            "width": 480,
+            "height": 320,
+            "file": "/System/Configuration/system.conf"
+        },
+        {
+            "filename": "VLC.apapplication",
+            "alias": "vlc.apapplication",
+            "id": "vlc.apapplication",
+            "name": "VLC Media Player",
+            "version": "3.0.21-purple",
+            "author": "VideoLAN / Purple OS Team",
+            "desc": "Default media player and streaming media engine",
+            "perms": PERM_GUI | PERM_STORAGE | PERM_NETWORK,
+            "width": 620,
+            "height": 420,
+            "file": "/Users/aegis/Videos/sample.mp4"
+        },
+        {
+            "filename": "sysmon.apapplication",
+            "alias": None,
+            "id": "sysmon.apapplication",
+            "name": "Aegis System Monitor",
+            "version": "1.2.0",
+            "author": "Aegis Security Lab",
+            "desc": "Real-time task monitor and memory usage analyzer",
+            "perms": PERM_CONSOLE | PERM_GUI | PERM_SYSADMIN,
+            "width": 500,
+            "height": 350,
+            "file": None
+        },
+        {
+            "filename": "calculator.apapplication",
+            "alias": None,
+            "id": "calculator.apapplication",
+            "name": "Desktop Calculator",
+            "version": "1.0.1",
+            "author": "Purple OS Team",
+            "desc": "Standard scientific desktop calculator",
+            "perms": PERM_GUI,
+            "width": 280,
+            "height": 340,
+            "file": None
+        },
+        {
+            "filename": "appmgr.apapplication",
+            "alias": None,
+            "id": "appmgr.apapplication",
+            "name": "Application Manager",
+            "version": "1.0.0",
+            "author": "Aegis Security Lab",
+            "desc": "Package manager and HMAC signature validator",
+            "perms": PERM_GUI | PERM_SYSADMIN | PERM_STORAGE,
+            "width": 520,
+            "height": 340,
+            "file": None
+        },
+        {
+            "filename": "editor.apapplication",
+            "alias": None,
+            "id": "editor.apapplication",
+            "name": "Aegis Text Editor",
+            "version": "1.0.0",
+            "author": "Purple OS Team",
+            "desc": "Full-screen native text editor and document creator",
+            "perms": PERM_GUI | PERM_STORAGE,
+            "width": 560,
+            "height": 360,
+            "file": "/Users/aegis/Desktop/notes.txt"
+        },
+        {
+            "filename": "help.apapplication",
+            "alias": None,
+            "id": "help.apapplication",
+            "name": "Help & Documentation Center",
+            "version": "1.0.0",
+            "author": "Purple OS Documentation Team",
+            "desc": "Interactive OS guide, shortcuts, and manual",
+            "perms": PERM_GUI,
+            "width": 580,
+            "height": 380,
+            "file": None
         },
         {
             "filename": "diskmgr.apapplication",
-            "id": "diskmgr.apapplications",
+            "alias": None,
+            "id": "diskmgr.apapplication",
             "name": "Purple Partition Manager",
             "version": "1.0.0",
             "author": "Aegis Storage Group",
             "desc": "Disk utility, partition manager, and filesystem administration",
             "perms": PERM_GUI | PERM_STORAGE | PERM_SYSADMIN,
             "width": 640,
-            "height": 420
+            "height": 420,
+            "file": None
         }
     ]
 
     for app in apps:
-        out = os.path.join(output_dir, app["filename"])
+        apex_path = os.path.join(output_dir, f"{app['id']}.apexec")
+        init_msg = f"{app['name']}: Ring 3 userspace process initialized\n"
+        build_native_apexec(
+            apex_path,
+            app["name"],
+            app["width"],
+            app["height"],
+            init_msg,
+            file_path=app.get("file")
+        )
+
+        with open(apex_path, "rb") as f:
+            payload_bytes = f.read()
+
+        out_primary = os.path.join(output_dir, app["filename"])
         build_apapp(
-            out,
+            out_primary,
             app["id"],
             app["name"],
             app["version"],
@@ -230,8 +266,71 @@ def generate_default_apps(output_dir):
             app["perms"],
             app["width"],
             app["height"],
-            dummy_code
+            payload_bytes
         )
+
+        # Also copy to root build/ dir if output_dir is build/apps
+        if "build/apps" in output_dir:
+            root_out = os.path.join("build", app["filename"])
+            build_apapp(
+                root_out,
+                app["id"],
+                app["name"],
+                app["version"],
+                app["author"],
+                app["desc"],
+                app["perms"],
+                app["width"],
+                app["height"],
+                payload_bytes
+            )
+
+        if app["alias"]:
+            out_alias = os.path.join(output_dir, app["alias"])
+            build_apapp(
+                out_alias,
+                app["id"],
+                app["name"],
+                app["version"],
+                app["author"],
+                app["desc"],
+                app["perms"],
+                app["width"],
+                app["height"],
+                payload_bytes
+            )
+            if "build/apps" in output_dir:
+                root_alias = os.path.join("build", app["alias"])
+                build_apapp(
+                    root_alias,
+                    app["id"],
+                    app["name"],
+                    app["version"],
+                    app["author"],
+                    app["desc"],
+                    app["perms"],
+                    app["width"],
+                    app["height"],
+                    payload_bytes
+                )
+
+    # Controlled Ring 3 security fault test application
+    fault_apex_path = os.path.join(output_dir, "fault_test.apexec")
+    build_fault_test_apexec(fault_apex_path)
+    with open(fault_apex_path, "rb") as f:
+        fault_payload = f.read()
+    build_apapp(
+        os.path.join(output_dir, "fault_test.apapplication"),
+        "fault_test.apapplication",
+        "Ring 3 Fault Test",
+        "1.0.0",
+        "Aegis Security Lab",
+        "Controlled Ring 3 privilege fault containment validator",
+        PERM_CONSOLE,
+        300,
+        200,
+        fault_payload
+    )
 
 if __name__ == "__main__":
     out_dir = sys.argv[1] if len(sys.argv) > 1 else "build/apps"

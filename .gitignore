@@ -1,10 +1,36 @@
-build/
-*.o
-*.elf
-*.img
-*.fd
-scratch/
+# Purple OS / Aegis64 .gitignore
+
+# Temporary files and directories
+/tmp/
 tmp/
+scratch/
 *~
 *.swp
+__pycache__/
+*.pyc
+
+# VLC source repository exception (per user directive)
+/vlc/
+vlc/
+
+# Large raw disk images exceeding GitHub's 100 MB hard limit
+# (Preserved via aegis64-uefi.img.gz and aegis64-uefi.img.part_*)
+build/aegis64-uefi.img
+build/aegis64-uefi-test.img
+
+# Test audit and forensic reports (per user directive)
+docs/*AUDIT*.md
+docs/*audit*.md
+docs/*REPORT*.md
+docs/*report*.md
+docs/*ACCEPTANCE*.md
+docs/*FORENSIC*.md
+docs/*VERIFICATION*.md
+docs/*REGRESSION*.md
+checkpoints/**/*AUDIT*.md
+checkpoints/**/*audit*.md
+checkpoints/**/*REPORT*.md
+checkpoints/**/*report*.md
+checkpoints/**/*PROGRESS*.md
 checkpoints/**/source-snapshot.tar.gz
+TESTING.md

@@ -14,6 +14,15 @@ static uint8_t r_pos = 16, r_size = 8;
 static uint8_t g_pos = 8,  g_size = 8;
 static uint8_t b_pos = 0,  b_size = 8;
 
+/* Render Target State */
+static uint32_t *cur_render_target = NULL;
+static uint32_t cur_target_w = 0;
+static uint32_t cur_target_h = 0;
+static uint32_t cur_target_pitch = 0;
+static int32_t  cur_target_ox = 0;
+static int32_t  cur_target_oy = 0;
+static int      is_custom_target = 0;
+
 static uint32_t cursor_x = 0;
 static uint32_t cursor_y = 0;
 static uint32_t current_fg = COLOR_WHITE;
@@ -224,29 +233,162 @@ int video_set_mode(uint32_t width, uint32_t height, uint32_t bpp) {
 }
 #endif
 
+void video_set_render_target_offset(uint32_t *target, uint32_t width, uint32_t height,
+                                    uint32_t pitch, int32_t origin_x, int32_t origin_y) {
+    if (target) {
+        cur_render_target = target;
+        cur_target_w = width;
+        cur_target_h = height;
+        cur_target_pitch = pitch;
+        cur_target_ox = origin_x;
+        cur_target_oy = origin_y;
+        is_custom_target = 1;
+    } else {
+        cur_render_target = fb_ptr;
+        cur_target_w = fb_width;
+        cur_target_h = fb_height;
+        cur_target_pitch = fb_pitch;
+        cur_target_ox = 0;
+        cur_target_oy = 0;
+        is_custom_target = 0;
+    }
+}
+
+void video_set_render_target(uint32_t *target, uint32_t width, uint32_t height, uint32_t pitch) {
+    video_set_render_target_offset(target, width, height, pitch, 0, 0);
+}
+
+void video_reset_render_target(void) {
+    cur_render_target = fb_ptr;
+    cur_target_w = fb_width;
+    cur_target_h = fb_height;
+    cur_target_pitch = fb_pitch;
+    cur_target_ox = 0;
+    cur_target_oy = 0;
+    is_custom_target = 0;
+}
+
+uint32_t *video_get_render_target(void) {
+    return cur_render_target ? cur_render_target : fb_ptr;
+}
+
+uint32_t *video_get_fb_ptr(void) {
+    return fb_ptr;
+}
+
+uint32_t video_get_pitch(void) {
+    return fb_pitch;
+}
+
+void video_blit(uint32_t dst_x, uint32_t dst_y,
+                const uint32_t *src_pixels, uint32_t src_w, uint32_t src_h, uint32_t src_pitch) {
+    if (!fb_available || !src_pixels || src_w == 0 || src_h == 0) return;
+
+    int32_t dx = (int32_t)dst_x;
+    int32_t dy = (int32_t)dst_y;
+    int32_t sx0 = 0;
+    int32_t sy0 = 0;
+    int32_t w = (int32_t)src_w;
+    int32_t h = (int32_t)src_h;
+
+    if (dx < 0) {
+        sx0 = -dx;
+        w += dx;
+        dx = 0;
+    }
+    if (dy < 0) {
+        sy0 = -dy;
+        h += dy;
+        dy = 0;
+    }
+    if (dx + w > (int32_t)fb_width) {
+        w = (int32_t)fb_width - dx;
+    }
+    if (dy + h > (int32_t)fb_height) {
+        h = (int32_t)fb_height - dy;
+    }
+    if (w <= 0 || h <= 0) return;
+
+    int fast_copy = (r_pos == 16 && g_pos == 8 && b_pos == 0 &&
+                     r_size == 8 && g_size == 8 && b_size == 8);
+
+    for (int32_t r = 0; r < h; r++) {
+        uint32_t *dst_row = (uint32_t *)((uint8_t *)fb_ptr + (dy + r) * fb_pitch) + dx;
+        const uint32_t *src_row = (const uint32_t *)((const uint8_t *)src_pixels + (sy0 + r) * src_pitch) + sx0;
+        if (fast_copy) {
+            memcpy(dst_row, src_row, (size_t)w * sizeof(uint32_t));
+        } else {
+            for (int32_t c = 0; c < w; c++) {
+                dst_row[c] = video_rgb_to_hw(src_row[c]);
+            }
+        }
+    }
+}
+
 void video_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
-    if (!fb_available || x >= fb_width || y >= fb_height) return;
-    uint32_t *dest = (uint32_t *)((uint8_t *)fb_ptr + y * fb_pitch) + x;
-    *dest = video_rgb_to_hw(color);
+    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
+    if (!target) return;
+    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
+    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
+    uint32_t pitch = cur_render_target ? cur_target_pitch : fb_pitch;
+
+    int32_t lx = (int32_t)x - cur_target_ox;
+    int32_t ly = (int32_t)y - cur_target_oy;
+    if (lx < 0 || (uint32_t)lx >= target_w || ly < 0 || (uint32_t)ly >= target_h) return;
+
+    uint32_t pixel_val = is_custom_target ? color : video_rgb_to_hw(color);
+    uint32_t *dest = (uint32_t *)((uint8_t *)target + ly * pitch) + lx;
+    *dest = pixel_val;
 }
 
 uint32_t video_get_pixel(uint32_t x, uint32_t y) {
-    if (!fb_available || x >= fb_width || y >= fb_height) return 0;
-    const uint32_t *src = (const uint32_t *)((const uint8_t *)fb_ptr + y * fb_pitch) + x;
-    return video_hw_to_rgb(*src);
+    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
+    if (!target) return 0;
+    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
+    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
+    uint32_t pitch = cur_render_target ? cur_target_pitch : fb_pitch;
+
+    int32_t lx = (int32_t)x - cur_target_ox;
+    int32_t ly = (int32_t)y - cur_target_oy;
+    if (lx < 0 || (uint32_t)lx >= target_w || ly < 0 || (uint32_t)ly >= target_h) return 0;
+
+    const uint32_t *src = (const uint32_t *)((const uint8_t *)target + ly * pitch) + lx;
+    return is_custom_target ? *src : video_hw_to_rgb(*src);
 }
 
 void video_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
-    if (!fb_available) return;
-    if (x >= fb_width || y >= fb_height) return;
-    if (x + w > fb_width) w = fb_width - x;
-    if (y + h > fb_height) h = fb_height - y;
+    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
+    if (!target || w == 0 || h == 0) return;
+    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
+    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
+    uint32_t pitch = cur_render_target ? cur_target_pitch : fb_pitch;
 
-    uint32_t hw_color = video_rgb_to_hw(color);
-    for (uint32_t r = 0; r < h; r++) {
-        uint32_t *row = (uint32_t *)((uint8_t *)fb_ptr + (y + r) * fb_pitch) + x;
-        for (uint32_t c = 0; c < w; c++) {
-            row[c] = hw_color;
+    int32_t lx = (int32_t)x - cur_target_ox;
+    int32_t ly = (int32_t)y - cur_target_oy;
+    int32_t rw = (int32_t)w;
+    int32_t rh = (int32_t)h;
+
+    if (lx < 0) {
+        rw += lx;
+        lx = 0;
+    }
+    if (ly < 0) {
+        rh += ly;
+        ly = 0;
+    }
+    if (lx + rw > (int32_t)target_w) {
+        rw = (int32_t)target_w - lx;
+    }
+    if (ly + rh > (int32_t)target_h) {
+        rh = (int32_t)target_h - ly;
+    }
+    if (rw <= 0 || rh <= 0) return;
+
+    uint32_t pixel_val = is_custom_target ? color : video_rgb_to_hw(color);
+    for (int32_t r = 0; r < rh; r++) {
+        uint32_t *row = (uint32_t *)((uint8_t *)target + (ly + r) * pitch) + lx;
+        for (int32_t c = 0; c < rw; c++) {
+            row[c] = pixel_val;
         }
     }
 }
@@ -280,8 +422,11 @@ int video_test_colors(void) {
 }
 
 void video_clear(uint32_t color) {
-    if (!fb_available) return;
-    video_draw_rect(0, 0, fb_width, fb_height, color);
+    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
+    if (!target) return;
+    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
+    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
+    video_draw_rect(cur_target_ox, cur_target_oy, target_w, target_h, color);
     cursor_x = 0;
     cursor_y = 0;
 }
@@ -312,17 +457,28 @@ static void video_scroll(void) {
 }
 
 static void video_draw_glyph(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg) {
+    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
+    if (!target) return;
+    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
+    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
+    uint32_t pitch = cur_render_target ? cur_target_pitch : fb_pitch;
+
+    int32_t lx = (int32_t)x - cur_target_ox;
+    int32_t ly = (int32_t)y - cur_target_oy;
+
     uint8_t ch = (uint8_t)c;
     const uint8_t *bitmap = font8x16[ch];
-    uint32_t hw_fg = video_rgb_to_hw(fg);
-    uint32_t hw_bg = video_rgb_to_hw(bg);
+    uint32_t hw_fg = is_custom_target ? fg : video_rgb_to_hw(fg);
+    uint32_t hw_bg = is_custom_target ? bg : video_rgb_to_hw(bg);
 
     for (uint32_t row = 0; row < 16; row++) {
-        if (y + row >= fb_height) break;
+        int32_t py = ly + (int32_t)row;
+        if (py < 0 || (uint32_t)py >= target_h) continue;
         uint8_t bits = bitmap[row];
-        uint32_t *dest = (uint32_t *)((uint8_t *)fb_ptr + (y + row) * fb_pitch) + x;
+        uint32_t *dest = (uint32_t *)((uint8_t *)target + py * pitch) + lx;
         for (uint32_t col = 0; col < 8; col++) {
-            if (x + col < fb_width) {
+            int32_t px = lx + (int32_t)col;
+            if (px >= 0 && (uint32_t)px < target_w) {
                 dest[col] = (bits & (0x80 >> col)) ? hw_fg : hw_bg;
             }
         }

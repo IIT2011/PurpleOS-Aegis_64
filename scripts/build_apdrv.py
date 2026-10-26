@@ -265,5 +265,57 @@ def main():
         ["kinfo", "usb_dump_controllers"]
     )
 
+    # 13. camera.apdrv / Camera.apdrv (UVC USB Video Class Driver)
+    build_module(
+        os.path.join(out_dir, "camera.apdrv"),
+        "purple_camera",
+        "USB Video Class (UVC) Camera Subsystem Driver",
+        "Purple OS Hardware Group",
+        0xFFFF, 0xFFFF,
+        ["kinfo", "usb_dump_controllers"]
+    )
+
+    # 14. Graphics.apdrv (Unified Graphics Driver Package)
+    build_module(
+        os.path.join(out_dir, "Graphics.apdrv"),
+        "purple_graphics",
+        "Unified Hardware Graphics and Compositor Accelerator",
+        "Purple OS Hardware Group",
+        0x8086, 0x1912,
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+    )
+
+    # Also generate the exact TitleCase filenames required by Directive 4 & 13
+    title_cases = {
+        "storage.apdrv": "Storage.apdrv",
+        "network.apdrv": "Network.apdrv",
+        "usb.apdrv": "USB.apdrv",
+        "audio.apdrv": "Audio.apdrv",
+        "input.apdrv": "Input.apdrv",
+        "wifi.apdrv": "WiFi.apdrv",
+        "bluetooth.apdrv": "Bluetooth.apdrv",
+        "camera.apdrv": "Camera.apdrv"
+    }
+    for src, dst in title_cases.items():
+        src_path = os.path.join(out_dir, src)
+        if os.path.exists(src_path):
+            with open(src_path, "rb") as sf:
+                data = sf.read()
+            with open(os.path.join(out_dir, dst), "wb") as df:
+                df.write(data)
+            # Also copy to root build/
+            with open(os.path.join("build", dst), "wb") as df:
+                df.write(data)
+            with open(os.path.join("build", src), "wb") as df:
+                df.write(data)
+
+    # Also copy Graphics.apdrv to build/
+    g_src = os.path.join(out_dir, "Graphics.apdrv")
+    if os.path.exists(g_src):
+        with open(g_src, "rb") as sf:
+            data = sf.read()
+        with open(os.path.join("build", "Graphics.apdrv"), "wb") as df:
+            df.write(data)
+
 if __name__ == "__main__":
     main()

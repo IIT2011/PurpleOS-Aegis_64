@@ -39,7 +39,7 @@
 | **Kernel Symbol Table (KSYM)** | Complete | 10/10 host tests passed (`build/test_apdrv`) | Dynamic symbol registration/lookup, exports `memcpy`, `pci_*`, `netdev_*` |
 | **APDRV v3 Native Driver Loader** | Complete | 10/10 host tests passed (`build/test_apdrv`) | Magic `APDRV100`, relocations (RELOC_64, 32, PC32, PLT32), W^X enforcement |
 | **Network Device Subsystem (`netdev`)** | Complete | 10/10 host tests passed (`build/test_apdrv`) | Network interface abstraction, packet/byte metrics, PurpleDetect binding |
-| **Application Bundles (`.apapplications`)** | Complete | 5/5 host tests passed (`build/test_apapp`) | HMAC-SHA256 signed manifests, permissions, task spawn, GUI auto-window |
+| **Application Bundles (`.apapplication`)** | Complete | 5/5 host tests passed (`build/test_apapp`) | HMAC-SHA256 signed manifests, permissions, task spawn, GUI auto-window |
 | **AegisShell Command Interface** | Complete | Interactive shell & automated test harnesses | `help`, `sysinfo`, `cpuinfo`, `mem`, `tasks`, `task`, `disks`, `df`, `remount`, `sync`, `touch`, `write`, `peek`, `ls`, `aegisdetect`, `devices`, `lspci`, `desktop`, `mouse`, `smp`, `smptest`, `ksym`, `insmod`, `lsmod`, `rmmod`, `ifconfig`, `apps`, `app`, `video`, `clear`, `echo`, `reboot`, `panic` |
 
 ---
@@ -68,6 +68,6 @@
   - `make check-scheduler-qemu`: Preemption, multi-tier priority, worker tasks passed.
   - `make check-writable-storage-qemu`: Disposable disk GPT partition creation, remount rw, touch, write, sync, peek passed.
   - `make check-smp-qemu`: 4-core multi-core boot, core affinity, concurrent workers, per-CPU idle tasks passed.
-  - `make check-storage-qemu`: 44/44 assertions passed across PurpleFS, AegisDetect, PurpleDetect, Desktop, Mouse, KSYM, APDRV v3 W^X driver loading, `.apapplications` HMAC-SHA256 launch, Bochs VBE video configuration.
+  - `make check-storage-qemu`: 44/44 assertions passed across PurpleFS, AegisDetect, PurpleDetect, Desktop, Mouse, KSYM, APDRV v3 W^X driver loading, `.apapplication` HMAC-SHA256 launch, Bochs VBE video configuration.
   - `make check-modern-storage-qemu`: 17/17 assertions passed across AHCI SATA and NVMe PCIe controller discovery, namespace enumeration, GPT partition parsing, and PurpleFS v2 mounting.
   - `make check-graphics-qemu`: 9/9 assertions passed across Bochs VBE resolution modes, CP437 glyph rendering, windowed desktop frame rendering, and ASCII preview fallback.

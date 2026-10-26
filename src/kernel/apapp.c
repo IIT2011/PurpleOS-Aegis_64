@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #else
 #include "pmm.h"
+#include "vmm.h"
+#include "apexec.h"
 #include "kernel_storage.h"
 #endif
 
@@ -153,7 +155,17 @@ int apapp_launch(const apapp_manifest_t *manifest,
     /* 3. Task Creation under AegisSched */
     uint32_t tid = 0;
 #ifndef __KERNEL_HOST_TEST__
-    if (entry) {
+    if (payload && payload_len >= sizeof(apex_header_t) && apex_validate(payload, payload_len) == APEX_OK) {
+        page_table_t *pml4 = vmm_get_kernel_pml4();
+        apex_binary_info_t binfo;
+        if (apex_load(pml4, payload, payload_len, &binfo) == APEX_OK) {
+            uint32_t prio = manifest->default_priority ? manifest->default_priority : 2;
+            task_t *t = task_create_user(manifest->app_id, binfo.entry_point, binfo.stack_top - 16, (task_priority_t)prio);
+            if (t) {
+                tid = t->id;
+            }
+        }
+    } else if (entry) {
         uint32_t prio = manifest->default_priority ? manifest->default_priority : 2;
         task_t *t = task_create(manifest->app_id, entry, NULL, (task_priority_t)prio);
         if (t) {
@@ -215,49 +227,121 @@ int apapp_terminate(const char *app_id) {
     return APAPP_OK;
 }
 
+int apapp_has_canonical_extension(const char *path) {
+    if (!path) return 0;
+    size_t len = strlen(path);
+    const char *ext = APAPP_EXTENSION;
+    size_t ext_len = strlen(ext);
+    if (len < ext_len) return 0;
+    return (strcmp(path + len - ext_len, ext) == 0) ? 1 : 0;
+}
+
 #ifndef __KERNEL_HOST_TEST__
 int apapp_launch_from_storage(const char *bundle_path, app_entry_fn fallback_entry) {
     if (!bundle_path) return APAPP_ERR_INVALID;
+    if (!apapp_has_canonical_extension(bundle_path)) {
+        kerror("APAPP: Noncanonical application bundle extension in '%s' (required: %s)", bundle_path, APAPP_EXTENSION);
+        return APAPP_ERR_INVALID;
+    }
     if (!storage_is_fs_mounted()) {
         kerror("APAPP: Cannot load '%s' - No PurpleFS volume mounted", bundle_path);
         return APAPP_ERR_NOT_FOUND;
     }
 
-    pfs2_fs_t *fs = storage_get_fs();
-    uint32_t ino = 0;
-    if (pfs2_lookup(fs, bundle_path, &ino) != PFS2_OK) {
-        kerror("APAPP: Bundle '%s' not found on PurpleFS", bundle_path);
-        return APAPP_ERR_NOT_FOUND;
-    }
+    uint8_t *buf = NULL;
+    uint32_t file_size = 0;
+    uint32_t pages = 0;
 
-    pfs2_inode_t finode;
-    if (pfs2_read_inode(fs, ino, &finode) != PFS2_OK) {
-        kerror("APAPP: Failed to read inode for '%s'", bundle_path);
-        return APAPP_ERR_INVALID;
-    }
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t ino3 = 0;
+        char resolved_path[128];
+        const char *lookup_path = bundle_path;
+        if (bundle_path[0] != '/') {
+            snprintf(resolved_path, sizeof(resolved_path), "%s/%s", APAPP_SYSTEM_DIR, bundle_path);
+            if (pfs3_lookup_path(fs3, resolved_path, &ino3) == PFS3_OK) {
+                lookup_path = resolved_path;
+            } else {
+                snprintf(resolved_path, sizeof(resolved_path), "%s/%s", APAPP_USER_DIR, bundle_path);
+                if (pfs3_lookup_path(fs3, resolved_path, &ino3) == PFS3_OK) {
+                    lookup_path = resolved_path;
+                } else {
+                    snprintf(resolved_path, sizeof(resolved_path), "/%s", bundle_path);
+                    if (pfs3_lookup_path(fs3, resolved_path, &ino3) == PFS3_OK) {
+                        lookup_path = resolved_path;
+                    }
+                }
+            }
+        }
+        if (pfs3_lookup_path(fs3, lookup_path, &ino3) != PFS3_OK) {
+            kerror("APAPP: Bundle '%s' not found on PurpleFS v3", lookup_path);
+            return APAPP_ERR_NOT_FOUND;
+        }
 
-    if (finode.size_bytes < sizeof(apapp_manifest_t) || finode.size_bytes > 1024 * 1024) {
-        kerror("APAPP: Invalid bundle size (%u bytes) for '%s'", (uint32_t)finode.size_bytes, bundle_path);
-        return APAPP_ERR_INVALID;
-    }
+        pfs3_inode_t finode3;
+        if (pfs3_read_inode(fs3, ino3, &finode3) != PFS3_OK) {
+            kerror("APAPP: Failed to read inode for '%s'", lookup_path);
+            return APAPP_ERR_INVALID;
+        }
 
-    uint32_t pages = (finode.size_bytes + 4095) / 4096;
-    void *buf = pmm_alloc_frames(pages);
-    if (!buf) {
-        kerror("APAPP: Out of memory reading bundle '%s'", bundle_path);
-        return APAPP_ERR_MEMORY;
-    }
+        if (finode3.size_bytes < sizeof(apapp_manifest_t) || finode3.size_bytes > 2 * 1024 * 1024) {
+            kerror("APAPP: Invalid bundle size (%u bytes) for '%s'", (uint32_t)finode3.size_bytes, lookup_path);
+            return APAPP_ERR_INVALID;
+        }
 
-    size_t bytes_read = 0;
-    int rc = pfs2_read_file(fs, ino, buf, finode.size_bytes, 0, &bytes_read);
-    if (rc != PFS2_OK || bytes_read != finode.size_bytes) {
-        pmm_free_frames(buf, pages);
-        kerror("APAPP: Storage read error on '%s'", bundle_path);
-        return APAPP_ERR_INVALID;
+        file_size = (uint32_t)finode3.size_bytes;
+        pages = (file_size + 4095) / 4096;
+        buf = (uint8_t *)pmm_alloc_frames(pages);
+        if (!buf) {
+            kerror("APAPP: Out of memory reading bundle '%s'", lookup_path);
+            return APAPP_ERR_MEMORY;
+        }
+
+        uint64_t bytes_read = 0;
+        int rc = pfs3_read_file(fs3, ino3, buf, file_size, 0, &bytes_read);
+        if (rc != PFS3_OK || bytes_read != file_size) {
+            pmm_free_frames(buf, pages);
+            kerror("APAPP: Storage read error on '%s'", lookup_path);
+            return APAPP_ERR_INVALID;
+        }
+    } else {
+        pfs2_fs_t *fs = storage_get_fs();
+        uint32_t ino = 0;
+        if (pfs2_lookup(fs, bundle_path, &ino) != PFS2_OK) {
+            kerror("APAPP: Bundle '%s' not found on PurpleFS v2", bundle_path);
+            return APAPP_ERR_NOT_FOUND;
+        }
+
+        pfs2_inode_t finode;
+        if (pfs2_read_inode(fs, ino, &finode) != PFS2_OK) {
+            kerror("APAPP: Failed to read inode for '%s'", bundle_path);
+            return APAPP_ERR_INVALID;
+        }
+
+        if (finode.size_bytes < sizeof(apapp_manifest_t) || finode.size_bytes > 2 * 1024 * 1024) {
+            kerror("APAPP: Invalid bundle size (%u bytes) for '%s'", (uint32_t)finode.size_bytes, bundle_path);
+            return APAPP_ERR_INVALID;
+        }
+
+        file_size = (uint32_t)finode.size_bytes;
+        pages = (file_size + 4095) / 4096;
+        buf = (uint8_t *)pmm_alloc_frames(pages);
+        if (!buf) {
+            kerror("APAPP: Out of memory reading bundle '%s'", bundle_path);
+            return APAPP_ERR_MEMORY;
+        }
+
+        size_t bytes_read = 0;
+        int rc = pfs2_read_file(fs, ino, buf, file_size, 0, &bytes_read);
+        if (rc != PFS2_OK || bytes_read != file_size) {
+            pmm_free_frames(buf, pages);
+            kerror("APAPP: Storage read error on '%s'", bundle_path);
+            return APAPP_ERR_INVALID;
+        }
     }
 
     apapp_manifest_t manifest;
-    int prc = apapp_parse_manifest(buf, finode.size_bytes, &manifest);
+    int prc = apapp_parse_manifest(buf, file_size, &manifest);
     if (prc != APAPP_OK) {
         pmm_free_frames(buf, pages);
         return prc;
@@ -273,14 +357,17 @@ int apapp_launch_from_storage(const char *bundle_path, app_entry_fn fallback_ent
 }
 #else
 int apapp_launch_from_storage(const char *bundle_path, app_entry_fn fallback_entry) {
-    (void)bundle_path;
+    if (!bundle_path) return APAPP_ERR_INVALID;
+    if (!apapp_has_canonical_extension(bundle_path)) {
+        return APAPP_ERR_INVALID;
+    }
     (void)fallback_entry;
     return APAPP_OK;
 }
 #endif
 
 void apapp_dump(void) {
-    kprintf("\n=== Active .apapplications Native Application Bundles (%u running) ===\n", app_count);
+    kprintf("\n=== Active .apapplication Native Application Bundles (%u running) ===\n", app_count);
     kprintf("  APP_ID                  VERSION  PID   WIN_ID  PERMISSIONS  STATE\n");
     kprintf("  ------------------------------------------------------------------------\n");
     if (app_count == 0) {

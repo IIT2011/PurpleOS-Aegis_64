@@ -313,26 +313,19 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     # Copy ESP filesystem into disk at p1_start
     disk[p1_start * 512 : (p1_start + esp_sectors) * 512] = esp_data
 
-    # Format and copy PurpleFS v2 filesystem into Partition 2
-    pfs2_files = {
-        "welcome.txt": (
-            "Welcome to Purple OS / Aegis64 Native Filesystem!\n"
-            "Architecture: x86-64 | Kernel: Aegis64\n"
-            "Filesystem: PurpleFS v2 Persistent Storage\n"
-        ),
-        "version.txt": "Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)\n",
-        "motd": "Purple OS: Correctness, Memory Safety, and Recoverability.\n",
-        "desktop.cfg": "resolution=1024x768\nwallpaper=cosmic_purple\ntheme=violet_dark\n",
-    }
-    # If built .apapplication packages exist, copy them into the root filesystem
-    for app_name in ["terminal", "sysmon", "files", "calculator"]:
-        app_path = f"build/{app_name}.apapplication"
-        if os.path.exists(app_path):
-            with open(app_path, "rb") as af:
-                pfs2_files[f"{app_name}.apapplication"] = af.read()
-
-    pfs2_data = format_purplefs_v2(p2_blocks, "PurpleSystem", pfs2_files)
-    disk[p2_start * 512 : p2_start * 512 + len(pfs2_data)] = pfs2_data
+    # Format and copy PurpleFS v3 filesystem into Partition 2
+    pfs3_img = "build/pfs3_part.img"
+    pfs3_tool = "./build/pfs3_tool"
+    if not os.path.exists(pfs3_tool):
+        subprocess.check_call([
+            "gcc", "-Wall", "-Wextra", "-D__KERNEL_HOST_TEST__", "-Iinclude",
+            "tools/pfs3_tool.c", "src/fs/purplefs_v3.c", "src/drivers/block_dev.c",
+            "src/kernel/string.c", "src/drivers/serial.c", "-o", pfs3_tool
+        ])
+    subprocess.check_call([pfs3_tool, "populate", pfs3_img, str(p2_sectors)])
+    with open(pfs3_img, "rb") as pf:
+        pfs3_data = pf.read()
+    disk[p2_start * 512 : p2_start * 512 + len(pfs3_data)] = pfs3_data
 
     # Generate Partition Entries
     entries = bytearray(128 * 128) # 128 entries of 128 bytes each
@@ -352,10 +345,10 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     name1 = "EFI System Partition".encode("utf-16le")
     entries[56:56 + len(name1)] = name1
 
-    # Entry 2: PurpleFS Partition GUID: 4F535046-5332-0001-8000-00A0C911D504
+    # Entry 2: PurpleFS Partition GUID: 4F535046-5333-0001-8000-00A0C911D504
     pfs_guid = bytes([
         0x46, 0x50, 0x53, 0x4F,
-        0x32, 0x53,
+        0x33, 0x53,
         0x01, 0x00,
         0x80, 0x00,
         0x00, 0xA0, 0xC9, 0x11, 0xD5, 0x04
@@ -364,7 +357,7 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     entries[128:144] = pfs_guid
     entries[144:160] = unique_guid2
     struct.pack_into("<QQQ", entries, 160, p2_start, p2_end, 0)
-    name2 = "PurpleFS v2 Data".encode("utf-16le")
+    name2 = "PurpleFS v3 System".encode("utf-16le")
     entries[184:184 + len(name2)] = name2
 
     entries_crc = crc32_gpt(entries)

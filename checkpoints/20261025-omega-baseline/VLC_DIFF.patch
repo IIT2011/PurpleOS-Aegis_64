@@ -1,0 +1,53 @@
+diff --git a/include/vlc_threads.h b/include/vlc_threads.h
+index e05fc8790d..9083a5145a 100644
+--- a/include/vlc_threads.h
++++ b/include/vlc_threads.h
+@@ -75,6 +75,12 @@ typedef struct vlc_timer *vlc_timer_t;
+ 
+ # define pthread_sigmask  sigprocmask
+ 
++#elif defined (__PURPLE_OS__)
++typedef struct vlc_thread *vlc_thread_t;
++#define VLC_THREAD_CANCELED ((void*) UINTPTR_MAX)
++typedef struct vlc_threadvar *vlc_threadvar_t;
++typedef struct vlc_timer *vlc_timer_t;
++
+ #elif defined (__ANDROID__)      /* pthreads subset without pthread_cancel() */
+ # include <unistd.h>
+ # include <pthread.h>
+diff --git a/modules/audio_output/Makefile.am b/modules/audio_output/Makefile.am
+index 291c4092ff..bc897658e8 100644
+--- a/modules/audio_output/Makefile.am
++++ b/modules/audio_output/Makefile.am
+@@ -77,6 +77,13 @@ aout_PLUGINS += libalsa_plugin.la
+ endif
+ 
+ libvlc_pipewire_la_SOURCES = audio_output/vlc_pipewire.c audio_output/vlc_pipewire.h
++### Purple OS Audio Output ###
++libpurple_aout_plugin_la_SOURCES = audio_output/purple.c
++libpurple_aout_plugin_la_CFLAGS = $(AM_CFLAGS) -I$(top_srcdir)/../include
++if HAVE_PURPLE_OS
++aout_PLUGINS += libpurple_aout_plugin.la
++endif
++
+ libvlc_pipewire_la_CFLAGS = $(AM_CFLAGS) $(PIPEWIRE_CFLAGS)
+ libvlc_pipewire_la_LIBADD = $(PIPEWIRE_LIBS) $(LTLIBVLCCORE)
+ libvlc_pipewire_la_LDFLAGS = \
+diff --git a/modules/video_output/Makefile.am b/modules/video_output/Makefile.am
+index ac05df3594..85523b0294 100644
+--- a/modules/video_output/Makefile.am
++++ b/modules/video_output/Makefile.am
+@@ -409,6 +409,13 @@ vout_PLUGINS += libkms_plugin.la libdrm_display_plugin.la
+ endif
+ 
+ 
++### Purple OS Video Output ###
++libpurple_vout_plugin_la_SOURCES = video_output/purple.c
++libpurple_vout_plugin_la_CFLAGS = $(AM_CFLAGS) -I$(top_srcdir)/../include
++if HAVE_PURPLE_OS
++vout_PLUGINS += libpurple_vout_plugin.la
++endif
++
+ ### Coloured ASCII art ###
+ libcaca_plugin_la_SOURCES = video_output/caca.c
+ libcaca_plugin_la_CFLAGS = $(AM_CFLAGS) $(CACA_CFLAGS)

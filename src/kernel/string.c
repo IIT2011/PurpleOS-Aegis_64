@@ -127,6 +127,28 @@ char *strstr(const char *haystack, const char *needle) {
     }
     return NULL;
 }
+char *strchr(const char *s, int c) {
+    if (!s) return NULL;
+    char ch = (char)c;
+    while (*s != '\0') {
+        if (*s == ch) return (char *)s;
+        s++;
+    }
+    return (ch == '\0') ? (char *)s : NULL;
+}
+
+char *strrchr(const char *s, int c) {
+    if (!s) return NULL;
+    char ch = (char)c;
+    const char *last = NULL;
+    while (*s != '\0') {
+        if (*s == ch) last = s;
+        s++;
+    }
+    if (ch == '\0') return (char *)s;
+    return (char *)last;
+}
+
 char *strdup(const char *s) {
     if (!s) return NULL;
     size_t len = strlen(s) + 1;
@@ -141,4 +163,134 @@ char *strdup(const char *s) {
     }
     return copy;
 }
+
+int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
+    if (!str || size == 0) return 0;
+    size_t written = 0;
+
+    for (const char *p = format; *p != '\0'; p++) {
+        if (*p != '%') {
+            if (written + 1 < size) {
+                str[written++] = *p;
+            }
+            continue;
+        }
+
+        p++; // skip '%'
+        if (*p == '\0') break;
+        if (*p == '%') {
+            if (written + 1 < size) {
+                str[written++] = '%';
+            }
+            continue;
+        }
+
+        int width = 0;
+        while (*p >= '0' && *p <= '9') {
+            width = width * 10 + (*p - '0');
+            p++;
+        }
+
+        int is_long = 0;
+        if (*p == 'l') {
+            is_long = 1;
+            p++;
+            if (*p == 'l') {
+                is_long = 2;
+                p++;
+            }
+        }
+
+        switch (*p) {
+            case 's': {
+                const char *s = va_arg(ap, const char *);
+                if (!s) s = "(null)";
+                while (*s && written + 1 < size) {
+                    str[written++] = *s++;
+                }
+                break;
+            }
+            case 'c': {
+                char c = (char)va_arg(ap, int);
+                if (written + 1 < size) {
+                    str[written++] = c;
+                }
+                break;
+            }
+            case 'd':
+            case 'i': {
+                int64_t val = (is_long >= 1) ? va_arg(ap, int64_t) : va_arg(ap, int);
+                if (val < 0) {
+                    if (written + 1 < size) str[written++] = '-';
+                    val = -val;
+                }
+                char num_buf[32];
+                int idx = 0;
+                uint64_t uval = (uint64_t)val;
+                if (uval == 0) num_buf[idx++] = '0';
+                else {
+                    while (uval > 0) {
+                        num_buf[idx++] = '0' + (uval % 10);
+                        uval /= 10;
+                    }
+                }
+                for (int j = idx - 1; j >= 0; j--) {
+                    if (written + 1 < size) str[written++] = num_buf[j];
+                }
+                break;
+            }
+            case 'u': {
+                uint64_t uval = (is_long >= 1) ? va_arg(ap, uint64_t) : (uint64_t)va_arg(ap, unsigned int);
+                char num_buf[32];
+                int idx = 0;
+                if (uval == 0) num_buf[idx++] = '0';
+                else {
+                    while (uval > 0) {
+                        num_buf[idx++] = '0' + (uval % 10);
+                        uval /= 10;
+                    }
+                }
+                for (int j = idx - 1; j >= 0; j--) {
+                    if (written + 1 < size) str[written++] = num_buf[j];
+                }
+                break;
+            }
+            case 'x':
+            case 'X':
+            case 'p': {
+                uint64_t uval = (*p == 'p' || is_long >= 1) ? va_arg(ap, uint64_t) : (uint64_t)va_arg(ap, unsigned int);
+                char num_buf[32];
+                int idx = 0;
+                const char *hex_digits = (*p == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+                if (uval == 0) num_buf[idx++] = '0';
+                else {
+                    while (uval > 0) {
+                        num_buf[idx++] = hex_digits[uval & 0xF];
+                        uval >>= 4;
+                    }
+                }
+                while (idx < width) num_buf[idx++] = '0';
+                for (int j = idx - 1; j >= 0; j--) {
+                    if (written + 1 < size) str[written++] = num_buf[j];
+                }
+                break;
+            }
+            default:
+                if (written + 1 < size) str[written++] = *p;
+                break;
+        }
+    }
+
+    str[written] = '\0';
+    return (int)written;
+}
+
+int snprintf(char *str, size_t size, const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    int ret = vsnprintf(str, size, format, ap);
+    va_end(ap);
+    return ret;
+}
+
 #pragma GCC diagnostic pop

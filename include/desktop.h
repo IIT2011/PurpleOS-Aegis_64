@@ -74,6 +74,12 @@ typedef struct {
     int      type;
     uint32_t icon_id;
 
+    /* Window Bounded Drawing Surface */
+    uint32_t *surface;
+    uint32_t surface_w;
+    uint32_t surface_h;
+    uint32_t surface_pitch;
+
     /* Window geometry state for maximize/restore */
     int      is_maximized;
     uint32_t saved_x;
@@ -175,6 +181,7 @@ uint32_t desktop_get_window_count(void);
 desktop_hit_result_t desktop_hit_test(int32_t x, int32_t y);
 
 void desktop_render(void);
+void desktop_composite(void);
 void desktop_render_preview(void);
 void desktop_draw_cursor(uint32_t x, uint32_t y);
 void desktop_erase_cursor(void);
@@ -183,6 +190,8 @@ void desktop_move_cursor(int32_t nx, int32_t ny);
 int  desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons);
 void desktop_handle_key(char c, uint8_t scancode, int pressed, uint8_t modifiers);
 void desktop_terminal_put_line(gui_window_t *win, const char *line);
+void desktop_terminal_write(const char *s);
+void desktop_terminal_clear(void);
 void desktop_terminal_execute(gui_window_t *win, const char *cmd);
 void desktop_run_session(void);
 int  desktop_is_active(void);

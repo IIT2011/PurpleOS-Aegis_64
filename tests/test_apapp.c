@@ -42,7 +42,7 @@ static void test_apapp_init_state(void) {
     printf("[TEST  1] Running test_apapp_init_state                     ... ");
     assert(apapp_subsystem_init() == APAPP_OK);
     assert(apapp_get_count() == 0);
-    assert(apapp_find("calc.apapplications") == NULL);
+    assert(apapp_find("calc.apapplication") == NULL);
     printf("PASSED\n");
 }
 
@@ -53,7 +53,7 @@ static void test_apapp_manifest_parsing(void) {
     memcpy(m.magic, APAPP_MAGIC, 8);
     m.version = 1;
     m.manifest_size = sizeof(apapp_manifest_t);
-    strcpy(m.app_id, "calculator.apapplications");
+    strcpy(m.app_id, "calculator.apapplication");
     strcpy(m.app_name, "Desktop Calculator");
     strcpy(m.version_str, "1.0.0");
     strcpy(m.author, "Aegis Core");
@@ -63,7 +63,7 @@ static void test_apapp_manifest_parsing(void) {
 
     apapp_manifest_t parsed;
     assert(apapp_parse_manifest(&m, sizeof(m), &parsed) == APAPP_OK);
-    assert(strcmp(parsed.app_id, "calculator.apapplications") == 0);
+    assert(strcmp(parsed.app_id, "calculator.apapplication") == 0);
     assert(strcmp(parsed.app_name, "Desktop Calculator") == 0);
     assert(parsed.permissions == (APAPP_PERM_GUI | APAPP_PERM_CONSOLE));
 
@@ -89,7 +89,7 @@ static void test_apapp_security_verification_valid(void) {
     memcpy(m.magic, APAPP_MAGIC, 8);
     m.version = 1;
     m.manifest_size = sizeof(apapp_manifest_t);
-    strcpy(m.app_id, "sysmon.apapplications");
+    strcpy(m.app_id, "sysmon.apapplication");
     strcpy(m.app_name, "System Monitor");
 
     const char *payload = "PAYLOAD_EXECUTABLE_CODE_BYTES_12345";
@@ -106,7 +106,7 @@ static void test_apapp_security_verification_tampered(void) {
     memcpy(m.magic, APAPP_MAGIC, 8);
     m.version = 1;
     m.manifest_size = sizeof(apapp_manifest_t);
-    strcpy(m.app_id, "sysmon.apapplications");
+    strcpy(m.app_id, "sysmon.apapplication");
     strcpy(m.app_name, "System Monitor");
 
     const char *payload = "PAYLOAD_EXECUTABLE_CODE_BYTES_12345";
@@ -135,7 +135,7 @@ static void test_apapp_launch_gui_and_lifecycle(void) {
     memcpy(m.magic, APAPP_MAGIC, 8);
     m.version = 1;
     m.manifest_size = sizeof(apapp_manifest_t);
-    strcpy(m.app_id, "editor.apapplications");
+    strcpy(m.app_id, "editor.apapplication");
     strcpy(m.app_name, "Purple Text Editor");
     strcpy(m.version_str, "2.1.0");
     m.permissions = APAPP_PERM_GUI;
@@ -151,15 +151,15 @@ static void test_apapp_launch_gui_and_lifecycle(void) {
     assert(inst->state == APAPP_STATE_RUNNING);
     assert(inst->window_id >= 0); /* GUI window created */
     assert(apapp_get_count() == 1);
-    assert(apapp_find("editor.apapplications") == inst);
+    assert(apapp_find("editor.apapplication") == inst);
 
     /* Duplicate rejection */
     assert(apapp_launch(&m, payload, strlen(payload), NULL, &inst) == APAPP_ERR_EXISTS);
 
     /* Terminate */
-    assert(apapp_terminate("editor.apapplications") == APAPP_OK);
+    assert(apapp_terminate("editor.apapplication") == APAPP_OK);
     assert(apapp_get_count() == 0);
-    assert(apapp_find("editor.apapplications") == NULL);
+    assert(apapp_find("editor.apapplication") == NULL);
 
     printf("PASSED\n");
 }
@@ -183,7 +183,7 @@ static void test_apapp_disk_bundles_validation(void) {
 
     apapp_manifest_t manifest;
     assert(apapp_parse_manifest(buf, sz, &manifest) == APAPP_OK);
-    assert(strcmp(manifest.app_id, "terminal.apapplications") == 0);
+    assert(strcmp(manifest.app_id, "terminal.apapplication") == 0);
 
     const void *payload = buf + manifest.exec_offset;
     assert(apapp_verify_security(&manifest, payload, manifest.exec_size) == APAPP_OK);
@@ -192,15 +192,64 @@ static void test_apapp_disk_bundles_validation(void) {
     assert(apapp_launch(&manifest, payload, manifest.exec_size, NULL, &inst) == APAPP_OK);
     assert(inst != NULL);
     assert(apapp_get_count() == 1);
-    assert(apapp_terminate("terminal.apapplications") == APAPP_OK);
+    assert(apapp_terminate("terminal.apapplication") == APAPP_OK);
 
     free(buf);
     printf("PASSED\n");
 }
 
+static void test_apapp_canonical_extension_enforcement(void) {
+    printf("[TEST  7] Running test_apapp_canonical_extension_enforcement... ");
+    /* 1. Canonical .apapplication extension must be accepted */
+    assert(apapp_has_canonical_extension("terminal.apapplication") == 1);
+    assert(apapp_has_canonical_extension("/System/Applications/PurpleTerminal.apapplication") == 1);
+    assert(apapp_has_canonical_extension("/Users/aegis/Applications/Calculator.apapplication") == 1);
+    assert(apapp_has_canonical_extension("/Users/Admin/Applications/Editor.apapplication") == 1);
+
+    /* 2. Noncanonical .apapp MUST be strictly rejected */
+    assert(apapp_has_canonical_extension("terminal.apapp") == 0);
+    assert(apapp_has_canonical_extension("/System/Applications/terminal.apapp") == 0);
+    assert(apapp_has_canonical_extension("/Users/aegis/Applications/calculator.apapp") == 0);
+
+    /* 3. Plural .apapplications or other extensions MUST be rejected */
+    assert(apapp_has_canonical_extension("terminal.apapplications") == 0);
+    assert(apapp_has_canonical_extension("app.exe") == 0);
+    assert(apapp_has_canonical_extension("app.bin") == 0);
+    assert(apapp_has_canonical_extension("app.app") == 0);
+    assert(apapp_has_canonical_extension("terminal") == 0);
+    assert(apapp_has_canonical_extension("") == 0);
+    assert(apapp_has_canonical_extension(NULL) == 0);
+
+    /* 4. apapp_launch_from_storage must fail on noncanonical extensions */
+    assert(apapp_launch_from_storage("terminal.apapp", NULL) == APAPP_ERR_INVALID);
+    assert(apapp_launch_from_storage("terminal.exe", NULL) == APAPP_ERR_INVALID);
+    assert(apapp_launch_from_storage("terminal", NULL) == APAPP_ERR_INVALID);
+
+    /* 5. apapp_launch_from_storage succeeds validation on canonical extension */
+    assert(apapp_launch_from_storage("terminal.apapplication", NULL) == APAPP_OK);
+    assert(apapp_launch_from_storage("/System/Applications/PurpleTerminal.apapplication", NULL) == APAPP_OK);
+    assert(apapp_launch_from_storage("/Users/aegis/Applications/Calculator.apapplication", NULL) == APAPP_OK);
+
+    printf("PASSED\n");
+}
+
+static void test_apapp_directory_structure(void) {
+    printf("[TEST  8] Running test_apapp_directory_structure            ... ");
+    /* Verify system application canonical directory */
+    assert(strcmp(APAPP_SYSTEM_DIR, "/System/Applications") == 0);
+
+    /* Verify user application canonical directory */
+    assert(strcmp(APAPP_USER_DIR, "/Users/aegis/Applications") == 0);
+
+    /* Verify canonical extension constant */
+    assert(strcmp(APAPP_EXTENSION, ".apapplication") == 0);
+
+    printf("PASSED\n");
+}
+
 int main(void) {
     printf("=====================================================\n");
-    printf(" Running .apapplications Application Bundle Tests    \n");
+    printf(" Running .apapplication Application Bundle Tests     \n");
     printf("=====================================================\n");
 
     test_apapp_init_state();
@@ -209,9 +258,11 @@ int main(void) {
     test_apapp_security_verification_tampered();
     test_apapp_launch_gui_and_lifecycle();
     test_apapp_disk_bundles_validation();
+    test_apapp_canonical_extension_enforcement();
+    test_apapp_directory_structure();
 
     printf("=====================================================\n");
-    printf(" .apapplications Tests: 6/6 passed                   \n");
+    printf(" .apapplication Tests: 8/8 passed                    \n");
     printf("=====================================================\n");
     return 0;
 }

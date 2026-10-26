@@ -1,0 +1,820 @@
+diff --git a/Makefile b/Makefile
+index 3c2b716..fb0db21 100644
+--- a/Makefile
++++ b/Makefile
+@@ -97,7 +97,7 @@ $(KERNEL32_ELF): $(KERNEL64_ELF)
+ 	$(OBJCOPY) -O elf32-i386 $< $@
+ 	@grub-file --is-x86-multiboot $@ && echo "[OK] Multiboot 1 verification passed: $@"
+ 
+-test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path $(BUILD_DIR)/test_keyboard_focus $(BUILD_DIR)/test_gpu $(BUILD_DIR)/test_font $(BUILD_DIR)/test_icons $(BUILD_DIR)/test_gui_widgets $(BUILD_DIR)/test_purple_abi $(BUILD_DIR)/test_native_vlc_app
++test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(BUILD_DIR)/test_purplefs_v2 $(BUILD_DIR)/test_purplefs_v3 $(BUILD_DIR)/test_storage_gpt $(BUILD_DIR)/test_acpi $(BUILD_DIR)/test_aegis_detect $(BUILD_DIR)/test_purple_detect $(BUILD_DIR)/test_desktop $(BUILD_DIR)/test_desktop_persistence $(BUILD_DIR)/test_apdrv $(BUILD_DIR)/test_apapp $(BUILD_DIR)/test_video $(BUILD_DIR)/test_block_dev $(BUILD_DIR)/test_ahci $(BUILD_DIR)/test_nvme $(BUILD_DIR)/test_drivers $(BUILD_DIR)/test_shell_path $(BUILD_DIR)/test_keyboard_focus $(BUILD_DIR)/test_gpu $(BUILD_DIR)/test_font $(BUILD_DIR)/test_icons $(BUILD_DIR)/test_gui_widgets $(BUILD_DIR)/test_purple_abi $(BUILD_DIR)/test_native_vlc_app
+ 	@echo "=== Running Host Test Suite ==="
+ 	./$(BUILD_DIR)/test_pmm
+ 	./$(BUILD_DIR)/test_vmm
+@@ -109,6 +109,7 @@ test: $(BUILD_DIR)/test_pmm $(BUILD_DIR)/test_vmm $(BUILD_DIR)/test_scheduler $(
+ 	./$(BUILD_DIR)/test_aegis_detect
+ 	./$(BUILD_DIR)/test_purple_detect
+ 	./$(BUILD_DIR)/test_desktop
++	./$(BUILD_DIR)/test_desktop_persistence
+ 	./$(BUILD_DIR)/test_apdrv
+ 	@$(PYTHON) scripts/build_apapp.py build/apps
+ 	./$(BUILD_DIR)/test_apapp
+@@ -143,6 +144,8 @@ test-asan:
+ 	./$(BUILD_DIR)/test_purple_detect_asan
+ 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_asan
+ 	./$(BUILD_DIR)/test_desktop_asan
++	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_desktop_persistence.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_desktop_persistence_asan
++	./$(BUILD_DIR)/test_desktop_persistence_asan
+ 	$(CC) -fsanitize=address,undefined -g -Wall -Wextra -D__KERNEL_HOST_TEST__ -Iinclude tests/test_apdrv.c src/drivers/apdrv.c src/kernel/ksym.c src/drivers/rtc.c src/drivers/usb.c src/drivers/e1000.c src/drivers/audio.c src/drivers/dma.c src/drivers/netdev.c src/drivers/pci.c src/drivers/purple_detect.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c -o $(BUILD_DIR)/test_apdrv_asan
+ 	./$(BUILD_DIR)/test_apdrv_asan
+ 	@$(PYTHON) scripts/build_apapp.py build/apps
+@@ -230,6 +233,10 @@ $(BUILD_DIR)/test_desktop: tests/test_desktop.c src/drivers/desktop.c src/driver
+ 	@mkdir -p $(BUILD_DIR)
+ 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+ 
++$(BUILD_DIR)/test_desktop_persistence: tests/test_desktop_persistence.c src/drivers/desktop.c src/drivers/icon_data.c src/drivers/font.c src/drivers/font_data.c src/drivers/gpu.c src/drivers/pci.c src/drivers/mouse.c src/drivers/keyboard.c src/drivers/video.c src/drivers/font8x16.c src/kernel/cpu.c src/mm/pmm.c src/kernel/string.c src/drivers/serial.c
++	@mkdir -p $(BUILD_DIR)
++	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
++
+ $(BUILD_DIR)/test_keyboard_focus: tests/test_keyboard_focus.c src/drivers/keyboard.c
+ 	@mkdir -p $(BUILD_DIR)
+ 	$(CC) -g -D__KERNEL_HOST_TEST__ -Iinclude $^ -o $@
+diff --git a/include/desktop.h b/include/desktop.h
+index 5d83bbb..bdc7b88 100644
+--- a/include/desktop.h
++++ b/include/desktop.h
+@@ -74,6 +74,12 @@ typedef struct {
+     int      type;
+     uint32_t icon_id;
+ 
++    /* Window Bounded Drawing Surface */
++    uint32_t *surface;
++    uint32_t surface_w;
++    uint32_t surface_h;
++    uint32_t surface_pitch;
++
+     /* Window geometry state for maximize/restore */
+     int      is_maximized;
+     uint32_t saved_x;
+@@ -175,6 +181,7 @@ uint32_t desktop_get_window_count(void);
+ desktop_hit_result_t desktop_hit_test(int32_t x, int32_t y);
+ 
+ void desktop_render(void);
++void desktop_composite(void);
+ void desktop_render_preview(void);
+ void desktop_draw_cursor(uint32_t x, uint32_t y);
+ void desktop_erase_cursor(void);
+@@ -183,6 +190,8 @@ void desktop_move_cursor(int32_t nx, int32_t ny);
+ int  desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons);
+ void desktop_handle_key(char c, uint8_t scancode, int pressed, uint8_t modifiers);
+ void desktop_terminal_put_line(gui_window_t *win, const char *line);
++void desktop_terminal_write(const char *s);
++void desktop_terminal_clear(void);
+ void desktop_terminal_execute(gui_window_t *win, const char *cmd);
+ void desktop_run_session(void);
+ int  desktop_is_active(void);
+diff --git a/include/video.h b/include/video.h
+index dd5ceb3..8e6a251 100644
+--- a/include/video.h
++++ b/include/video.h
+@@ -28,6 +28,13 @@ void video_clear(uint32_t color);
+ void video_draw_pixel(uint32_t x, uint32_t y, uint32_t color);
+ uint32_t video_get_pixel(uint32_t x, uint32_t y);
+ void video_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
++void video_set_render_target(uint32_t *target, uint32_t width, uint32_t height, uint32_t pitch);
++void video_set_render_target_offset(uint32_t *target, uint32_t width, uint32_t height, uint32_t pitch, int32_t origin_x, int32_t origin_y);
++void video_reset_render_target(void);
++uint32_t *video_get_render_target(void);
++uint32_t *video_get_fb_ptr(void);
++uint32_t video_get_pitch(void);
++void video_blit(uint32_t dst_x, uint32_t dst_y, const uint32_t *src_pixels, uint32_t src_w, uint32_t src_h, uint32_t src_pitch);
+ void video_putc(char c);
+ void video_puts(const char *s);
+ void video_set_cursor(uint32_t col, uint32_t row);
+diff --git a/src/drivers/desktop.c b/src/drivers/desktop.c
+index 110cad7..d5df521 100644
+--- a/src/drivers/desktop.c
++++ b/src/drivers/desktop.c
+@@ -15,6 +15,9 @@
+ #include "rtc.h"
+ #include "font.h"
+ #include "font8x16.h"
++#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
++#include <stdlib.h>
++#endif
+ 
+ #ifdef __KERNEL_HOST_TEST__
+ __attribute__((weak)) int storage_is_fs_mounted(void) { return 0; }
+@@ -50,6 +53,56 @@ static uint32_t window_count = 0;
+ static uint32_t z_order[DESKTOP_MAX_WINDOWS];
+ static int desktop_active = 0;
+ 
++static uint32_t *desktop_bg_surface = NULL;
++static uint32_t desktop_bg_width = 0;
++static uint32_t desktop_bg_height = 0;
++
++static void render_cosmic_background(uint32_t w, uint32_t h);
++static void draw_window_frame(const gui_window_t *win);
++static void draw_window_content(const gui_window_t *win, uint32_t idx);
++static void desktop_paint_window(gui_window_t *win, uint32_t idx);
++
++static void desktop_ensure_bg_surface(uint32_t scr_w, uint32_t scr_h) {
++    if (scr_w == 0 || scr_h == 0) return;
++    if (desktop_bg_surface && desktop_bg_width == scr_w && desktop_bg_height == scr_h) {
++        return;
++    }
++    size_t sz = (size_t)scr_w * scr_h * sizeof(uint32_t);
++#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
++    if (desktop_bg_surface) free(desktop_bg_surface);
++    desktop_bg_surface = (uint32_t *)malloc(sz);
++#else
++    desktop_bg_surface = (uint32_t *)pmm_alloc_frames((sz + 4095) / 4096);
++#endif
++    if (desktop_bg_surface) {
++        desktop_bg_width = scr_w;
++        desktop_bg_height = scr_h;
++        video_set_render_target(desktop_bg_surface, scr_w, scr_h, scr_w * 4);
++        render_cosmic_background(scr_w, scr_h);
++        video_reset_render_target();
++    }
++}
++
++static void desktop_ensure_window_surface(gui_window_t *win) {
++    if (!win || win->width == 0 || win->height == 0) return;
++    if (win->surface && win->surface_w == win->width && win->surface_h == win->height) {
++        return;
++    }
++    size_t sz = (size_t)win->width * win->height * sizeof(uint32_t);
++#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
++    if (win->surface) free(win->surface);
++    win->surface = (uint32_t *)malloc(sz);
++#else
++    win->surface = (uint32_t *)pmm_alloc_frames((sz + 4095) / 4096);
++#endif
++    if (win->surface) {
++        win->surface_w = win->width;
++        win->surface_h = win->height;
++        win->surface_pitch = win->width * 4;
++        memset(win->surface, 0, sz);
++    }
++}
++
+ static int launcher_open = 0;
+ static char launcher_search[32] = {0};
+ static int system_panel_open = 0;
+@@ -182,6 +235,9 @@ int desktop_create_window(const char *title, uint32_t x, uint32_t y, uint32_t w,
+     win->focused = 1;
+     win->type = WIN_TYPE_GENERIC;
+ 
++    /* Allocate bounded surface for this window */
++    desktop_ensure_window_surface(win);
++
+     z_order[idx] = idx;
+     bring_to_front((int)idx);
+     return win->id;
+@@ -192,6 +248,9 @@ int desktop_close_window(uint32_t id) {
+         if (windows[i].id == id) {
+             windows[i].visible = 0;
+             windows[i].focused = 0;
++            if (desktop_active) {
++                desktop_composite();
++            }
+             return 0;
+         }
+     }
+@@ -202,6 +261,9 @@ int desktop_focus_window(uint32_t id) {
+     for (uint32_t i = 0; i < window_count; i++) {
+         if (windows[i].id == id) {
+             bring_to_front((int)i);
++            if (desktop_active) {
++                desktop_render();
++            }
+             return 0;
+         }
+     }
+@@ -214,8 +276,14 @@ int desktop_toggle_window(uint32_t id) {
+             windows[i].visible = !windows[i].visible;
+             if (windows[i].visible) {
+                 bring_to_front((int)i);
++                if (desktop_active) {
++                    desktop_render();
++                }
+             } else {
+                 windows[i].focused = 0;
++                if (desktop_active) {
++                    desktop_composite();
++                }
+             }
+             return windows[i].visible;
+         }
+@@ -235,6 +303,9 @@ int desktop_minimize_window(uint32_t id) {
+                     break;
+                 }
+             }
++            if (desktop_active) {
++                desktop_composite();
++            }
+             return 0;
+         }
+     }
+@@ -265,7 +336,11 @@ int desktop_maximize_window(uint32_t id) {
+                 w->width = w->saved_w;
+                 w->height = w->saved_h;
+             }
++            desktop_ensure_window_surface(w);
+             bring_to_front((int)i);
++            if (desktop_active) {
++                desktop_render();
++            }
+             return 0;
+         }
+     }
+@@ -1562,7 +1637,10 @@ static void draw_window_frame(const gui_window_t *win) {
+     if (!video_is_available() || !win->visible) return;
+ 
+     uint32_t outline_color = win->focused ? 0x9D4EDD : 0x4A2574;
+-    video_draw_rect(win->x - 1, win->y - 1, win->width + 2, win->height + 2, outline_color);
++    video_draw_rect(win->x, win->y, win->width, 1, outline_color);
++    video_draw_rect(win->x, win->y + win->height - 1, win->width, 1, outline_color);
++    video_draw_rect(win->x, win->y, 1, win->height, outline_color);
++    video_draw_rect(win->x + win->width - 1, win->y, 1, win->height, outline_color);
+ 
+     /* Title bar */
+     video_draw_rect(win->x, win->y, win->width, 24, win->title_bg);
+@@ -1620,9 +1698,13 @@ static void draw_window_content(const gui_window_t *win, uint32_t idx) {
+                          "Purple OS / Aegis64 Interactive Shell Terminal", 0xC77DFF, &clip);
+ 
+         /* Scrollback Output Lines */
+-        for (int i = 0; i < win->output_count && i < 7; i++) {
++        int visible_lines = 7;
++        int max_start = (win->output_count > visible_lines) ? (win->output_count - visible_lines) : 0;
++        int start = max_start - win->term_scroll_offset;
++        if (start < 0) start = 0;
++        for (int i = 0; i < visible_lines && (start + i) < win->output_count; i++) {
+             font_draw_string(f_mono_reg, (int32_t)win->x + 12, (int32_t)(win->y + 50 + i * 18),
+-                             win->output_lines[i], COLOR_WHITE, &clip);
++                             win->output_lines[start + i], COLOR_WHITE, &clip);
+         }
+ 
+         /* Active prompt and input line */
+@@ -2170,7 +2252,19 @@ static void draw_window_content(const gui_window_t *win, uint32_t idx) {
+     }
+ }
+ 
+-void desktop_render(void) {
++static void desktop_paint_window(gui_window_t *win, uint32_t idx) {
++    if (!win || !win->visible) return;
++    desktop_ensure_window_surface(win);
++    if (!win->surface) return;
++
++    video_set_render_target_offset(win->surface, win->width, win->height, win->surface_pitch,
++                                   (int32_t)win->x, (int32_t)win->y);
++    draw_window_frame(win);
++    draw_window_content(win, idx);
++    video_reset_render_target();
++}
++
++void desktop_composite(void) {
+     desktop_active = 1;
+     if (!video_is_available()) {
+         desktop_render_preview();
+@@ -2180,8 +2274,14 @@ void desktop_render(void) {
+     uint32_t scr_w = video_get_width();
+     uint32_t scr_h = video_get_height();
+ 
+-    /* 1. Clean Anime Cosmic Fantasy Wallpaper (Pure Vista, ZERO UI Baked In) */
+-    render_cosmic_background(scr_w, scr_h);
++    desktop_ensure_bg_surface(scr_w, scr_h);
++
++    /* 1. Fast Blit of persistent desktop background */
++    if (desktop_bg_surface && desktop_bg_width == scr_w && desktop_bg_height == scr_h) {
++        video_blit(0, 0, desktop_bg_surface, scr_w, scr_h, scr_w * 4);
++    } else {
++        render_cosmic_background(scr_w, scr_h);
++    }
+ 
+     /* 2. Dynamically Composite All Native Desktop UI Elements Independently */
+     render_top_bar(scr_w);
+@@ -2195,12 +2295,12 @@ void desktop_render(void) {
+     render_bottom_dock(scr_w, scr_h);
+     render_welcome_toast(scr_w, scr_h);
+ 
+-    /* 3. Draw Windows in z-order (only visible windows) */
++    /* 3. Composite visible windows from their bounded surfaces in z-order */
+     for (uint32_t i = 0; i < window_count; i++) {
+         uint32_t idx = z_order[i];
+-        if (windows[idx].visible) {
+-            draw_window_frame(&windows[idx]);
+-            draw_window_content(&windows[idx], idx);
++        gui_window_t *w = &windows[idx];
++        if (w->visible && w->surface) {
++            video_blit(w->x, w->y, w->surface, w->width, w->height, w->surface_pitch);
+         }
+     }
+ 
+@@ -2210,7 +2310,85 @@ void desktop_render(void) {
+     int32_t my = mouse_get_y();
+     desktop_move_cursor(mx, my);
+ 
+-    kinfo("Desktop: Graphical desktop frame rendered to framebuffer (%ux%u)", scr_w, scr_h);
++    kinfo("Desktop: Graphical desktop frame composited to framebuffer (%ux%u)", scr_w, scr_h);
++}
++
++void desktop_render(void) {
++    desktop_active = 1;
++    if (!video_is_available()) {
++        desktop_render_preview();
++        return;
++    }
++
++    /* Repaint each visible window into its bounded drawing surface */
++    for (uint32_t i = 0; i < window_count; i++) {
++        uint32_t idx = z_order[i];
++        if (windows[idx].visible) {
++            desktop_paint_window(&windows[idx], idx);
++        }
++    }
++
++    desktop_composite();
++}
++
++void desktop_terminal_write(const char *s) {
++    if (!s) return;
++    gui_window_t *w = NULL;
++    uint32_t w_idx = 0;
++    for (uint32_t i = 0; i < window_count; i++) {
++        if (windows[i].type == WIN_TYPE_TERMINAL) {
++            w = &windows[i];
++            w_idx = i;
++            break;
++        }
++    }
++    if (!w) return;
++
++    const char *p = s;
++    char line_buf[TERM_LINE_LEN];
++    int li = 0;
++    while (*p) {
++        if (*p == '\n') {
++            line_buf[li] = '\0';
++            desktop_terminal_put_line(w, line_buf);
++            li = 0;
++        } else if (*p != '\r') {
++            if (li < TERM_LINE_LEN - 1) {
++                line_buf[li++] = *p;
++            }
++        }
++        p++;
++    }
++    if (li > 0) {
++        line_buf[li] = '\0';
++        desktop_terminal_put_line(w, line_buf);
++    }
++
++    if (desktop_active && w->visible) {
++        desktop_paint_window(w, w_idx);
++        desktop_composite();
++    }
++}
++
++void desktop_terminal_clear(void) {
++    gui_window_t *w = NULL;
++    uint32_t w_idx = 0;
++    for (uint32_t i = 0; i < window_count; i++) {
++        if (windows[i].type == WIN_TYPE_TERMINAL) {
++            w = &windows[i];
++            w_idx = i;
++            break;
++        }
++    }
++    if (!w) return;
++
++    w->output_count = 0;
++    w->term_scroll_offset = 0;
++
++    if (desktop_active && w->visible) {
++        desktop_paint_window(w, w_idx);
++        desktop_composite();
++    }
+ }
+ 
+ int desktop_handle_mouse(int32_t x, int32_t y, uint8_t buttons) {
+@@ -2589,6 +2767,14 @@ static void desktop_mouse_event_callback(int32_t x, int32_t y, uint8_t buttons)
+ 
+ int desktop_init(void) {
+     font_init();
++#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
++    for (uint32_t i = 0; i < window_count; i++) {
++        if (windows[i].surface) {
++            free(windows[i].surface);
++            windows[i].surface = NULL;
++        }
++    }
++#endif
+     window_count = 0;
+     cursor_drawn = 0;
+     desktop_active = 0;
+@@ -2608,13 +2794,8 @@ int desktop_init(void) {
+             w->icon_id = ICON_APP_TERMINAL;
+             desktop_terminal_put_line(w, "Purple OS / Aegis64 Shell Terminal v1.0.0");
+             desktop_terminal_put_line(w, "Type 'help' for available terminal commands.");
+-#ifndef __KERNEL_HOST_TEST__
+-            w->visible = 0;
+-            w->focused = 0;
+-#else
+             w->visible = 1;
+             w->focused = 1;
+-#endif
+         }
+     }
+ 
+@@ -2627,7 +2808,7 @@ int desktop_init(void) {
+             w->icon_id = ICON_APP_FILES;
+             strncpy(w->files_current_path, "/", sizeof(w->files_current_path) - 1);
+             w->files_selected_idx = 0;
+-            w->visible = 0;
++            w->visible = 1;
+             w->focused = 0;
+         }
+     }
+@@ -2639,7 +2820,7 @@ int desktop_init(void) {
+         if (w) {
+             w->type = WIN_TYPE_SYSMON;
+             w->icon_id = ICON_APP_SYSMON;
+-            w->visible = 0;
++            w->visible = 1;
+             w->focused = 0;
+         }
+     }
+@@ -2788,7 +2969,16 @@ int desktop_init(void) {
+     desktop_load_settings();
+ 
+     mouse_set_callback(desktop_mouse_event_callback);
+-    kinfo("Desktop: Graphical workspace online with 11 application windows");
++
++    if (video_is_available()) {
++        uint32_t scr_w = video_get_width();
++        uint32_t scr_h = video_get_height();
++        desktop_ensure_bg_surface(scr_w, scr_h);
++        desktop_active = 1;
++        desktop_render();
++    }
++
++    kinfo("Desktop: Graphical workspace online with %u application windows", window_count);
+     return 0;
+ }
+ 
+diff --git a/src/drivers/video.c b/src/drivers/video.c
+index b7a76b1..f0abe66 100644
+--- a/src/drivers/video.c
++++ b/src/drivers/video.c
+@@ -14,6 +14,15 @@ static uint8_t r_pos = 16, r_size = 8;
+ static uint8_t g_pos = 8,  g_size = 8;
+ static uint8_t b_pos = 0,  b_size = 8;
+ 
++/* Render Target State */
++static uint32_t *cur_render_target = NULL;
++static uint32_t cur_target_w = 0;
++static uint32_t cur_target_h = 0;
++static uint32_t cur_target_pitch = 0;
++static int32_t  cur_target_ox = 0;
++static int32_t  cur_target_oy = 0;
++static int      is_custom_target = 0;
++
+ static uint32_t cursor_x = 0;
+ static uint32_t cursor_y = 0;
+ static uint32_t current_fg = COLOR_WHITE;
+@@ -224,29 +233,162 @@ int video_set_mode(uint32_t width, uint32_t height, uint32_t bpp) {
+ }
+ #endif
+ 
++void video_set_render_target_offset(uint32_t *target, uint32_t width, uint32_t height,
++                                    uint32_t pitch, int32_t origin_x, int32_t origin_y) {
++    if (target) {
++        cur_render_target = target;
++        cur_target_w = width;
++        cur_target_h = height;
++        cur_target_pitch = pitch;
++        cur_target_ox = origin_x;
++        cur_target_oy = origin_y;
++        is_custom_target = 1;
++    } else {
++        cur_render_target = fb_ptr;
++        cur_target_w = fb_width;
++        cur_target_h = fb_height;
++        cur_target_pitch = fb_pitch;
++        cur_target_ox = 0;
++        cur_target_oy = 0;
++        is_custom_target = 0;
++    }
++}
++
++void video_set_render_target(uint32_t *target, uint32_t width, uint32_t height, uint32_t pitch) {
++    video_set_render_target_offset(target, width, height, pitch, 0, 0);
++}
++
++void video_reset_render_target(void) {
++    cur_render_target = fb_ptr;
++    cur_target_w = fb_width;
++    cur_target_h = fb_height;
++    cur_target_pitch = fb_pitch;
++    cur_target_ox = 0;
++    cur_target_oy = 0;
++    is_custom_target = 0;
++}
++
++uint32_t *video_get_render_target(void) {
++    return cur_render_target ? cur_render_target : fb_ptr;
++}
++
++uint32_t *video_get_fb_ptr(void) {
++    return fb_ptr;
++}
++
++uint32_t video_get_pitch(void) {
++    return fb_pitch;
++}
++
++void video_blit(uint32_t dst_x, uint32_t dst_y,
++                const uint32_t *src_pixels, uint32_t src_w, uint32_t src_h, uint32_t src_pitch) {
++    if (!fb_available || !src_pixels || src_w == 0 || src_h == 0) return;
++
++    int32_t dx = (int32_t)dst_x;
++    int32_t dy = (int32_t)dst_y;
++    int32_t sx0 = 0;
++    int32_t sy0 = 0;
++    int32_t w = (int32_t)src_w;
++    int32_t h = (int32_t)src_h;
++
++    if (dx < 0) {
++        sx0 = -dx;
++        w += dx;
++        dx = 0;
++    }
++    if (dy < 0) {
++        sy0 = -dy;
++        h += dy;
++        dy = 0;
++    }
++    if (dx + w > (int32_t)fb_width) {
++        w = (int32_t)fb_width - dx;
++    }
++    if (dy + h > (int32_t)fb_height) {
++        h = (int32_t)fb_height - dy;
++    }
++    if (w <= 0 || h <= 0) return;
++
++    int fast_copy = (r_pos == 16 && g_pos == 8 && b_pos == 0 &&
++                     r_size == 8 && g_size == 8 && b_size == 8);
++
++    for (int32_t r = 0; r < h; r++) {
++        uint32_t *dst_row = (uint32_t *)((uint8_t *)fb_ptr + (dy + r) * fb_pitch) + dx;
++        const uint32_t *src_row = (const uint32_t *)((const uint8_t *)src_pixels + (sy0 + r) * src_pitch) + sx0;
++        if (fast_copy) {
++            memcpy(dst_row, src_row, (size_t)w * sizeof(uint32_t));
++        } else {
++            for (int32_t c = 0; c < w; c++) {
++                dst_row[c] = video_rgb_to_hw(src_row[c]);
++            }
++        }
++    }
++}
++
+ void video_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
+-    if (!fb_available || x >= fb_width || y >= fb_height) return;
+-    uint32_t *dest = (uint32_t *)((uint8_t *)fb_ptr + y * fb_pitch) + x;
+-    *dest = video_rgb_to_hw(color);
++    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
++    if (!target) return;
++    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
++    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
++    uint32_t pitch = cur_render_target ? cur_target_pitch : fb_pitch;
++
++    int32_t lx = (int32_t)x - cur_target_ox;
++    int32_t ly = (int32_t)y - cur_target_oy;
++    if (lx < 0 || (uint32_t)lx >= target_w || ly < 0 || (uint32_t)ly >= target_h) return;
++
++    uint32_t pixel_val = is_custom_target ? color : video_rgb_to_hw(color);
++    uint32_t *dest = (uint32_t *)((uint8_t *)target + ly * pitch) + lx;
++    *dest = pixel_val;
+ }
+ 
+ uint32_t video_get_pixel(uint32_t x, uint32_t y) {
+-    if (!fb_available || x >= fb_width || y >= fb_height) return 0;
+-    const uint32_t *src = (const uint32_t *)((const uint8_t *)fb_ptr + y * fb_pitch) + x;
+-    return video_hw_to_rgb(*src);
++    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
++    if (!target) return 0;
++    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
++    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
++    uint32_t pitch = cur_render_target ? cur_target_pitch : fb_pitch;
++
++    int32_t lx = (int32_t)x - cur_target_ox;
++    int32_t ly = (int32_t)y - cur_target_oy;
++    if (lx < 0 || (uint32_t)lx >= target_w || ly < 0 || (uint32_t)ly >= target_h) return 0;
++
++    const uint32_t *src = (const uint32_t *)((const uint8_t *)target + ly * pitch) + lx;
++    return is_custom_target ? *src : video_hw_to_rgb(*src);
+ }
+ 
+ void video_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+-    if (!fb_available) return;
+-    if (x >= fb_width || y >= fb_height) return;
+-    if (x + w > fb_width) w = fb_width - x;
+-    if (y + h > fb_height) h = fb_height - y;
+-
+-    uint32_t hw_color = video_rgb_to_hw(color);
+-    for (uint32_t r = 0; r < h; r++) {
+-        uint32_t *row = (uint32_t *)((uint8_t *)fb_ptr + (y + r) * fb_pitch) + x;
+-        for (uint32_t c = 0; c < w; c++) {
+-            row[c] = hw_color;
++    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
++    if (!target || w == 0 || h == 0) return;
++    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
++    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
++    uint32_t pitch = cur_render_target ? cur_target_pitch : fb_pitch;
++
++    int32_t lx = (int32_t)x - cur_target_ox;
++    int32_t ly = (int32_t)y - cur_target_oy;
++    int32_t rw = (int32_t)w;
++    int32_t rh = (int32_t)h;
++
++    if (lx < 0) {
++        rw += lx;
++        lx = 0;
++    }
++    if (ly < 0) {
++        rh += ly;
++        ly = 0;
++    }
++    if (lx + rw > (int32_t)target_w) {
++        rw = (int32_t)target_w - lx;
++    }
++    if (ly + rh > (int32_t)target_h) {
++        rh = (int32_t)target_h - ly;
++    }
++    if (rw <= 0 || rh <= 0) return;
++
++    uint32_t pixel_val = is_custom_target ? color : video_rgb_to_hw(color);
++    for (int32_t r = 0; r < rh; r++) {
++        uint32_t *row = (uint32_t *)((uint8_t *)target + (ly + r) * pitch) + lx;
++        for (int32_t c = 0; c < rw; c++) {
++            row[c] = pixel_val;
+         }
+     }
+ }
+@@ -280,8 +422,11 @@ int video_test_colors(void) {
+ }
+ 
+ void video_clear(uint32_t color) {
+-    if (!fb_available) return;
+-    video_draw_rect(0, 0, fb_width, fb_height, color);
++    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
++    if (!target) return;
++    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
++    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
++    video_draw_rect(cur_target_ox, cur_target_oy, target_w, target_h, color);
+     cursor_x = 0;
+     cursor_y = 0;
+ }
+@@ -312,17 +457,28 @@ static void video_scroll(void) {
+ }
+ 
+ static void video_draw_glyph(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg) {
++    uint32_t *target = cur_render_target ? cur_render_target : fb_ptr;
++    if (!target) return;
++    uint32_t target_w = cur_render_target ? cur_target_w : fb_width;
++    uint32_t target_h = cur_render_target ? cur_target_h : fb_height;
++    uint32_t pitch = cur_render_target ? cur_target_pitch : fb_pitch;
++
++    int32_t lx = (int32_t)x - cur_target_ox;
++    int32_t ly = (int32_t)y - cur_target_oy;
++
+     uint8_t ch = (uint8_t)c;
+     const uint8_t *bitmap = font8x16[ch];
+-    uint32_t hw_fg = video_rgb_to_hw(fg);
+-    uint32_t hw_bg = video_rgb_to_hw(bg);
++    uint32_t hw_fg = is_custom_target ? fg : video_rgb_to_hw(fg);
++    uint32_t hw_bg = is_custom_target ? bg : video_rgb_to_hw(bg);
+ 
+     for (uint32_t row = 0; row < 16; row++) {
+-        if (y + row >= fb_height) break;
++        int32_t py = ly + (int32_t)row;
++        if (py < 0 || (uint32_t)py >= target_h) continue;
+         uint8_t bits = bitmap[row];
+-        uint32_t *dest = (uint32_t *)((uint8_t *)fb_ptr + (y + row) * fb_pitch) + x;
++        uint32_t *dest = (uint32_t *)((uint8_t *)target + py * pitch) + lx;
+         for (uint32_t col = 0; col < 8; col++) {
+-            if (x + col < fb_width) {
++            int32_t px = lx + (int32_t)col;
++            if (px >= 0 && (uint32_t)px < target_w) {
+                 dest[col] = (bits & (0x80 >> col)) ? hw_fg : hw_bg;
+             }
+         }
+diff --git a/src/kernel/purple_abi.c b/src/kernel/purple_abi.c
+index 4eef5af..2ca1ab4 100644
+--- a/src/kernel/purple_abi.c
++++ b/src/kernel/purple_abi.c
+@@ -129,20 +129,29 @@ int purple_window_present(purple_window_t *win) {
+     if (!gw || !gw->visible) return 0;
+ 
+     /* Copy surface contents into desktop window body */
+-    uint32_t wx = gw->x + 2;
+-    uint32_t wy = gw->y + 28;
++    uint32_t wx = 2;
++    uint32_t wy = 28;
+     uint32_t bw = (gw->width > 4) ? (gw->width - 4) : 0;
+     uint32_t bh = (gw->height > 30) ? (gw->height - 30) : 0;
+ 
+     uint32_t copy_w = (win->width < bw) ? win->width : bw;
+     uint32_t copy_h = (win->height < bh) ? win->height : bh;
+ 
+-    for (uint32_t r = 0; r < copy_h; r++) {
+-        uint32_t *src_row = win->surface.pixels + r * (win->surface.pitch / 4);
+-        for (uint32_t c = 0; c < copy_w; c++) {
+-            video_draw_pixel(wx + c, wy + r, src_row[c]);
++    if (gw->surface) {
++        for (uint32_t r = 0; r < copy_h; r++) {
++            uint32_t *src_row = win->surface.pixels + r * (win->surface.pitch / 4);
++            uint32_t *dst_row = (uint32_t *)((uint8_t *)gw->surface + (wy + r) * gw->surface_pitch) + wx;
++            memcpy(dst_row, src_row, (size_t)copy_w * sizeof(uint32_t));
++        }
++    } else {
++        for (uint32_t r = 0; r < copy_h; r++) {
++            uint32_t *src_row = win->surface.pixels + r * (win->surface.pitch / 4);
++            for (uint32_t c = 0; c < copy_w; c++) {
++                video_draw_pixel(gw->x + wx + c, gw->y + wy + r, src_row[c]);
++            }
+         }
+     }
++    desktop_composite();
+     return 0;
+ }
+ 
+diff --git a/src/kernel/shell.c b/src/kernel/shell.c
+index 5bce320..ffcb7c7 100644
+--- a/src/kernel/shell.c
++++ b/src/kernel/shell.c
+@@ -107,7 +107,9 @@ static void smp_worker_func(void *arg) {
+ 
+ static void shell_print(const char *s) {
+     serial_write(s);
+-    if (video_is_available() && !desktop_is_active()) {
++    if (desktop_is_active()) {
++        desktop_terminal_write(s);
++    } else if (video_is_available()) {
+         video_puts(s);
+     }
+ }
+@@ -838,9 +840,12 @@ static void execute_command(int argc, char **argv) {
+             kprintf("  Commands:   video [w h] | video test | video bgr | video rgb\n\n");
+         }
+     } else if (strcmp(argv[0], "clear") == 0) {
+-        if (video_is_available()) {
++        if (desktop_is_active()) {
++            desktop_terminal_clear();
++        } else if (video_is_available()) {
+             video_clear(COLOR_PURPLE_BG);
+         }
++        serial_write("\033[2J\033[H");
+     } else if (strcmp(argv[0], "echo") == 0) {
+         for (int i = 1; i < argc; i++) {
+             shell_print(argv[i]);
+@@ -952,6 +957,13 @@ void shell_step(void) {
+         if (c == '\n' || c == '\r') {
+             shell_print("\n");
+             shell_buf[shell_buf_len] = '\0';
++            if (desktop_is_active() && shell_buf_len > 0) {
++                char echo_cmd[TERM_LINE_LEN];
++                echo_cmd[0] = '>'; echo_cmd[1] = ' ';
++                strncpy(echo_cmd + 2, shell_buf, TERM_LINE_LEN - 3);
++                echo_cmd[TERM_LINE_LEN - 1] = '\0';
++                desktop_terminal_write(echo_cmd);
++            }
+             parse_and_execute(shell_buf);
+             shell_buf_len = 0;
+             shell_prompt();
+@@ -960,7 +972,7 @@ void shell_step(void) {
+                 shell_buf_len--;
+                 shell_buf[shell_buf_len] = '\0';
+                 serial_write("\b \b");
+-                if (video_is_available()) {
++                if (video_is_available() && !desktop_is_active()) {
+                     video_putc('\b');
+                 }
+             }
+@@ -969,7 +981,7 @@ void shell_step(void) {
+                 shell_buf[shell_buf_len++] = c;
+                 shell_buf[shell_buf_len] = '\0';
+                 serial_putchar(c);
+-                if (video_is_available()) {
++                if (video_is_available() && !desktop_is_active()) {
+                     video_putc(c);
+                 }
+             }
+diff --git a/vlc b/vlc
+--- a/vlc
++++ b/vlc
+@@ -1 +1 @@
+-Subproject commit 2556a9abdfc491d77d0cd96388f80153b4ae3910
++Subproject commit 2556a9abdfc491d77d0cd96388f80153b4ae3910-dirty

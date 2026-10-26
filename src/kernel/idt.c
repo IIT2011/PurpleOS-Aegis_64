@@ -4,6 +4,8 @@
 #include "serial.h"
 #include "string.h"
 #include "io.h"
+#include "syscall.h"
+#include "task.h"
 
 static idt_entry_t idt_entries[256];
 static idt_ptr_t   idt_ptr;
@@ -39,6 +41,34 @@ static const char *exception_messages[32] = {
 
 void interrupt_dispatch(interrupt_frame_t *frame) {
     if (frame->int_no < 32) {
+        /* Check if exception occurred in User Mode (CPL 3) */
+        if ((frame->cs & 3) == 3) {
+            uint64_t cr2 = (frame->int_no == 14) ? read_cr2() : 0;
+            task_t *cur = task_get_current();
+            const char *proc_name = cur ? cur->name : "unknown";
+            uint32_t pid = cur ? cur->id : 0;
+
+            kerror("[SECURITY] User Process Exception %u (%s) in PID %u ('%s')",
+                   (uint32_t)frame->int_no,
+                   exception_messages[frame->int_no],
+                   pid, proc_name);
+            kerror("  Faulting RIP: %p  CS: %p  RSP: %p  SS: %p",
+                   (void *)frame->rip, (void *)frame->cs, (void *)frame->rsp, (void *)frame->ss);
+            if (frame->int_no == 14) {
+                kerror("  CR2 (Fault Address): %p  Error Code: 0x%lx [%s, %s, %s]",
+                       (void *)cr2, frame->err_code,
+                       (frame->err_code & 1) ? "Prot Violation" : "Non-Present",
+                       (frame->err_code & 2) ? "Write" : "Read",
+                       (frame->err_code & 16) ? "Exec" : "Data");
+            }
+            kerror("[SECURITY] Terminating faulted Ring 3 process safely to protect kernel.");
+            task_exit();
+            while (1) {
+                hlt();
+            }
+        }
+
+        /* Kernel Mode Exception: Fatal Kernel Panic */
         kerror("=================================================");
         kerror("!!! KERNEL PANIC: CPU EXCEPTION %u (%s) !!!",
                (uint32_t)frame->int_no,
@@ -85,6 +115,11 @@ void interrupt_dispatch(interrupt_frame_t *frame) {
         apic_eoi();
     }
 
+    if (frame->int_no == 128) {
+        frame->rax = (uint64_t)syscall_dispatch(frame->rax, frame->rdi, frame->rsi, frame->rdx, frame->r10, frame->r8, frame->r9);
+        return;
+    }
+
     if (isr_handlers[frame->int_no]) {
         isr_handlers[frame->int_no](frame);
     }
@@ -98,10 +133,12 @@ void idt_init(void) {
     idt_ptr.base  = (uint64_t)(uintptr_t)&idt_entries;
 
     /* 0x8E = Present, Ring 0, 64-bit Interrupt Gate */
+    /* 0xEE = Present, Ring 3 (DPL 3), 64-bit Interrupt Gate */
     uint16_t cs = 0x08; // Kernel code segment
 
     for (int i = 0; i < 256; i++) {
-        idt_set_gate((uint8_t)i, (uint64_t)isr_stub_table[i], cs, 0x8E);
+        uint8_t flags = (i == 128) ? 0xEE : 0x8E;
+        idt_set_gate((uint8_t)i, (uint64_t)isr_stub_table[i], cs, flags);
     }
 
     idt_load(&idt_ptr);

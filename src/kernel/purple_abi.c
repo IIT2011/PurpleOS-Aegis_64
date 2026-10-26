@@ -129,20 +129,29 @@ int purple_window_present(purple_window_t *win) {
     if (!gw || !gw->visible) return 0;
 
     /* Copy surface contents into desktop window body */
-    uint32_t wx = gw->x + 2;
-    uint32_t wy = gw->y + 28;
+    uint32_t wx = 2;
+    uint32_t wy = 28;
     uint32_t bw = (gw->width > 4) ? (gw->width - 4) : 0;
     uint32_t bh = (gw->height > 30) ? (gw->height - 30) : 0;
 
     uint32_t copy_w = (win->width < bw) ? win->width : bw;
     uint32_t copy_h = (win->height < bh) ? win->height : bh;
 
-    for (uint32_t r = 0; r < copy_h; r++) {
-        uint32_t *src_row = win->surface.pixels + r * (win->surface.pitch / 4);
-        for (uint32_t c = 0; c < copy_w; c++) {
-            video_draw_pixel(wx + c, wy + r, src_row[c]);
+    if (gw->surface) {
+        for (uint32_t r = 0; r < copy_h; r++) {
+            uint32_t *src_row = win->surface.pixels + r * (win->surface.pitch / 4);
+            uint32_t *dst_row = (uint32_t *)((uint8_t *)gw->surface + (wy + r) * gw->surface_pitch) + wx;
+            memcpy(dst_row, src_row, (size_t)copy_w * sizeof(uint32_t));
+        }
+    } else {
+        for (uint32_t r = 0; r < copy_h; r++) {
+            uint32_t *src_row = win->surface.pixels + r * (win->surface.pitch / 4);
+            for (uint32_t c = 0; c < copy_w; c++) {
+                video_draw_pixel(gw->x + wx + c, gw->y + wy + r, src_row[c]);
+            }
         }
     }
+    desktop_composite();
     return 0;
 }
 
@@ -289,19 +298,54 @@ purple_file_t *purple_file_open(const char *path, uint32_t flags) {
 
 #ifndef __KERNEL_HOST_TEST__
     if (!storage_is_fs_mounted()) return NULL;
-    pfs2_fs_t *fs = storage_get_fs();
-    uint32_t ino = 0;
-    if (pfs2_lookup(fs, path, &ino) != PFS2_OK) {
-        if (flags & PURPLE_FILE_CREATE) {
-            if (pfs2_create_file(fs, path, 0644, &ino) != PFS2_OK) return NULL;
-        } else {
-            return NULL;
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t ino3 = 0;
+        int lrc = pfs3_lookup_path(fs3, path, &ino3);
+        if (lrc != PFS3_OK) {
+            if (flags & PURPLE_FILE_CREATE) {
+                char parent[256];
+                char base[64];
+                const char *last_slash = strrchr(path, '/');
+                uint64_t parent_ino = PFS3_ROOT_INODE;
+                if (last_slash) {
+                    size_t plen = (size_t)(last_slash - path);
+                    if (plen == 0) plen = 1;
+                    strncpy(parent, path, plen);
+                    parent[plen] = '\0';
+                    strncpy(base, last_slash + 1, sizeof(base) - 1);
+                    base[sizeof(base) - 1] = '\0';
+                    pfs3_lookup_path(fs3, parent, &parent_ino);
+                } else {
+                    strncpy(base, path, sizeof(base) - 1);
+                    base[sizeof(base) - 1] = '\0';
+                }
+                if (pfs3_create_entry(fs3, parent_ino, base, PFS3_FT_REG, &ino3) != PFS3_OK) {
+                    return NULL;
+                }
+            } else {
+                return NULL;
+            }
         }
+        pfs3_inode_t node3;
+        if (pfs3_read_inode(fs3, ino3, &node3) != PFS3_OK) return NULL;
+        file->inode_num = (uint32_t)ino3;
+        file->size_bytes = node3.size_bytes;
+    } else {
+        pfs2_fs_t *fs = storage_get_fs();
+        uint32_t ino = 0;
+        if (pfs2_lookup(fs, path, &ino) != PFS2_OK) {
+            if (flags & PURPLE_FILE_CREATE) {
+                if (pfs2_create_file(fs, path, 0644, &ino) != PFS2_OK) return NULL;
+            } else {
+                return NULL;
+            }
+        }
+        pfs2_inode_t node;
+        if (pfs2_read_inode(fs, ino, &node) != PFS2_OK) return NULL;
+        file->inode_num = ino;
+        file->size_bytes = node.size_bytes;
     }
-    pfs2_inode_t node;
-    if (pfs2_read_inode(fs, ino, &node) != PFS2_OK) return NULL;
-    file->inode_num = ino;
-    file->size_bytes = node.size_bytes;
 #else
     file->inode_num = 1;
     file->size_bytes = 1024;
@@ -321,14 +365,25 @@ int purple_file_read(purple_file_t *file, void *buf, size_t count) {
 
 #ifndef __KERNEL_HOST_TEST__
     if (!storage_is_fs_mounted()) return -1;
-    pfs2_fs_t *fs = storage_get_fs();
-    size_t bytes_read = 0;
-    int rc = pfs2_read_file(fs, file->inode_num, buf, count, file->file_offset, &bytes_read);
-    if (rc == PFS2_OK && bytes_read > 0) {
-        file->file_offset += bytes_read;
-        return (int)bytes_read;
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t bytes_read = 0;
+        int rc = pfs3_read_file(fs3, file->inode_num, buf, count, file->file_offset, &bytes_read);
+        if (rc == PFS3_OK && bytes_read > 0) {
+            file->file_offset += bytes_read;
+            return (int)bytes_read;
+        }
+        return (rc == PFS3_OK) ? 0 : -1;
+    } else {
+        pfs2_fs_t *fs = storage_get_fs();
+        size_t bytes_read = 0;
+        int rc = pfs2_read_file(fs, file->inode_num, buf, count, file->file_offset, &bytes_read);
+        if (rc == PFS2_OK && bytes_read > 0) {
+            file->file_offset += bytes_read;
+            return (int)bytes_read;
+        }
+        return (rc == PFS2_OK) ? 0 : -1;
     }
-    return (rc == PFS2_OK) ? 0 : -1;
 #else
     size_t to_read = count;
     if (file->file_offset + to_read > file->size_bytes) {
@@ -345,17 +400,30 @@ int purple_file_write(purple_file_t *file, const void *buf, size_t count) {
 
 #ifndef __KERNEL_HOST_TEST__
     if (!storage_is_fs_mounted()) return -1;
-    pfs2_fs_t *fs = storage_get_fs();
-    size_t bytes_written = 0;
-    int rc = pfs2_write_file(fs, file->inode_num, buf, count, file->file_offset, &bytes_written);
-    if (rc == PFS2_OK && bytes_written > 0) {
-        file->file_offset += bytes_written;
-        if (file->file_offset > file->size_bytes) {
-            file->size_bytes = file->file_offset;
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        int rc = pfs3_write_file(fs3, file->inode_num, buf, count, file->file_offset);
+        if (rc == PFS3_OK) {
+            file->file_offset += count;
+            if (file->file_offset > file->size_bytes) {
+                file->size_bytes = file->file_offset;
+            }
+            return (int)count;
         }
-        return (int)bytes_written;
+        return -1;
+    } else {
+        pfs2_fs_t *fs = storage_get_fs();
+        size_t bytes_written = 0;
+        int rc = pfs2_write_file(fs, file->inode_num, buf, count, file->file_offset, &bytes_written);
+        if (rc == PFS2_OK && bytes_written > 0) {
+            file->file_offset += bytes_written;
+            if (file->file_offset > file->size_bytes) {
+                file->size_bytes = file->file_offset;
+            }
+            return (int)bytes_written;
+        }
+        return (rc == PFS2_OK) ? 0 : -1;
     }
-    return (rc == PFS2_OK) ? 0 : -1;
 #else
     file->file_offset += count;
     if (file->file_offset > file->size_bytes) file->size_bytes = file->file_offset;
@@ -390,18 +458,33 @@ int purple_file_stat(const char *path, purple_stat_t *st) {
     if (!path || !st) return -1;
 #ifndef __KERNEL_HOST_TEST__
     if (!storage_is_fs_mounted()) return -1;
-    pfs2_fs_t *fs = storage_get_fs();
-    uint32_t ino = 0;
-    if (pfs2_lookup(fs, path, &ino) != PFS2_OK) return -1;
-    pfs2_inode_t node;
-    if (pfs2_read_inode(fs, ino, &node) != PFS2_OK) return -1;
-    st->inode_num = ino;
-    st->size_bytes = node.size_bytes;
-    st->flags = node.flags;
-    st->modified_time = (uint32_t)node.mtime;
-    strncpy(st->name, path, sizeof(st->name) - 1);
-    st->name[sizeof(st->name) - 1] = '\0';
-    return 0;
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t ino3 = 0;
+        if (pfs3_lookup_path(fs3, path, &ino3) != PFS3_OK) return -1;
+        pfs3_inode_t node3;
+        if (pfs3_read_inode(fs3, ino3, &node3) != PFS3_OK) return -1;
+        st->inode_num = (uint32_t)ino3;
+        st->size_bytes = node3.size_bytes;
+        st->flags = node3.mode;
+        st->modified_time = (uint32_t)node3.mtime_sec;
+        strncpy(st->name, path, sizeof(st->name) - 1);
+        st->name[sizeof(st->name) - 1] = '\0';
+        return 0;
+    } else {
+        pfs2_fs_t *fs = storage_get_fs();
+        uint32_t ino = 0;
+        if (pfs2_lookup(fs, path, &ino) != PFS2_OK) return -1;
+        pfs2_inode_t node;
+        if (pfs2_read_inode(fs, ino, &node) != PFS2_OK) return -1;
+        st->inode_num = ino;
+        st->size_bytes = node.size_bytes;
+        st->flags = node.flags;
+        st->modified_time = (uint32_t)node.mtime;
+        strncpy(st->name, path, sizeof(st->name) - 1);
+        st->name[sizeof(st->name) - 1] = '\0';
+        return 0;
+    }
 #else
     st->inode_num = 1;
     st->size_bytes = 1024;
@@ -436,18 +519,41 @@ int purple_dir_read(purple_dir_t *dir, purple_dirent_t *out_ent) {
     if (!dir || !dir->active || !out_ent) return -1;
 #ifndef __KERNEL_HOST_TEST__
     if (!storage_is_fs_mounted()) return -1;
-    pfs2_fs_t *fs = storage_get_fs();
-    pfs2_dir_entry_t dent;
-    pfs2_inode_t dino;
-    int rc = pfs2_readdir(fs, dir->dir_index, &dent, &dino);
-    if (rc != PFS2_OK) return 0; /* EOF */
+    if (storage_get_fs_version() == 3) {
+        pfs3_fs_t *fs3 = storage_get_fs3();
+        uint64_t dir_ino = PFS3_ROOT_INODE;
+        if (dir->path[0] && strcmp(dir->path, "/") != 0) {
+            if (pfs3_lookup_path(fs3, dir->path, &dir_ino) != PFS3_OK) return 0;
+        }
+        pfs3_dirent_t dent3;
+        int rc = pfs3_readdir(fs3, dir_ino, dir->dir_index, &dent3);
+        if (rc != PFS3_OK) return 0; /* EOF */
 
-    dir->dir_index++;
-    strncpy(out_ent->name, dent.name, sizeof(out_ent->name) - 1);
-    out_ent->name[sizeof(out_ent->name) - 1] = '\0';
-    out_ent->size_bytes = (uint32_t)dino.size_bytes;
-    out_ent->is_dir = (dent.file_type == 2);
-    return 1;
+        dir->dir_index++;
+        strncpy(out_ent->name, dent3.name, sizeof(out_ent->name) - 1);
+        out_ent->name[sizeof(out_ent->name) - 1] = '\0';
+        out_ent->is_dir = (dent3.file_type == PFS3_FT_DIR);
+        pfs3_inode_t di;
+        if (pfs3_read_inode(fs3, dent3.inode_num, &di) == PFS3_OK) {
+            out_ent->size_bytes = (uint32_t)di.size_bytes;
+        } else {
+            out_ent->size_bytes = 0;
+        }
+        return 1;
+    } else {
+        pfs2_fs_t *fs = storage_get_fs();
+        pfs2_dir_entry_t dent;
+        pfs2_inode_t dino;
+        int rc = pfs2_readdir(fs, dir->dir_index, &dent, &dino);
+        if (rc != PFS2_OK) return 0; /* EOF */
+
+        dir->dir_index++;
+        strncpy(out_ent->name, dent.name, sizeof(out_ent->name) - 1);
+        out_ent->name[sizeof(out_ent->name) - 1] = '\0';
+        out_ent->size_bytes = (uint32_t)dino.size_bytes;
+        out_ent->is_dir = (dent.file_type == 2);
+        return 1;
+    }
 #else
     if (dir->dir_index >= 3) return 0;
     static const char *dummy[3] = { "sample.mp4", "music.mp3", "notes.txt" };
