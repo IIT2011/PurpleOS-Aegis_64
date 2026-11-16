@@ -193,3 +193,59 @@ End  ───► └───────────────────�
 ```
 
 Strict enforcement ensures that **no page in memory can ever be simultaneously writable and executable**, preventing buffer overflow and code injection exploits at the hardware MMU level.
+
+---
+
+## 8. Canonical Package Naming Hierarchy & Directory Structure
+
+Purple OS / Aegis64 establishes a formal two-tier naming architecture for all `.apdrv` modules:
+
+### 8.1. Subsystem Family Packages (Canonical Functional Classes)
+For unified device stacks that aggregate drivers for an entire peripheral class, canonical title-case and lowercase filenames are standardized:
+
+| Canonical Family Name | Lowercase Alias | Target Hardware Class | Target PCI Class / Subclass |
+| :--- | :--- | :--- | :--- |
+| **`Storage.apdrv`** | `storage.apdrv` | SATA AHCI 1.3, NVMe 1.4, Legacy ATA PIO | `0x01` (Mass Storage) |
+| **`Network.apdrv`** | `network.apdrv` / `ethernet.apdrv` | PCIe Wired Ethernet (Intel, Realtek) | `0x02:0x00` (Ethernet) |
+| **`WiFi.apdrv`** | `wifi.apdrv` | 802.11 Wireless Network Adapters | `0x02:0x80` (Wireless Controller) |
+| **`USB.apdrv`** | `usb.apdrv` | USB Host Controllers (xHCI 3.0, EHCI 2.0) | `0x0C:0x03` (Serial Bus / USB) |
+| **`Audio.apdrv`** | `audio.apdrv` | High Definition Audio & AC97 Codecs | `0x04:0x03` (Multimedia Audio) |
+| **`Graphics.apdrv`** | `graphics.apdrv` | GPU Display Adapters & Accelerators | `0x03:0x00` (VGA Compatible) |
+| **`Input.apdrv`** | `input.apdrv` | PS/2 8042 Keyboard, Mouse & USB HID | Wildcard (`0xFFFF:0xFFFF`) |
+| **`Bluetooth.apdrv`** | `bluetooth.apdrv` | Bluetooth HCI Host Controllers (USB/UART) | `0x0D:0x11` (Wireless Bluetooth) |
+| **`Camera.apdrv`** | `camera.apdrv` | USB Video Class (UVC) Webcams & Capture | `0x0E:0x02` (Video Streaming) |
+
+### 8.2. Chipset-Specific Packages
+When specialized hardware registers, proprietary DMA ring engines, or vendor microcode are required, dedicated chipset packages are named after the controller:
+- **`e1000.apdrv`**: Intel 82540EM / 82545EM Gigabit Ethernet (`8086:100E`, `8086:100F`)
+- **`r8139.apdrv`**: Realtek RTL8139 Fast Ethernet (`10EC:8139`)
+- **`xhci.apdrv`**: Extensible Host Controller Interface USB 3.0 (`0C:03:30`)
+- **`hdaudio.apdrv`**: Intel High Definition Audio (`8086:2668`)
+- **`bochs_gpu.apdrv`**: Bochs / QEMU DRM VGA Video Adapter (`1234:1111`)
+- **`gpu-intel.apdrv`**: Intel HD Graphics Gen9/Gen11 Accelerator (`8086:5912`)
+- **`gpu-amd.apdrv`**: AMD Radeon GCN/RDNA Blit Accelerator (`1002:67DF`)
+
+### 8.3. Directory Structure on PurpleFS
+Driver modules reside in canonical paths on the filesystem:
+1. **Primary Directory:** `/System/Drivers/`
+   ```
+   /System/Drivers/
+   ├── Storage.apdrv    (or storage.apdrv)
+   ├── Network.apdrv    (or network.apdrv, e1000.apdrv, r8139.apdrv)
+   ├── WiFi.apdrv       (or wifi.apdrv)
+   ├── USB.apdrv        (or usb.apdrv, xhci.apdrv)
+   ├── Audio.apdrv      (or audio.apdrv, hdaudio.apdrv)
+   ├── Graphics.apdrv   (or graphics.apdrv, bochs_gpu.apdrv)
+   ├── Input.apdrv      (or input.apdrv)
+   ├── Bluetooth.apdrv  (or bluetooth.apdrv)
+   └── Camera.apdrv     (or camera.apdrv)
+   ```
+2. **Legacy / Root Fallback:** `/` (e.g. `/e1000.apdrv`, `/storage.apdrv`)
+3. **Build Artifacts Directory:** `build/drivers_apdrv/` and `build/`
+
+### 8.4. Resolution Precedence
+When the kernel loads a module via `insmod <name>` or during PCI auto-probing:
+1. **Case-Insensitive Normalization:** Path lookups treat `Storage.apdrv` and `storage.apdrv` as identical.
+2. **Specific-First Matching:** If an exact chipset driver exists for the discovered PCI Device ID (e.g. `e1000.apdrv` for `8086:100E`), it is prioritized over generic class drivers.
+3. **Family Fallback:** If no chipset-specific driver matches, the generic subsystem family driver (e.g. `Network.apdrv` or `Storage.apdrv` with wildcard `0xFFFF`) is invoked to bind the device.
+
