@@ -28,23 +28,24 @@ pub fn init() {
 
     unsafe {
         if ATA0.identify().is_ok() {
-            crate::drivers::block_dev::register(&mut ATA0);
+            crate::drivers::block_dev::register(&mut *core::ptr::addr_of_mut!(ATA0));
         }
         if ATA1.identify().is_ok() {
-            crate::drivers::block_dev::register(&mut ATA1);
+            crate::drivers::block_dev::register(&mut *core::ptr::addr_of_mut!(ATA1));
         }
         if ATA2.identify().is_ok() {
-            crate::drivers::block_dev::register(&mut ATA2);
+            crate::drivers::block_dev::register(&mut *core::ptr::addr_of_mut!(ATA2));
         }
         if ATA3.identify().is_ok() {
-            crate::drivers::block_dev::register(&mut ATA3);
+            crate::drivers::block_dev::register(&mut *core::ptr::addr_of_mut!(ATA3));
         }
 
         // AHCI scan from PCI
         if let Some(dev) = crate::drivers::pci::find_device(0x8086, 0x2922) { // Intel ICH9 AHCI
             let bar5 = dev.bar5 as u64;
-            if AHCI0.init(bar5 as *mut u8).is_ok() {
-                crate::drivers::block_dev::register(&mut AHCI0);
+            let ahci_ref = &mut *core::ptr::addr_of_mut!(AHCI0);
+            if ahci_ref.init(bar5 as *mut u8).is_ok() {
+                crate::drivers::block_dev::register(ahci_ref);
             }
         }
 
@@ -52,8 +53,9 @@ pub fn init() {
         crate::drivers::pci::for_each_device(|dev| {
             if dev.class_id == 0x01 && dev.subclass_id == 0x08 { // Mass Storage, NVMe
                 let bar0 = dev.bar0 as u64;
-                if NVME0.init(bar0).is_ok() {
-                    crate::drivers::block_dev::register(&mut NVME0);
+                let nvme_ref = &mut *core::ptr::addr_of_mut!(NVME0);
+                if nvme_ref.init(bar0).is_ok() {
+                    crate::drivers::block_dev::register(nvme_ref);
                 }
             }
         });

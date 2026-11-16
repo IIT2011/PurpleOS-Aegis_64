@@ -15,5 +15,6 @@ pub mod e1000;
 pub mod netdev;
 pub mod audio;
 pub mod usb;
+pub mod rtl8139;
 pub mod purple_detect;
 pub mod storage;

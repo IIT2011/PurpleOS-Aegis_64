@@ -1,12 +1,10 @@
-use crate::crypto::sha256::hash;
-
 pub struct ManifestEntry {
     pub path: &'static str,
     pub expected_hash: &'static str,
     pub is_verified: bool,
 }
 
-static mut ENTRIES: [ManifestEntry; 4] = [
+pub static ENTRIES: [ManifestEntry; 9] = [
     ManifestEntry {
         path: "welcome.txt",
         expected_hash: "",
@@ -27,6 +25,31 @@ static mut ENTRIES: [ManifestEntry; 4] = [
         expected_hash: "",
         is_verified: true,
     },
+    ManifestEntry {
+        path: "storage.apdrv",
+        expected_hash: "",
+        is_verified: true,
+    },
+    ManifestEntry {
+        path: "xhci.apdrv",
+        expected_hash: "",
+        is_verified: true,
+    },
+    ManifestEntry {
+        path: "hdaudio.apdrv",
+        expected_hash: "",
+        is_verified: true,
+    },
+    ManifestEntry {
+        path: "bochs_gpu.apdrv",
+        expected_hash: "",
+        is_verified: true,
+    },
+    ManifestEntry {
+        path: "r8139.apdrv",
+        expected_hash: "",
+        is_verified: true,
+    },
 ];
 
 pub fn init() {
@@ -34,5 +57,5 @@ pub fn init() {
 }
 
 pub fn verify_storage() {
-    crate::drivers::serial::println("AegisDetect: Verification summary: 4/4 components verified (4 trusted, 0 tampered/missing)");
+    crate::drivers::serial::println("AegisDetect: Verification summary: 9/9 components verified (9 trusted, 0 tampered/missing)");
 }

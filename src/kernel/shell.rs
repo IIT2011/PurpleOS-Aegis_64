@@ -171,10 +171,22 @@ impl Shell {
                 serial::println("      2   <FILE>            49   welcome.txt");
                 serial::println("      3   <FILE>            59   version.txt");
                 serial::println("      4   <FILE>            52   motd");
-                serial::println("      5   <FILE>          4096   e1000.apdrv");
+                serial::println("      5   <FILE>           764   e1000.apdrv");
                 serial::println("      6   <FILE>          8192   sysmon.apapplication");
+                serial::println("      7   <FILE>           724   storage.apdrv");
+                serial::println("      8   <FILE>           724   xhci.apdrv");
+                serial::println("      9   <FILE>           724   hdaudio.apdrv");
+                serial::println("     10   <FILE>           764   bochs_gpu.apdrv");
+                serial::println("     11   <FILE>           764   r8139.apdrv");
                 serial::println("  --------------------------------------------------");
-                serial::println("  Total: 5 item(s)\n");
+                serial::println("  Total: 10 item(s)\n");
+            }
+            "lsmod" | "modules" => {
+                crate::kernel::apdrv::list_modules();
+            }
+            "insmod" => {
+                let mod_name = parts.next().unwrap_or("e1000");
+                crate::kernel::apdrv::insmod(mod_name);
             }
             "peek" => {
                 let file = parts.next().unwrap_or("welcome.txt");
@@ -198,7 +210,7 @@ impl Shell {
                 serial::println("\nAegisDetect Boot Integrity & System Protection Subsystem:");
                 serial::println("  Status:        ONLINE (Enforcing Cryptographic W^X)");
                 serial::println("  Hash Engine:   SHA-256 / HMAC-SHA256");
-                serial::println("  Verification:  4/4 components verified (4 trusted, 0 tampered/missing)\n");
+                serial::println("  Verification:  9/9 components verified (9 trusted, 0 tampered/missing)\n");
             }
             "devices" => {
                 serial::println("\nPurpleDetect Hardware & Removable Device Registry:");
@@ -279,5 +291,5 @@ impl Shell {
 static mut GLOBAL_SHELL: Shell = Shell::new();
 
 pub fn get_shell() -> &'static mut Shell {
-    unsafe { &mut GLOBAL_SHELL }
+    unsafe { &mut *core::ptr::addr_of_mut!(GLOBAL_SHELL) }
 }

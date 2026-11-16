@@ -4,6 +4,10 @@ pub const PFS2_MAGIC: [u8; 8] = *b"PURPLEFS";
 pub const PFS2_BLOCK_SIZE: usize = 4096;
 pub const PFS2_ROOT_INODE: u32 = 1;
 
+static E1000_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/e1000.apdrv");
+static STORAGE_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/storage.apdrv");
+static XHCI_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/xhci.apdrv");
+
 pub struct PurpleFsV2<'a> {
     dev: &'a mut dyn BlockDevice,
     pub volume_label: [u8; 32],
@@ -40,6 +44,12 @@ impl<'a> PurpleFsV2<'a> {
             Some(3)
         } else if filename == "motd" {
             Some(4)
+        } else if filename == "e1000.apdrv" {
+            Some(5)
+        } else if filename == "storage.apdrv" {
+            Some(6)
+        } else if filename == "xhci.apdrv" {
+            Some(7)
         } else {
             None
         }
@@ -50,6 +60,9 @@ impl<'a> PurpleFsV2<'a> {
             2 => b"Welcome to Purple OS / Aegis64 Native Filesystem!\n",
             3 => b"Aegis64 Kernel v0.5.0 (Pure Rust Bare-Metal Architecture)\n",
             4 => b"Message of the Day: Aegis64 Pure Rust Operational.\n",
+            5 => E1000_BIN,
+            6 => STORAGE_BIN,
+            7 => XHCI_BIN,
             _ => return 0,
         };
         let len = content.len().min(buf.len());
