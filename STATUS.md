@@ -1,8 +1,12 @@
 # Purple OS / Aegis64: Implementation Status
 
+> [!WARNING]
+> **Active Development Warning:**
+> Purple OS and the Aegis64 kernel are under heavy active development.
+
 **Date:** 2026-11-16  
 **Architecture:** Pure Bare-Metal Rust (`no_std`, `no_main`), Zero C/C++ Runtime Dependencies.  
-**Target:** `x86_64-unknown-none` with Multiboot 1 ELF32 loader compatibility.
+**Target:** `x86_64-unknown-none` with Multiboot 1 ELF32 bootstrap compatibility.
 
 ---
 
@@ -29,17 +33,22 @@
 | **Unified Block Device Layer** | Complete | `src/drivers/block_dev.rs` | `BlockDevice` trait and device registry for ATA PIO, AHCI SATA, NVMe PCIe, and disk partitions. |
 | **Storage Controllers** | Complete | `src/drivers/storage/` | Primary/Secondary IDE ATA PIO mode, SATA AHCI 1.3 PRDT DMA, and NVMe 1.4 submission/completion queues. |
 | **Partition & Filesystem Engines** | Complete | `src/fs/` | GPT partition table parser, PurpleFS v2 flat filesystem parser, PurpleFS v3 hierarchical filesystem reader. |
-| **Security & Cryptography** | Complete | `src/crypto/sha256.rs`, `security/aegis_detect.rs` | SHA-256 and HMAC-SHA256 engine; AegisDetect trusted baseline verification (4/4 components verified). |
+| **Security & Cryptography** | Complete | `src/crypto/sha256.rs`, `security/aegis_detect.rs` | SHA-256 and HMAC-SHA256 engine; AegisDetect trusted baseline verification (12/12 components verified). |
 | **Hardware Discovery Daemon** | Complete | `src/drivers/purple_detect.rs` | Automated peripheral scanner for COM1, PS2KBD, PS2MOUSE, ATA channels, and PCI hierarchy. |
 | **PCI Bus Enumeration** | Complete | `src/drivers/pci.rs` | Configuration space scanning across buses 0..8 (Host bridge, ISA bridge, VGA/VBE device, Intel E1000 NIC). |
-| **Peripheral & Dynamic Execution** | Complete | `kernel/apdrv.rs`, `apapp.rs`, `apexec.rs`, `ksym.rs` | APDRV v3 kernel module manager with W^X enforcement, APAPP application bundle sandbox, APEXEC engine. |
-| **Linear Framebuffer** | Complete | `src/drivers/video.rs`, `font8x16.rs` | RGB linear framebuffer driver with CP437 character rendering and scrolling text console. |
-| **Interactive Terminal Shell** | Complete | `src/kernel/shell.rs` | AegisShell 2.0 console with 28+ built-in commands (`help`, `clear`, `cpu`, `mem`, `tasks`, `smp`, `pci`, `disks`, `ls`, `cat`, etc.). |
+| **Intel 82540EM Gigabit NIC** | Complete | `src/drivers/e1000.rs` | Authentic MMIO registers, EEPROM MAC reading, 32 RX / 32 TX coherent DMA ring buffers. |
+| **Realtek RTL8139 Fast Ethernet**| Complete | `src/drivers/rtl8139.rs` | Authentic Port I/O registers, 8 KiB continuous RX ring buffer, 4 TX buffers, CAPR erratum compensation. |
+| **Intel High Definition Audio** | Complete | `src/drivers/audio.rs` | CRST reset sequencing, 256-entry CORB and RIRB DMA rings, codec verb dispatch, 44.1 kHz 16-bit PCM streams. |
+| **xHCI USB 3.0 Host Controller**| Complete | `src/drivers/usb.rs` | Capability/operational registers, HCRST reset, DCBAA, 64-entry TRB command ring with cycle toggle. |
+| **Bochs / QEMU DRM Video** | Complete | `src/drivers/gpu.rs`, `video.rs` | VBE Dispi 1024x768 @ 32bpp, PCI BAR0 16 MiB VRAM binding, hardware page-flipping, 2D blit, framebuffer fallback. |
+| **3D Hardware Acceleration** | Complete | `src/drivers/gpu_accel.rs` | Intel Gen9/Gen11 RCS ring buffer, AMD GCN/RDNA PM4 packets, NVIDIA Nouveau pushbuffer FIFO methods. |
+| **APDRV v3 Native Modules** | Complete | `scripts/build_apdrv.py`, `kernel/apdrv.rs` | 17 production `.apdrv` modules generated with real x86-64 machine code, relocations, and W^X memory enforcement. |
+| **Interactive Terminal Shell** | Complete | `src/kernel/shell.rs` | AegisShell 2.0 console with 30+ built-in commands (`help`, `sysinfo`, `cpuinfo`, `mem`, `tasks`, `smp`, `smptest`, `disks`, `df`, `video`, `gpu3d`, `mouse`, `lspci`, `devices`, `lsmod`, `insmod`, `aegisdetect`, `reboot`, etc.). |
 
 ---
 
 ## 2. Verification Summary
 
 * **Compilation:** `cargo build --target x86_64-unknown-none` succeeds with 0 errors.
-* **QEMU Multi-Core Boot:** Verified with 4 SMP cores online, all device drivers initialized, and AegisShell prompt responsive.
+* **QEMU Multi-Core Boot:** Verified with 4 SMP cores online, all device drivers initialized, APDRV modules loaded with W^X enforcement, and AegisShell prompt responsive.
 * **Legacy Code Cleanup:** 100% of legacy C and C++ source and header files purged from repository.
