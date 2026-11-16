@@ -285,7 +285,7 @@ pub fn init() {
     }
 
     // 3. Scan PCI for VirtIO-GPU
-    if let Some(dev) = find_device(GPU_VENDOR_VIRTIO, GPU_DEV_VIRTIO_GPU) {
+    if let Some(_dev) = find_device(GPU_VENDOR_VIRTIO, GPU_DEV_VIRTIO_GPU) {
         gpu.gpu_type = GpuType::VirtioGpu;
         gpu.vendor_id = GPU_VENDOR_VIRTIO;
         gpu.device_id = GPU_DEV_VIRTIO_GPU;

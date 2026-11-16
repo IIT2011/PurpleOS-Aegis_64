@@ -1,4 +1,4 @@
-use crate::drivers::block_dev::{BlockDevice, BLOCK_DEV_ERR_BOUNDS, BLOCK_DEV_OK};
+use crate::drivers::block_dev::{BlockDevice, BLOCK_DEV_ERR_BOUNDS};
 
 pub struct PartitionDevice<'a> {
     parent: &'a mut dyn BlockDevice,

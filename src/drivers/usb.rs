@@ -7,7 +7,6 @@
 //!   - `drivers/usb/host/xhci-mem.c`
 //!   - eXtensible Host Controller Interface for Universal Serial Bus (xHCI) Rev 1.2
 
-use crate::drivers::pci::find_device;
 use crate::drivers::dma::alloc_coherent;
 use crate::sync::Spinlock;
 

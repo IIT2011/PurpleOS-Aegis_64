@@ -55,8 +55,51 @@ pub fn init(base_phys: u64) -> Result<(), &'static str> {
         crate::drivers::serial::print("Local APIC Initialized: Base=0x");
         crate::drivers::serial::print_hex(LAPIC_BASE);
         crate::drivers::serial::println("");
+
+        // Calibrate APIC timer against PIT Channel 2
+        calibrate_timer();
     }
     Ok(())
+}
+
+static mut APIC_TICKS_PER_10MS: u32 = 100000;
+
+fn on_apic_timer(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
+    crate::kernel::task::timer_tick();
+}
+
+pub fn calibrate_timer() -> u32 {
+    unsafe {
+        // Divide by 16 (0x03)
+        write_reg(LAPIC_TIMER_DIV, 0x03);
+
+        // Mask timer during calibration (bit 16 = 1)
+        write_reg(LAPIC_LVT_TIMER, (1 << 16) | 48);
+
+        // Load maximum count
+        write_reg(LAPIC_TIMER_INIT, 0xFFFFFFFF);
+
+        // Precise 10 ms delay via PIT Channel 2
+        crate::drivers::pit::delay_ms(10);
+
+        let curr = read_reg(LAPIC_TIMER_CURR);
+        let ticks_10ms = 0xFFFFFFFFu32.saturating_sub(curr);
+
+        APIC_TICKS_PER_10MS = if ticks_10ms > 1000 { ticks_10ms } else { 100000 };
+
+        // Register IDT handler for vector 48
+        crate::arch::x86_64::idt::register_handler(48, on_apic_timer);
+
+        // Set Periodic mode (bit 17 = 1) on Vector 48
+        write_reg(LAPIC_LVT_TIMER, (1 << 17) | 48);
+        write_reg(LAPIC_TIMER_INIT, APIC_TICKS_PER_10MS);
+
+        crate::drivers::serial::print("Local APIC Timer: Calibrated via PIT (");
+        crate::drivers::serial::print_u64((APIC_TICKS_PER_10MS as u64) * 100);
+        crate::drivers::serial::println(" Hz base, 100 Hz periodic tick active)");
+
+        APIC_TICKS_PER_10MS
+    }
 }
 
 pub fn init_ap() {
@@ -67,6 +110,11 @@ pub fn init_ap() {
 
         write_reg(LAPIC_SVR, 0x1FF);
         write_reg(LAPIC_TPR, 0);
+
+        // Synchronize APIC timer on AP core with calibrated frequency
+        write_reg(LAPIC_TIMER_DIV, 0x03);
+        write_reg(LAPIC_LVT_TIMER, (1 << 17) | 48);
+        write_reg(LAPIC_TIMER_INIT, APIC_TICKS_PER_10MS);
     }
 }
 

@@ -221,5 +221,5 @@ pub fn init_bsp() {
 }
 
 pub fn get_bsp_info() -> &'static CpuInfo {
-    unsafe { &BSP_INFO }
+    unsafe { &*core::ptr::addr_of!(BSP_INFO) }
 }

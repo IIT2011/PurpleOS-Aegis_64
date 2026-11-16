@@ -57,12 +57,12 @@ pub fn get_time() -> WallTime {
         let is_bcd = (reg_b & 0x04) == 0;
         let is_24h = (reg_b & 0x02) != 0;
 
-        let mut second = if is_bcd { bcd_to_bin(sec) } else { sec };
-        let mut minute = if is_bcd { bcd_to_bin(min) } else { min };
+        let second = if is_bcd { bcd_to_bin(sec) } else { sec };
+        let minute = if is_bcd { bcd_to_bin(min) } else { min };
         let mut h = if is_bcd { bcd_to_bin(hour & 0x7F) } else { hour & 0x7F };
-        let mut d = if is_bcd { bcd_to_bin(day) } else { day };
-        let mut m = if is_bcd { bcd_to_bin(month) } else { month };
-        let mut y = (if is_bcd { bcd_to_bin(year) } else { year }) as u16 + 2000;
+        let d = if is_bcd { bcd_to_bin(day) } else { day };
+        let m = if is_bcd { bcd_to_bin(month) } else { month };
+        let y = (if is_bcd { bcd_to_bin(year) } else { year }) as u16 + 2000;
 
         if !is_24h && (hour & 0x80) != 0 {
             h = (h + 12) % 24;

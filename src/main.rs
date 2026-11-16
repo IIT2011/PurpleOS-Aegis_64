@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 use core::arch::global_asm;
 use core::panic::PanicInfo;
 
@@ -75,6 +77,9 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
 
     // 4. Virtual Memory Manager (VMM) & CR0.WP
     mm::vmm::init();
+
+    // 4b. Dynamic Kernel Heap Allocator (GlobalAlloc)
+    mm::heap::init();
 
     // 5. GDT, TSS and IDT
     arch::x86_64::gdt::init();

@@ -1,5 +1,5 @@
 use crate::drivers::block_dev::{BlockDevice, BLOCK_DEV_ERR_BOUNDS, BLOCK_DEV_ERR_IO, BLOCK_DEV_OK};
-use crate::drivers::dma::{alloc_coherent, free_coherent};
+use crate::drivers::dma::alloc_coherent;
 
 #[repr(C, packed)]
 struct HbaPortRegs {

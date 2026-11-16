@@ -108,5 +108,5 @@ pub fn init(_mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
 }
 
 pub fn get_madt_info() -> &'static MadtInfo {
-    unsafe { &MADT_INFO }
+    unsafe { &*core::ptr::addr_of!(MADT_INFO) }
 }

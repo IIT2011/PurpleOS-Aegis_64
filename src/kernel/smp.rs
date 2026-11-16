@@ -87,7 +87,7 @@ pub fn init() {
 
             (*data).cr3 = read_cr3();
             (*data).rsp = stack_top;
-            (*data).entry = smp_ap_entry as usize as u64;
+            (*data).entry = smp_ap_entry as *const () as usize as u64;
             (*data).ready = 0;
             (*data).bsp_ack = 0;
 

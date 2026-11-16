@@ -1,12 +1,15 @@
-use super::pmm::{alloc_frame, free_frame, PAGE_SIZE};
+use super::pmm::{alloc_frame, PAGE_SIZE};
 use crate::arch::x86_64::cpu::{invlpg, read_cr0, read_cr3, write_cr0, write_cr3};
 use crate::sync::Spinlock;
 
 pub const PAGE_PRESENT: u64 = 1 << 0;
 pub const PAGE_WRITABLE: u64 = 1 << 1;
 pub const PAGE_USER: u64 = 1 << 2;
+pub const PAGE_WRITE_THROUGH: u64 = 1 << 3;
+pub const PAGE_CACHE_DISABLE: u64 = 1 << 4;
 pub const PAGE_HUGE: u64 = 1 << 7;
 pub const PAGE_NO_EXECUTE: u64 = 1 << 63;
+pub const PAGE_MMIO: u64 = PAGE_PRESENT | PAGE_WRITABLE | PAGE_CACHE_DISABLE | PAGE_WRITE_THROUGH | PAGE_NO_EXECUTE;
 pub const ENTRY_ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 
 #[repr(C, align(4096))]
@@ -142,7 +145,7 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
     let pt_i = pt_index(vaddr);
 
     unsafe {
-        let mut pdpt: *mut PageTable;
+        let pdpt: *mut PageTable;
         if ((*pml4).entries[pml4_i] & PAGE_PRESENT) == 0 {
             let frame = alloc_frame().ok_or("Out of memory for PDPT")?;
             pdpt = frame as *mut PageTable;
@@ -155,7 +158,7 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             }
         }
 
-        let mut pd: *mut PageTable;
+        let pd: *mut PageTable;
         if ((*pdpt).entries[pdpt_i] & PAGE_PRESENT) == 0 {
             let frame = alloc_frame().ok_or("Out of memory for PD")?;
             pd = frame as *mut PageTable;
@@ -172,7 +175,7 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             split_huge_page(pml4, vaddr)?;
         }
 
-        let mut pt: *mut PageTable;
+        let pt: *mut PageTable;
         if ((*pd).entries[pd_i] & PAGE_PRESENT) == 0 {
             let frame = alloc_frame().ok_or("Out of memory for PT")?;
             pt = frame as *mut PageTable;
@@ -297,5 +300,23 @@ pub fn create_pml4() -> Option<*mut PageTable> {
 pub fn switch_pml4(pml4: *mut PageTable) {
     if !pml4.is_null() {
         write_cr3(pml4 as u64);
+    }
+}
+
+/// Identity-maps a physical MMIO aperture with Cache-Disable and Write-Through attributes
+pub fn map_mmio_range(paddr: u64, size: usize) -> Result<(), &'static str> {
+    let _guard = VMM_LOCK.lock();
+    unsafe {
+        let pml4 = KERNEL_PML4;
+        if pml4.is_null() {
+            return Err("VMM not initialized");
+        }
+        let mut curr = paddr & !0xFFF;
+        let end = (paddr + size as u64 + 0xFFF) & !0xFFF;
+        while curr < end {
+            map_page(pml4, curr, curr, PAGE_MMIO)?;
+            curr += PAGE_SIZE as u64;
+        }
+        Ok(())
     }
 }

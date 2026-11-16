@@ -84,6 +84,7 @@ pub static SCHED: Spinlock<SchedState> = Spinlock::new(SchedState {
 extern "C" {
     fn switch_context(old_rsp: *mut u64, new_rsp: u64);
     fn task_trampoline();
+    #[allow(dead_code)]
     fn user_trampoline();
 }
 
@@ -196,11 +197,11 @@ pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8
         sp = sp.sub(1);
         *sp = arg as u64;
         sp = sp.sub(1);
-        *sp = entry as usize as u64;
+        *sp = entry as *const () as usize as u64;
 
         // Trampoline return address
         sp = sp.sub(1);
-        *sp = task_trampoline as usize as u64;
+        *sp = task_trampoline as *const () as usize as u64;
 
         // Callee-saved registers popped by switch_context
         sp = sp.sub(1);

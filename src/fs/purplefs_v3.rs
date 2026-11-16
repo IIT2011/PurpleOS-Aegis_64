@@ -14,6 +14,7 @@ static GPU_INTEL_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-inte
 static GPU_AMD_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-amd.apdrv");
 static GPU_NVIDIA_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-nvidia.apdrv");
 
+#[allow(dead_code)]
 pub struct PurpleFsV3<'a> {
     dev: &'a mut dyn BlockDevice,
     pub volume_label: [u8; 32],

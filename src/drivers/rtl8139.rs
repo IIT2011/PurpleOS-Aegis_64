@@ -4,7 +4,7 @@
 //!   - `drivers/net/ethernet/realtek/8139too.c`
 //!   - `drivers/net/ethernet/realtek/8139cp.c`
 
-use crate::arch::x86_64::io::{inb, outb, inw, outw, inl, outl};
+use crate::arch::x86_64::io::{inb, outb, outw, outl};
 use crate::drivers::pci::find_device;
 use crate::drivers::dma::alloc_coherent;
 use crate::sync::Spinlock;

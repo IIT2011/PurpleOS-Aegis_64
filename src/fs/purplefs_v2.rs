@@ -8,6 +8,7 @@ static E1000_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/e1000.apdrv"
 static STORAGE_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/storage.apdrv");
 static XHCI_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/xhci.apdrv");
 
+#[allow(dead_code)]
 pub struct PurpleFsV2<'a> {
     dev: &'a mut dyn BlockDevice,
     pub volume_label: [u8; 32],

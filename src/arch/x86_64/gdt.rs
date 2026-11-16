@@ -66,8 +66,8 @@ pub fn init() {
         let tss_base = &raw const TSS as u64;
         let tss_limit = (size_of::<Tss64>() - 1) as u64;
 
-        TSS.rsp0 = &raw const DEFAULT_STACK as u64 + DEFAULT_STACK.len() as u64;
-        TSS.ist1 = &raw const DOUBLE_FAULT_STACK as u64 + DOUBLE_FAULT_STACK.len() as u64;
+        TSS.rsp0 = &raw const DEFAULT_STACK as u64 + 16384;
+        TSS.ist1 = &raw const DOUBLE_FAULT_STACK as u64 + 8192;
         TSS.iopb_offset = size_of::<Tss64>() as u16;
 
         GDT.entries[0] = 0x0000000000000000; // Null

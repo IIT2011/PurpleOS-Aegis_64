@@ -11,14 +11,14 @@ pub const KBD_MOD_CAPS: u8 = 1 << 3;
 
 struct KbdState {
     modifiers: u8,
-    buf: [u8; 128],
+    buf: [u8; 256],
     head: usize,
     tail: usize,
 }
 
 static KBD: Spinlock<KbdState> = Spinlock::new(KbdState {
     modifiers: 0,
-    buf: [0; 128],
+    buf: [0; 256],
     head: 0,
     tail: 0,
 });
@@ -26,13 +26,13 @@ static KBD: Spinlock<KbdState> = Spinlock::new(KbdState {
 pub fn init() {
     crate::arch::x86_64::pic::clear_mask(1); // Unmask IRQ 1 (Keyboard)
     crate::arch::x86_64::idt::register_handler(33, on_interrupt);
-    crate::drivers::serial::println("Keyboard: PS/2 Keyboard Initialized");
+    crate::drivers::serial::println("Keyboard: PS/2 Keyboard Initialized (256-Byte Ring Buffer Active)");
 }
 
 fn on_interrupt(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
     unsafe {
-        let status = inb(KBD_STATUS_PORT);
-        if (status & 1) != 0 {
+        // Drain 8042 controller output buffer completely
+        while (inb(KBD_STATUS_PORT) & 1) != 0 {
             let scancode = inb(KBD_DATA_PORT);
             process_scancode(scancode);
         }
@@ -126,15 +126,21 @@ pub fn has_char() -> bool {
     k.head != k.tail
 }
 
+pub fn try_getchar() -> Option<u8> {
+    let mut k = KBD.lock();
+    if k.head != k.tail {
+        let ch = k.buf[k.tail];
+        k.tail = (k.tail + 1) % k.buf.len();
+        Some(ch)
+    } else {
+        None
+    }
+}
+
 pub fn getchar() -> u8 {
     loop {
-        {
-            let mut k = KBD.lock();
-            if k.head != k.tail {
-                let ch = k.buf[k.tail];
-                k.tail = (k.tail + 1) % k.buf.len();
-                return ch;
-            }
+        if let Some(ch) = try_getchar() {
+            return ch;
         }
         core::hint::spin_loop();
     }

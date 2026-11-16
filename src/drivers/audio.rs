@@ -143,6 +143,7 @@ impl HdaController {
         core::ptr::write_volatile(ptr, val);
     }
 
+    #[allow(dead_code)]
     #[inline(always)]
     unsafe fn read8(&self, reg: usize) -> u8 {
         let ptr = (self.mmio_base + reg) as *const u8;

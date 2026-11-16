@@ -1,14 +1,14 @@
-use crate::drivers::block_dev::{BlockDevice, REGISTRY};
 use crate::drivers::storage::ata_pio::{AtaDevice, ATA_PRIMARY_CTRL, ATA_PRIMARY_IO, ATA_SECONDARY_CTRL, ATA_SECONDARY_IO};
 use crate::drivers::storage::ahci::AhciPort;
 use crate::drivers::storage::nvme::NvmeController;
-use crate::fs::gpt;
 use crate::sync::Spinlock;
 
-static mut ATA0: AtaDevice = AtaDevice::new(b"ata0\0", ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, false);
-static mut ATA1: AtaDevice = AtaDevice::new(b"ata1\0", ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, true);
-static mut ATA2: AtaDevice = AtaDevice::new(b"ata2\0", ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, false);
-static mut ATA3: AtaDevice = AtaDevice::new(b"ata3\0", ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, true);
+static mut ATA_DEVICES: [AtaDevice; 4] = [
+    AtaDevice::new(b"ata0\0", ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, false),
+    AtaDevice::new(b"ata1\0", ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, true),
+    AtaDevice::new(b"ata2\0", ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, false),
+    AtaDevice::new(b"ata3\0", ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, true),
+];
 
 static mut AHCI0: AhciPort = AhciPort::new(0);
 static mut NVME0: NvmeController = NvmeController::new();
@@ -27,17 +27,12 @@ pub fn init() {
     crate::drivers::serial::println("Storage: Scanning legacy ATA channels (Primary & Secondary)...");
 
     unsafe {
-        if ATA0.identify().is_ok() {
-            crate::drivers::block_dev::register(&mut *core::ptr::addr_of_mut!(ATA0));
-        }
-        if ATA1.identify().is_ok() {
-            crate::drivers::block_dev::register(&mut *core::ptr::addr_of_mut!(ATA1));
-        }
-        if ATA2.identify().is_ok() {
-            crate::drivers::block_dev::register(&mut *core::ptr::addr_of_mut!(ATA2));
-        }
-        if ATA3.identify().is_ok() {
-            crate::drivers::block_dev::register(&mut *core::ptr::addr_of_mut!(ATA3));
+        let ata_base = core::ptr::addr_of_mut!(ATA_DEVICES) as *mut AtaDevice;
+        for i in 0..4 {
+            let dev = &mut *ata_base.add(i);
+            if dev.identify().is_ok() {
+                crate::drivers::block_dev::register(dev);
+            }
         }
 
         // AHCI scan from PCI

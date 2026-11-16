@@ -1,4 +1,4 @@
-use crate::arch::x86_64::io::{inb, outb, io_wait};
+use crate::arch::x86_64::io::{inb, outb};
 use crate::sync::Spinlock;
 
 const MOUSE_DATA: u16 = 0x60;

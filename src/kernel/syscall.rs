@@ -32,7 +32,7 @@ pub fn init() {
     let star = (0x0010u64 << 48) | (0x0008u64 << 32);
     wrmsr(MSR_STAR, star);
 
-    wrmsr(MSR_LSTAR, syscall_entry_asm as usize as u64);
+    wrmsr(MSR_LSTAR, syscall_entry_asm as *const () as usize as u64);
 
     // SFMASK: Clear IF (0x200) on syscall entry to disable interrupts
     wrmsr(MSR_SFMASK, 0x200);
@@ -45,7 +45,7 @@ pub fn init_ap() {
     wrmsr(MSR_EFER, efer | EFER_SCE);
     let star = (0x0010u64 << 48) | (0x0008u64 << 32);
     wrmsr(MSR_STAR, star);
-    wrmsr(MSR_LSTAR, syscall_entry_asm as usize as u64);
+    wrmsr(MSR_LSTAR, syscall_entry_asm as *const () as usize as u64);
     wrmsr(MSR_SFMASK, 0x200);
 }
 
@@ -67,7 +67,7 @@ pub extern "C" fn syscall_dispatch(
     sys_no: u64,
     a1: u64,
     a2: u64,
-    a3: u64,
+    _a3: u64,
     _a4: u64,
     _a5: u64,
     _a6: u64,
