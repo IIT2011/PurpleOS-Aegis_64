@@ -1,0 +1,23 @@
+[package]
+name = "aegis64"
+version = "0.5.0"
+edition = "2021"
+authors = ["Aegis64 Developers"]
+description = "Purple OS / Aegis64 Native 64-bit Operating System Kernel (Pure Rust)"
+
+[profile.dev]
+panic = "abort"
+opt-level = 2
+debug = true
+overflow-checks = false
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false
+overflow-checks = false
+
+[dependencies]
+# Completely self-contained bare-metal kernel with zero external crate dependencies

@@ -1,6 +1,11 @@
 # Purple OS / Aegis64 .gitignore
 
-# Temporary files and directories
+# Cargo build artifacts
+/target/
+target/
+*.log
+*.elf
+*.bin
 /tmp/
 tmp/
 scratch/
@@ -8,6 +13,8 @@ scratch/
 *.swp
 __pycache__/
 *.pyc
+build/*.exe
+build/*.img
 
 # VLC source repository exception (per user directive)
 /vlc/
