@@ -66,6 +66,29 @@ pub fn init(mbi: Option<&MultibootInfo>) {
         }
     }
 
+    // Hardware GPU fallback: probe Bochs / Intel / VirtIO GPU directly
+    if let Some((fb_ptr, width, height, pitch, bpp)) = crate::drivers::gpu::init_hardware_display() {
+        v.fb_ptr = fb_ptr;
+        v.width = width;
+        v.height = height;
+        v.pitch = pitch;
+        v.bpp = bpp;
+        v.cursor_col = 0;
+        v.cursor_row = 0;
+        v.fg_color = COLOR_WHITE;
+        v.bg_color = COLOR_PURPLE_BG;
+        v.available = true;
+
+        crate::drivers::serial::print("Video: Hardware GPU linear framebuffer initialized: ");
+        crate::drivers::serial::print_u64(v.width as u64);
+        crate::drivers::serial::print("x");
+        crate::drivers::serial::print_u64(v.height as u64);
+        crate::drivers::serial::print("@");
+        crate::drivers::serial::print_u64(v.bpp as u64);
+        crate::drivers::serial::println("bpp (Bochs/QEMU DRM VBE Engine)");
+        return;
+    }
+
     crate::drivers::serial::println("Video: No linear framebuffer discovered in boot info.");
 }
 
