@@ -361,6 +361,7 @@ pub fn init() {
 
     if let Some(pci_dev) = dev {
         let bar0 = (pci_dev.bar0 & !0xF) as u64;
+        let _ = crate::mm::vmm::map_mmio_range(bar0, 16384);
         let mut hda = HDA.lock();
         if hda.init_hw(bar0).is_ok() {
             crate::drivers::serial::print("Audio: Intel High Definition Audio initialized (Codecs: ");

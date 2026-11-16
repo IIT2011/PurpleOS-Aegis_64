@@ -13,6 +13,12 @@ static R8139_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/r8139.apdrv"
 static GPU_INTEL_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-intel.apdrv");
 static GPU_AMD_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-amd.apdrv");
 static GPU_NVIDIA_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-nvidia.apdrv");
+static BLUETOOTH_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/bluetooth.apdrv");
+static CAMERA_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/camera.apdrv");
+static INPUT_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/input.apdrv");
+static WIFI_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/wifi.apdrv");
+static NETWORK_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/network.apdrv");
+static GRAPHICS_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/Graphics.apdrv");
 
 #[allow(dead_code)]
 pub struct PurpleFsV3<'a> {
@@ -52,7 +58,7 @@ impl<'a> PurpleFsV3<'a> {
             Some(8)
         } else if trimmed == "hdaudio.apdrv" || trimmed == "System/Drivers/hdaudio.apdrv" || trimmed == "System/Drivers/audio.apdrv" {
             Some(9)
-        } else if trimmed == "bochs_gpu.apdrv" || trimmed == "System/Drivers/bochs_gpu.apdrv" || trimmed == "System/Drivers/Graphics.apdrv" {
+        } else if trimmed == "bochs_gpu.apdrv" || trimmed == "System/Drivers/bochs_gpu.apdrv" {
             Some(10)
         } else if trimmed == "r8139.apdrv" || trimmed == "System/Drivers/r8139.apdrv" {
             Some(11)
@@ -62,6 +68,18 @@ impl<'a> PurpleFsV3<'a> {
             Some(13)
         } else if trimmed == "gpu-nvidia.apdrv" || trimmed == "System/Drivers/gpu-nvidia.apdrv" {
             Some(14)
+        } else if trimmed == "bluetooth.apdrv" || trimmed == "System/Drivers/bluetooth.apdrv" {
+            Some(15)
+        } else if trimmed == "camera.apdrv" || trimmed == "System/Drivers/camera.apdrv" {
+            Some(16)
+        } else if trimmed == "input.apdrv" || trimmed == "System/Drivers/input.apdrv" {
+            Some(17)
+        } else if trimmed == "wifi.apdrv" || trimmed == "System/Drivers/wifi.apdrv" {
+            Some(18)
+        } else if trimmed == "network.apdrv" || trimmed == "System/Drivers/network.apdrv" {
+            Some(19)
+        } else if trimmed == "Graphics.apdrv" || trimmed == "System/Drivers/Graphics.apdrv" {
+            Some(20)
         } else {
             None
         }
@@ -81,6 +99,12 @@ impl<'a> PurpleFsV3<'a> {
             12 => GPU_INTEL_BIN,
             13 => GPU_AMD_BIN,
             14 => GPU_NVIDIA_BIN,
+            15 => BLUETOOTH_BIN,
+            16 => CAMERA_BIN,
+            17 => INPUT_BIN,
+            18 => WIFI_BIN,
+            19 => NETWORK_BIN,
+            20 => GRAPHICS_BIN,
             _ => return 0,
         };
         let len = content.len().min(buf.len());

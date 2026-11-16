@@ -137,8 +137,32 @@ pub extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
         crate::drivers::serial::println("=================================================");
         if int_no == 14 {
             let cr2 = crate::arch::x86_64::cpu::read_cr2();
+            let err = frame.err_code;
             crate::drivers::serial::print("CR2 (Faulting Address): 0x");
             crate::drivers::serial::print_hex(cr2);
+            crate::drivers::serial::println("");
+            crate::drivers::serial::print("Page Fault Reason: ");
+            if (err & (1 << 0)) == 0 {
+                crate::drivers::serial::print("[NOT_PRESENT] ");
+            } else {
+                crate::drivers::serial::print("[PROTECTION_VIOLATION] ");
+            }
+            if (err & (1 << 1)) != 0 {
+                crate::drivers::serial::print("[WRITE] ");
+            } else {
+                crate::drivers::serial::print("[READ] ");
+            }
+            if (err & (1 << 2)) != 0 {
+                crate::drivers::serial::print("[USER_MODE] ");
+            } else {
+                crate::drivers::serial::print("[SUPERVISOR] ");
+            }
+            if (err & (1 << 3)) != 0 {
+                crate::drivers::serial::print("[RSVD_BIT_VIOLATION] ");
+            }
+            if (err & (1 << 4)) != 0 {
+                crate::drivers::serial::print("[INSTRUCTION_FETCH_NX] ");
+            }
             crate::drivers::serial::println("");
         }
         loop {

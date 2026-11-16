@@ -226,12 +226,18 @@ pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8
     Some(tid)
 }
 
+#[inline(always)]
+fn get_current_cpu() -> usize {
+    let id = crate::drivers::apic::get_id() as usize;
+    if id < MAX_CPUS { id } else { 0 }
+}
+
 pub fn yield_now() {
     schedule();
 }
 
 pub fn sleep(ticks: u64) {
-    let cpu_id = 0; // BSP
+    let cpu_id = get_current_cpu();
     let mut s = SCHED.lock();
     if let Some(cur_idx) = s.current[cpu_id] {
         let now = s.ticks;
@@ -243,7 +249,7 @@ pub fn sleep(ticks: u64) {
 }
 
 pub fn exit() -> ! {
-    let cpu_id = 0;
+    let cpu_id = get_current_cpu();
     let mut s = SCHED.lock();
     if let Some(cur_idx) = s.current[cpu_id] {
         s.tasks[cur_idx].state = TaskState::Terminated;
@@ -312,7 +318,7 @@ fn pick_next(s: &mut SchedState, cpu_id: usize) -> Option<usize> {
 }
 
 pub fn schedule() {
-    let cpu_id = 0;
+    let cpu_id = get_current_cpu();
     let mut s = SCHED.lock();
 
     let cur_idx_opt = s.current[cpu_id];
@@ -358,7 +364,7 @@ pub fn timer_tick() {
     let mut s = SCHED.lock();
     s.ticks += 1;
 
-    let cpu_id = 0;
+    let cpu_id = get_current_cpu();
     let mut needs_sched = false;
     if let Some(cur_idx) = s.current[cpu_id] {
         if s.tasks[cur_idx].ticks_remaining > 0 {

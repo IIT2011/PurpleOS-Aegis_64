@@ -27,13 +27,13 @@ extern "C" {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn smp_ap_entry() -> ! {
-    crate::arch::x86_64::gdt::init_ap();
+    let apic_id = crate::drivers::apic::get_id();
+    let cpu_id = ONLINE_CPUS.fetch_add(1, Ordering::SeqCst);
+
+    crate::arch::x86_64::gdt::init_ap(cpu_id as usize);
     crate::arch::x86_64::idt::load_idt();
     crate::kernel::syscall::init_ap();
     crate::drivers::apic::init_ap();
-
-    let apic_id = crate::drivers::apic::get_id();
-    let cpu_id = ONLINE_CPUS.fetch_add(1, Ordering::SeqCst);
 
     crate::drivers::serial::print("SMP: AP core #");
     crate::drivers::serial::print_u64(cpu_id as u64);

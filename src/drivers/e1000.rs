@@ -344,6 +344,7 @@ pub static E1000: Spinlock<E1000Device> = Spinlock::new(E1000Device::new());
 pub fn init() {
     if let Some(dev) = find_device(E1000_VENDOR_INTEL, E1000_DEV_82540EM) {
         let bar0 = (dev.bar0 & !0xF) as u64;
+        let _ = crate::mm::vmm::map_mmio_range(bar0, 128 * 1024);
         let mut nic = E1000.lock();
         if nic.init_hw(bar0).is_ok() {
             crate::drivers::serial::print("E1000: Intel 82540EM initialized (MAC: ");

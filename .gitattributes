@@ -4,7 +4,9 @@
 *.apdrv binary
 *.ttf binary
 
-# Language detection overrides
-*.rs linguist-detectable=true
-*.s linguist-detectable=true
-*.py linguist-detectable=true
+# Language detection and statistics
+*.rs linguist-detectable=true linguist-language=Rust
+*.s linguist-detectable=true linguist-language=Assembly
+scripts/** linguist-vendored=true
+Makefile linguist-vendored=true
+docs/** linguist-documentation=true

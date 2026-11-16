@@ -266,6 +266,7 @@ pub fn init() {
         engine.vendor_id = INTEL_PCI_VENDOR;
         engine.device_id = dev.device_id;
         engine.mmio_base = (dev.bar0 & !0xF) as usize;
+        let _ = crate::mm::vmm::map_mmio_range(engine.mmio_base as u64, 65536);
         engine.ring_buffer = ring_ptr as *mut u32;
         engine.ring_phys = ring_phys;
         engine.is_ready = true;
@@ -289,6 +290,7 @@ pub fn init() {
         engine.vendor_id = AMD_PCI_VENDOR;
         engine.device_id = dev.device_id;
         engine.mmio_base = (dev.bar0 & !0xF) as usize;
+        let _ = crate::mm::vmm::map_mmio_range(engine.mmio_base as u64, 65536);
         engine.ring_buffer = ring_ptr as *mut u32;
         engine.ring_phys = ring_phys;
         engine.is_ready = true;
@@ -312,6 +314,7 @@ pub fn init() {
         engine.vendor_id = NVIDIA_PCI_VENDOR;
         engine.device_id = dev.device_id;
         engine.mmio_base = (dev.bar0 & !0xF) as usize;
+        let _ = crate::mm::vmm::map_mmio_range(engine.mmio_base as u64, 65536);
         engine.ring_buffer = ring_ptr as *mut u32;
         engine.ring_phys = ring_phys;
         engine.is_ready = true;

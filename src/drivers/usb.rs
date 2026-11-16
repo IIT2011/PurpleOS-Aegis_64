@@ -269,6 +269,7 @@ pub fn init() {
 
     if let Some(dev) = xhci_pci {
         let bar0 = (dev.bar0 & !0xF) as u64;
+        let _ = crate::mm::vmm::map_mmio_range(bar0, 65536);
         let mut xhci = XHCI.lock();
         if xhci.init_hw(bar0).is_ok() {
             crate::drivers::serial::print("USB: xHCI USB 3.0 Host Controller online (Slots: ");

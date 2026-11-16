@@ -245,6 +245,7 @@ pub fn init() {
     // 1. Scan PCI for Bochs / QEMU Standard VGA (1234:1111)
     if let Some(dev) = find_device(GPU_VENDOR_BOCHS, GPU_DEV_BOCHS_VGA) {
         let bar0 = (dev.bar0 & !0xF) as u64;
+        let _ = crate::mm::vmm::map_mmio_range(bar0, 16 * 1024 * 1024);
         gpu.gpu_type = GpuType::BochsVga;
         gpu.vendor_id = GPU_VENDOR_BOCHS;
         gpu.device_id = GPU_DEV_BOCHS_VGA;

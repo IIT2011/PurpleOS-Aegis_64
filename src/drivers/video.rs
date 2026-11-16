@@ -22,6 +22,7 @@ pub struct VideoState {
     pub fg_color: u32,
     pub bg_color: u32,
     pub available: bool,
+    pub text_buf: [u8; 128 * 64],
 }
 
 unsafe impl Send for VideoState {}
@@ -37,6 +38,7 @@ pub static VIDEO: Spinlock<VideoState> = Spinlock::new(VideoState {
     fg_color: COLOR_WHITE,
     bg_color: COLOR_PURPLE_BG,
     available: false,
+    text_buf: [0; 128 * 64],
 });
 
 pub fn init(mbi: Option<&MultibootInfo>) {
@@ -101,6 +103,7 @@ pub fn clear_screen(color: u32) {
     if !v.available || v.fb_ptr.is_null() {
         return;
     }
+    v.text_buf.fill(0);
     let total_pixels = v.pitch * v.height;
     unsafe {
         for i in 0..total_pixels {
@@ -133,22 +136,35 @@ fn scroll_up(v: &mut VideoState) {
     if !v.available || v.fb_ptr.is_null() {
         return;
     }
-    let line_height = FONT_HEIGHT;
+    let max_cols = (v.width / FONT_WIDTH).min(128);
+    let max_rows = (v.height / FONT_HEIGHT).min(64);
+
+    // 1. Shift fast in-memory text buffer (L1 cache operation)
+    v.text_buf.copy_within(128..(max_rows * 128), 0);
+    v.text_buf[(max_rows - 1) * 128..max_rows * 128].fill(0);
+
+    // 2. Redraw text lines using pure write stream (no PCIe readback)
+    let fb_slice = unsafe { core::slice::from_raw_parts_mut(v.fb_ptr, v.pitch * v.height) };
+    let bg = v.bg_color;
+    let fg = v.fg_color;
     let pitch = v.pitch;
     let height = v.height;
 
-    unsafe {
-        // Shift lines up
-        let src = v.fb_ptr.add(line_height * pitch);
-        let dst = v.fb_ptr;
-        let count = (height - line_height) * pitch;
-        core::ptr::copy(src, dst, count);
-
-        // Clear bottom row
-        let bottom = v.fb_ptr.add((height - line_height) * pitch);
-        let bottom_count = line_height * pitch;
-        for i in 0..bottom_count {
-            *bottom.add(i) = v.bg_color;
+    for row in 0..max_rows {
+        let y = row * FONT_HEIGHT;
+        for col in 0..max_cols {
+            let ch = v.text_buf[row * 128 + col];
+            let x = col * FONT_WIDTH;
+            if ch != 0 {
+                draw_char(fb_slice, pitch, height, x, y, ch, fg, bg);
+            } else {
+                for py in 0..FONT_HEIGHT {
+                    let off = (y + py) * pitch + x;
+                    for px in 0..FONT_WIDTH {
+                        fb_slice[off + px] = bg;
+                    }
+                }
+            }
         }
     }
 }
@@ -173,6 +189,11 @@ pub fn putc(c: u8) {
         b'\x08' => { // Backspace
             if v.cursor_col > 0 {
                 v.cursor_col -= 1;
+                let cr = v.cursor_row;
+                let cc = v.cursor_col;
+                if cr < 64 && cc < 128 {
+                    v.text_buf[cr * 128 + cc] = 0;
+                }
                 let x = v.cursor_col * FONT_WIDTH;
                 let y = v.cursor_row * FONT_HEIGHT;
                 let pitch = v.pitch;
@@ -197,8 +218,14 @@ pub fn putc(c: u8) {
                 v.cursor_row = max_rows.saturating_sub(1);
             }
 
-            let x = v.cursor_col * FONT_WIDTH;
-            let y = v.cursor_row * FONT_HEIGHT;
+            let cur_row = v.cursor_row;
+            let cur_col = v.cursor_col;
+            if cur_row < 64 && cur_col < 128 {
+                v.text_buf[cur_row * 128 + cur_col] = c;
+            }
+
+            let x = cur_col * FONT_WIDTH;
+            let y = cur_row * FONT_HEIGHT;
             let fb_slice = unsafe { core::slice::from_raw_parts_mut(v.fb_ptr, v.pitch * v.height) };
             draw_char(fb_slice, v.pitch, v.height, x, y, c, v.fg_color, v.bg_color);
             v.cursor_col += 1;

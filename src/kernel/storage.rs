@@ -38,6 +38,7 @@ pub fn init() {
         // AHCI scan from PCI
         if let Some(dev) = crate::drivers::pci::find_device(0x8086, 0x2922) { // Intel ICH9 AHCI
             let bar5 = dev.bar5 as u64;
+            let _ = crate::mm::vmm::map_mmio_range(bar5, 0x1000);
             let ahci_ref = &mut *core::ptr::addr_of_mut!(AHCI0);
             if ahci_ref.init(bar5 as *mut u8).is_ok() {
                 crate::drivers::block_dev::register(ahci_ref);
@@ -48,6 +49,7 @@ pub fn init() {
         crate::drivers::pci::for_each_device(|dev| {
             if dev.class_id == 0x01 && dev.subclass_id == 0x08 { // Mass Storage, NVMe
                 let bar0 = dev.bar0 as u64;
+                let _ = crate::mm::vmm::map_mmio_range(bar0, 0x4000);
                 let nvme_ref = &mut *core::ptr::addr_of_mut!(NVME0);
                 if nvme_ref.init(bar0).is_ok() {
                     crate::drivers::block_dev::register(nvme_ref);

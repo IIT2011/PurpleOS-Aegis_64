@@ -6,7 +6,9 @@ pub const GDT_KERNEL_CS: u16 = 0x08;
 pub const GDT_KERNEL_DS: u16 = 0x10;
 pub const GDT_USER_DS: u16 = 0x1B; // 0x18 | 3
 pub const GDT_USER_CS: u16 = 0x23; // 0x20 | 3
-pub const GDT_TSS: u16 = 0x28;
+pub const GDT_TSS_BASE: u16 = 0x28;
+
+pub const MAX_GDT_CPUS: usize = 8;
 
 #[repr(C, packed)]
 #[derive(Copy, Clone, Default)]
@@ -34,13 +36,14 @@ pub struct GdtPointer {
     pub base: u64,
 }
 
+// 5 base entries + (2 entries * 8 CPUs) for 64-bit TSS descriptors = 21 entries
 #[repr(C, align(16))]
 pub struct GdtTable {
-    pub entries: [u64; 7],
+    pub entries: [u64; 5 + 2 * MAX_GDT_CPUS],
 }
 
-static mut GDT: GdtTable = GdtTable { entries: [0; 7] };
-static mut TSS: Tss64 = Tss64 {
+static mut GDT: GdtTable = GdtTable { entries: [0; 5 + 2 * MAX_GDT_CPUS] };
+static mut TSS_ARRAY: [Tss64; MAX_GDT_CPUS] = [Tss64 {
     reserved0: 0,
     rsp0: 0,
     rsp1: 0,
@@ -55,38 +58,49 @@ static mut TSS: Tss64 = Tss64 {
     ist7: 0,
     reserved2: 0,
     reserved3: 0,
-    iopb_offset: size_of::<Tss64>() as u16,
-};
+    iopb_offset: 104,
+}; MAX_GDT_CPUS];
+
 static mut GDT_PTR: GdtPointer = GdtPointer { limit: 0, base: 0 };
-static mut DEFAULT_STACK: [u8; 16384] = [0; 16384];
-static mut DOUBLE_FAULT_STACK: [u8; 8192] = [0; 8192];
+static mut DEFAULT_STACKS: [[u8; 16384]; MAX_GDT_CPUS] = [[0; 16384]; MAX_GDT_CPUS];
+static mut DOUBLE_FAULT_STACKS: [[u8; 8192]; MAX_GDT_CPUS] = [[0; 8192]; MAX_GDT_CPUS];
 
 pub fn init() {
     unsafe {
-        let tss_base = &raw const TSS as u64;
-        let tss_limit = (size_of::<Tss64>() - 1) as u64;
-
-        TSS.rsp0 = &raw const DEFAULT_STACK as u64 + 16384;
-        TSS.ist1 = &raw const DOUBLE_FAULT_STACK as u64 + 8192;
-        TSS.iopb_offset = size_of::<Tss64>() as u16;
-
+        // Base segments
         GDT.entries[0] = 0x0000000000000000; // Null
         GDT.entries[1] = 0x00AF9A000000FFFF; // Kernel CS 64-bit (DPL 0, Exec/Read, L=1)
         GDT.entries[2] = 0x00CF92000000FFFF; // Kernel DS 64-bit (DPL 0, Read/Write)
         GDT.entries[3] = 0x00CFF2000000FFFF; // User DS 64-bit (DPL 3, Read/Write)
         GDT.entries[4] = 0x00AFFA000000FFFF; // User CS 64-bit (DPL 3, Exec/Read, L=1)
 
-        // 16-byte TSS descriptor
-        let tss_low = (tss_limit & 0xFFFF)
-            | ((tss_base & 0xFFFF) << 16)
-            | (((tss_base >> 16) & 0xFF) << 32)
-            | (0x89u64 << 40) // Present, DPL 0, 64-bit TSS Available (type 9)
-            | (((tss_limit >> 16) & 0x0F) << 48)
-            | (((tss_base >> 24) & 0xFF) << 56);
-        let tss_high = tss_base >> 32;
+        let tss_limit = (size_of::<Tss64>() - 1) as u64;
 
-        GDT.entries[5] = tss_low;
-        GDT.entries[6] = tss_high;
+        // Populate per-CPU TSS descriptors
+        for cpu in 0..MAX_GDT_CPUS {
+            let tss_ptr = &raw mut TSS_ARRAY[cpu];
+            let default_stack_top = (&raw const DEFAULT_STACKS[cpu] as u64) + 16384;
+            let df_stack_top = (&raw const DOUBLE_FAULT_STACKS[cpu] as u64) + 8192;
+
+            (*tss_ptr).rsp0 = default_stack_top;
+            (*tss_ptr).ist1 = df_stack_top;
+            (*tss_ptr).iopb_offset = size_of::<Tss64>() as u16;
+
+            let tss_base = tss_ptr as u64;
+
+            // 16-byte TSS descriptor (Available 64-bit TSS type 9, Present)
+            let tss_low = (tss_limit & 0xFFFF)
+                | ((tss_base & 0xFFFF) << 16)
+                | (((tss_base >> 16) & 0xFF) << 32)
+                | (0x89u64 << 40)
+                | (((tss_limit >> 16) & 0x0F) << 48)
+                | (((tss_base >> 24) & 0xFF) << 56);
+            let tss_high = tss_base >> 32;
+
+            let entry_idx = 5 + cpu * 2;
+            GDT.entries[entry_idx] = tss_low;
+            GDT.entries[entry_idx + 1] = tss_high;
+        }
 
         GDT_PTR.limit = (size_of::<GdtTable>() - 1) as u16;
         GDT_PTR.base = &raw const GDT as u64;
@@ -95,7 +109,10 @@ pub fn init() {
     }
 }
 
-pub fn init_ap() {
+pub fn init_ap(cpu_id: usize) {
+    let cpu = cpu_id.min(MAX_GDT_CPUS - 1);
+    let tss_sel = (GDT_TSS_BASE + (cpu as u16 * 16)) as u16;
+
     unsafe {
         asm!("lgdt [{}]", in(reg) &raw const GDT_PTR, options(readonly, nostack, preserves_flags));
 
@@ -119,6 +136,13 @@ pub fn init_ap() {
             "mov fs, ax",
             "mov gs, ax",
             out("ax") _,
+            options(nomem, nostack, preserves_flags)
+        );
+
+        // Load per-CPU Task Register
+        asm!(
+            "ltr {0:x}",
+            in(reg) tss_sel,
             options(nomem, nostack, preserves_flags)
         );
     }
@@ -150,12 +174,6 @@ unsafe fn load_gdt_and_tr() {
         options(nomem, nostack, preserves_flags)
     );
 
-    // Load Task Register
-    asm!("ltr ax", in("ax") GDT_TSS, options(nomem, nostack, preserves_flags));
-}
-
-pub fn set_kernel_stack(rsp0: u64) {
-    unsafe {
-        TSS.rsp0 = rsp0;
-    }
+    // Load BSP Task Register (0x28)
+    asm!("ltr ax", in("ax") GDT_TSS_BASE, options(nomem, nostack, preserves_flags));
 }
