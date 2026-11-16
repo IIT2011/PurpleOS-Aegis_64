@@ -1,0 +1,10 @@
+# Purple OS / Aegis64 .gitattributes
+
+# Mark binary packages
+*.apdrv binary
+*.ttf binary
+
+# Language detection overrides
+*.rs linguist-detectable=true
+*.s linguist-detectable=true
+*.py linguist-detectable=true
