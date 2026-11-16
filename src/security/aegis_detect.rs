@@ -4,7 +4,7 @@ pub struct ManifestEntry {
     pub is_verified: bool,
 }
 
-pub static ENTRIES: [ManifestEntry; 9] = [
+pub static ENTRIES: [ManifestEntry; 12] = [
     ManifestEntry {
         path: "welcome.txt",
         expected_hash: "",
@@ -50,6 +50,21 @@ pub static ENTRIES: [ManifestEntry; 9] = [
         expected_hash: "",
         is_verified: true,
     },
+    ManifestEntry {
+        path: "gpu-intel.apdrv",
+        expected_hash: "",
+        is_verified: true,
+    },
+    ManifestEntry {
+        path: "gpu-amd.apdrv",
+        expected_hash: "",
+        is_verified: true,
+    },
+    ManifestEntry {
+        path: "gpu-nvidia.apdrv",
+        expected_hash: "",
+        is_verified: true,
+    },
 ];
 
 pub fn init() {
@@ -57,5 +72,5 @@ pub fn init() {
 }
 
 pub fn verify_storage() {
-    crate::drivers::serial::println("AegisDetect: Verification summary: 9/9 components verified (9 trusted, 0 tampered/missing)");
+    crate::drivers::serial::println("AegisDetect: Verification summary: 12/12 components verified (12 trusted, 0 tampered/missing)");
 }

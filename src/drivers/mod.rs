@@ -11,6 +11,7 @@ pub mod pci;
 pub mod block_dev;
 pub mod dma;
 pub mod gpu;
+pub mod gpu_accel;
 pub mod e1000;
 pub mod netdev;
 pub mod audio;

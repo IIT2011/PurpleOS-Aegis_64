@@ -10,6 +10,9 @@ static XHCI_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/xhci.apdrv");
 static HDAUDIO_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/hdaudio.apdrv");
 static BOCHS_GPU_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/bochs_gpu.apdrv");
 static R8139_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/r8139.apdrv");
+static GPU_INTEL_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-intel.apdrv");
+static GPU_AMD_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-amd.apdrv");
+static GPU_NVIDIA_BIN: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-nvidia.apdrv");
 
 pub struct PurpleFsV3<'a> {
     dev: &'a mut dyn BlockDevice,
@@ -52,6 +55,12 @@ impl<'a> PurpleFsV3<'a> {
             Some(10)
         } else if trimmed == "r8139.apdrv" || trimmed == "System/Drivers/r8139.apdrv" {
             Some(11)
+        } else if trimmed == "gpu-intel.apdrv" || trimmed == "System/Drivers/gpu-intel.apdrv" {
+            Some(12)
+        } else if trimmed == "gpu-amd.apdrv" || trimmed == "System/Drivers/gpu-amd.apdrv" {
+            Some(13)
+        } else if trimmed == "gpu-nvidia.apdrv" || trimmed == "System/Drivers/gpu-nvidia.apdrv" {
+            Some(14)
         } else {
             None
         }
@@ -68,6 +77,9 @@ impl<'a> PurpleFsV3<'a> {
             9 => HDAUDIO_BIN,
             10 => BOCHS_GPU_BIN,
             11 => R8139_BIN,
+            12 => GPU_INTEL_BIN,
+            13 => GPU_AMD_BIN,
+            14 => GPU_NVIDIA_BIN,
             _ => return 0,
         };
         let len = content.len().min(buf.len());

@@ -125,6 +125,7 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     drivers::rtl8139::init();
     drivers::audio::init();
     drivers::gpu::init();
+    drivers::gpu_accel::init();
     kernel::apdrv::init();
     kernel::apapp::init();
     kernel::apexec::init();
