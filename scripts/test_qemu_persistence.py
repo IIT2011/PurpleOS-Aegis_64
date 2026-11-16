@@ -8,7 +8,7 @@ import sys
 def run_qemu_session(disk_path, commands, timeout_sec=8):
     cmd = [
         "qemu-system-x86_64",
-        "-kernel", "build/kernel.elf",
+        "-kernel", "target/kernel.elf",
         "-serial", "stdio",
         "-display", "none",
         "-m", "256M",

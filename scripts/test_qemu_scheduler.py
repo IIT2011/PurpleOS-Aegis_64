@@ -7,7 +7,7 @@ def main():
     print("=== Launching AegisSched_64 Preemption Test ===")
     cmd = [
         "qemu-system-x86_64",
-        "-kernel", "build/kernel.elf",
+        "-kernel", "target/kernel.elf",
         "-serial", "stdio",
         "-display", "none",
         "-m", "256M",

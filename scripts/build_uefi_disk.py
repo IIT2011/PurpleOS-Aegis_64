@@ -427,7 +427,7 @@ menuentry "Purple OS / Aegis64" {
 }
 """
 
-    kernel_elf_data = open("build/kernel.elf", "rb").read()
+    kernel_elf_data = open("target/kernel.elf", "rb").read()
     bootx64_data = open("build/BOOTX64.EFI", "rb").read()
 
     files = {

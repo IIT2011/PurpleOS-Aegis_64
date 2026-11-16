@@ -30,7 +30,7 @@ def main():
         # 2. Launch QEMU with AHCI SATA and NVMe PCIe controllers
         cmd = [
             "qemu-system-x86_64",
-            "-kernel", "build/kernel.elf",
+            "-kernel", "target/kernel.elf",
             "-serial", "stdio",
             "-display", "none",
             "-m", "256M",

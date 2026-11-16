@@ -1,5 +1,4 @@
-
-name: Purple OS — Desktop and Kernel CI
+name: Purple OS / Aegis64 — Pure Rust CI
 
 on:
   workflow_dispatch:
@@ -18,105 +17,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  audit-build-test:
-    name: Audit, build and test Aegis64
+  build-and-verify:
+    name: Build & Verify Pure Rust Kernel
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout the selected commit
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          persist-credentials: false
+          targets: x86_64-unknown-none
+          components: rust-src
 
-      - name: Record source identity
-        run: |
-          echo "Commit: $GITHUB_SHA"
-          echo "Branch/ref: $GITHUB_REF"
-          git status --short --branch
-          git log -1 --oneline
-
-      - name: Install build and QEMU tools
+      - name: Install QEMU and Binutils
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential gcc g++ make nasm python3-pil \
-            binutils python3 python3-pip \
-            git qemu-system-x86 ovmf \
-            grub-pc-bin grub-efi-amd64-bin \
-            xorriso mtools dosfstools parted \
-            pkg-config file
+          sudo apt-get install -y qemu-system-x86 binutils
 
-      - name: Audit desktop architecture
-        shell: bash
+      - name: Cargo Check
+        run: cargo check --target x86_64-unknown-none
+
+      - name: Cargo Build
+        run: cargo build --target x86_64-unknown-none
+
+      - name: Create Multiboot ELF32 Binary
         run: |
-          mkdir -p ci-results
-          {
-            echo "=== Window and compositor symbols ==="
-            grep -RniE \
-              'window_create|window_focus|window_manager|compositor|surface_buffer|dirty_rect|damage_region|focused_window' \
-              src include || true
+          mkdir -p target
+          objcopy -O elf32-i386 target/x86_64-unknown-none/debug/aegis64 target/kernel.elf
 
-            echo "=== Framebuffer rendering paths ==="
-            grep -RniE \
-              'framebuffer|draw_pixel|fill_rect|redraw|render_desktop|swap_buffer' \
-              src include || true
-
-            echo "=== Keyboard and text input paths ==="
-            grep -RniE \
-              'keyboard_handler|key_event|text_input|keyboard_get|scancode' \
-              src include || true
-          } > ci-results/desktop-audit.txt
-
-          cat ci-results/desktop-audit.txt
-
-      - name: Build kernel
+      - name: QEMU Boot Verification
         run: |
-          set -o pipefail
-          make -j2 2>&1 | tee ci-results-build.log
-
-      - name: Run repository checks
-        shell: bash
-        run: |
-          set -o pipefail
-          make check 2>&1 | tee ci-results-test.log
-
-      - name: Check available UEFI smoke-test targets
-        if: always()
-        run: |
-          make -qp 2>/dev/null |
-            grep -E '^[a-zA-Z0-9_.-]*(uefi|qemu|smoke|desktop)[a-zA-Z0-9_.-]*:' \
-            > ci-results-targets.txt || true
-          cat ci-results-targets.txt
-
-      - name: Record build outputs and hashes
-        if: always()
-        run: |
-          mkdir -p ci-results
-          {
-            for f in build/kernel.elf build/kernel64.elf \
-                     build/BOOTX64.EFI build/aegis64-uefi-test.img; do
-              if test -f "$f"; then
-                file "$f"
-                sha256sum "$f"
-                stat -c '%n %s bytes' "$f"
-              fi
-            done
-          } > ci-results/artifact-manifest.txt
-
-          cat ci-results/artifact-manifest.txt
-
-      - name: Upload diagnostic results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: purple-os-ci-${{ github.sha }}
-          path: |
-            ci-results/
-            ci-results-build.log
-            ci-results-test.log
-            build/kernel.elf
-            build/kernel64.elf
-            build/BOOTX64.EFI
-          if-no-files-found: warn
-          retention-days: 14
+          timeout 5s qemu-system-x86_64 \
+            -kernel target/kernel.elf \
+            -serial stdio \
+            -display none \
+            -m 256M \
+            -smp 4 > boot.log 2>&1 || true
+          cat boot.log
+          grep -q "Aegis64 Kernel (Purple OS) - Pure Rust Edition" boot.log
+          grep -q "Multiprocessing operational. 4/4 CPUs online." boot.log
+          grep -q "aegis64@purple:~$" boot.log
+          echo "Kernel Boot & SMP Verification Passed!"

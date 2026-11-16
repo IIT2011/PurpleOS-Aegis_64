@@ -16,7 +16,7 @@ import time
 import subprocess
 
 def run_smp_test():
-    kernel_path = "build/kernel.elf"
+    kernel_path = "target/kernel.elf"
     if not os.path.exists(kernel_path):
         print(f"Error: {kernel_path} not found. Run 'make all' first.")
         sys.exit(1)

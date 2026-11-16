@@ -22,7 +22,7 @@ def main():
         # 2. Launch QEMU with disposable disk attached to IDE controller (index 1 = Primary Slave)
         cmd = [
             "qemu-system-x86_64",
-            "-kernel", "build/kernel.elf",
+            "-kernel", "target/kernel.elf",
             "-serial", "stdio",
             "-display", "none",
             "-m", "256M",

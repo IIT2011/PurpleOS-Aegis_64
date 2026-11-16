@@ -288,7 +288,7 @@ def verify_with_qemu(image_path: str):
     print("=== Launching QEMU to verify Aegis64 GPT & PurpleFS detection on 300 MiB layout ===")
     cmd = [
         "qemu-system-x86_64",
-        "-kernel", "build/kernel.elf",
+        "-kernel", "target/kernel.elf",
         "-serial", "stdio",
         "-display", "none",
         "-m", "512M",
