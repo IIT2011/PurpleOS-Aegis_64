@@ -97,7 +97,7 @@ Purple OS implements strict principle-of-least-privilege capability bits:
 | :--- | :---: | :--- |
 | `APAPP_PERM_CONSOLE` | `0x00000001` | Allows standard console I/O (`printf`, `kinfo`, interactive stdin/stdout). |
 | `APAPP_PERM_GUI` | `0x00000002` | Permits creation and management of graphical desktop windows via `desktop_create_window()`. |
-| `APAPP_PERM_STORAGE` | `0x00000004` | Grants read/write access to user files on PurpleFS (`/Users/`, `/System/Data/`). |
+| `APAPP_PERM_STORAGE` | `0x00000004` | Grants read/write access to user files on PurpleFS (`/System/Users/`, `/System/Data/`). |
 | `APAPP_PERM_NETWORK` | `0x00000008` | Grants network access (raw packets, socket communication via netdev). |
 | `APAPP_PERM_SYSADMIN`| `0x00000010` | Privileged operations (modifying system drivers, reboot, low-level hardware access). |
 
@@ -125,7 +125,10 @@ If the computed HMAC does not match `manifest.hmac_signature`, the kernel logs a
 
 ## 6. Application Lifecycle
 
-1. **Discovery:** Applications are located in `/Applications/` or `/System/Applications/`.
+1. **Discovery & Storage Location:**
+   - **Core System Applications:** Located strictly in `/System/Applications/` (e.g. `PurpleTerminal.apapplication`, `PurpleFiles.apapplication`, `PurpleSettings.apapplication`). Note: `/System/Kernel/Applications` is invalid and must never exist.
+   - **User-Installed Applications:** Located in `/System/Users/<user>/Applications/` (e.g. `/System/Users/aegis/Applications/VLC.apapplication`).
+   - The application manager searches `/System/Applications/` followed by `/System/Users/<current_user>/Applications/`.
 2. **Inspection:** `apapp_parse_manifest()` reads and validates the header, checking magic, version, and section boundaries.
 3. **Security Audit:** `apapp_verify_security()` evaluates the HMAC-SHA256 signature against the trust anchor.
 4. **Task Instantiation:** `apapp_launch()` spawns an AegisSched task with the specified priority and name.

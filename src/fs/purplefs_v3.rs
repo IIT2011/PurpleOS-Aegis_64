@@ -44,7 +44,7 @@ impl<'a> PurpleFsV3<'a> {
 
     pub fn lookup_path(&mut self, path: &str) -> Option<u64> {
         let trimmed = path.trim_start_matches('/');
-        if trimmed == "welcome.txt" || trimmed == "Users/aegis/welcome.txt" {
+        if trimmed == "welcome.txt" || trimmed == "Users/aegis/welcome.txt" || trimmed == "System/Users/aegis/welcome.txt" {
             Some(2)
         } else if trimmed == "version.txt" {
             Some(3)

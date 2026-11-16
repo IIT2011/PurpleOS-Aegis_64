@@ -99,7 +99,7 @@ $$512\text{ GiB} + 1\text{ GiB} + 2\text{ MiB} + 48\text{ KiB} = \mathbf{513\tex
 #### Realizable Maximum File Size vs. Theoretical Partition Bound:
 The figure $\text{usable\_data\_blocks} \times 4096$ ($7,722,256 \times 4096 \approx \mathbf{29.458\text{ GiB}}$ on Partition 2) represents an **absolute theoretical upper bound**, NOT a guaranteed realizable single-file size:
 1. **Indirect Pointer Blocks Consume Data Blocks:** Large files consume additional blocks from the volume's data pool to store single, double, and triple indirect pointer tables. For example, a 1 GiB file consumes 513 metadata pointer blocks; a multi-gigabyte file consumes thousands of pointer blocks.
-2. **FileSystem Overhead & Multi-File Coexistence:** Directory tables, inodes, journal entries, and other files in `/System`, `/Boot`, `/Applications`, and `/Users` consume blocks from the same volume.
+2. **FileSystem Overhead & Multi-File Coexistence:** Directory tables, inodes, journal entries, and other files in `/System`, `/Boot`, `/System/Applications`, and `/System/Users` consume blocks from the same volume.
 3. **Allocation Model Enforcement:** The future driver implementation must dynamically calculate and enforce the realizable maximum file size based on actual free block availability and the allocation model at runtime. We explicitly do not invent an artificial speculative realizable figure before that allocation model is defined.
 
 ---
