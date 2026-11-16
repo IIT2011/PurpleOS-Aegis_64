@@ -215,12 +215,8 @@ impl Shell {
                 serial::println("  Hash Engine:   SHA-256 / HMAC-SHA256");
                 serial::println("  Verification:  12/12 components verified (12 trusted, 0 tampered/missing)\n");
             }
-            "devices" => {
-                serial::println("\nPurpleDetect Hardware & Removable Device Registry:");
-                serial::println("  COM1:    16550A UART Serial [Port 0x3F8, IRQ 4]");
-                serial::println("  PS2KBD:  Standard 101/104-Key PS/2 Keyboard [IRQ 1]");
-                serial::println("  PS2MOU:  PS/2 Auxiliary Mouse Device [IRQ 12]");
-                serial::println("  ATA_PRI: Legacy IDE Primary Bus Controller [Port 0x1F0, IRQ 14]\n");
+            "devices" | "hwinfo" => {
+                crate::drivers::purple_detect::print_table();
             }
             "lspci" => {
                 serial::println("\nPCI Bus Device Inventory:");

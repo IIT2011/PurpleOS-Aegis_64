@@ -305,7 +305,6 @@ pub fn switch_pml4(pml4: *mut PageTable) {
 
 /// Identity-maps a physical MMIO aperture with Cache-Disable and Write-Through attributes
 pub fn map_mmio_range(paddr: u64, size: usize) -> Result<(), &'static str> {
-    let _guard = VMM_LOCK.lock();
     unsafe {
         let pml4 = KERNEL_PML4;
         if pml4.is_null() {
