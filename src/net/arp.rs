@@ -117,10 +117,10 @@ pub fn update_arp_cache(ip: [u8; 4], mac: [u8; 6]) {
 }
 
 pub fn send_arp_request(target_ip: [u8; 4]) -> Result<(), &'static str> {
-    if !crate::drivers::e1000::is_ready() {
-        return Err("No active Ethernet NIC");
-    }
-    let my_mac = crate::drivers::e1000::get_mac();
+    let my_mac = match crate::net::get_my_mac() {
+        Some(m) => m,
+        None => return Err("No active Ethernet NIC"),
+    };
     let my_ip = crate::net::get_ip();
 
     let arp_req = ArpPacket {

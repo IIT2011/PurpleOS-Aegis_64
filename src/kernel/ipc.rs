@@ -55,7 +55,7 @@ impl Pipe {
             if self.writers_count == 0 {
                 return Ok(0);
             }
-            return Ok(0);
+            return Err(-crate::kernel::posix::EAGAIN);
         }
 
         let mut read_bytes = 0;
@@ -168,4 +168,11 @@ pub fn pipe_close_legacy(id: usize) {
 pub fn pipe_close(id: usize) {
     pipe_close_reader(id);
     pipe_close_writer(id);
+}
+
+pub fn destroy_pipe(id: usize) {
+    let mut reg = PIPE_REGISTRY.lock();
+    if id < MAX_PIPES {
+        reg[id] = None;
+    }
 }

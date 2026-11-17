@@ -245,3 +245,16 @@ pub fn print_table() {
     }
     serial::println("  --------------------------------------------------------------------------------\n");
 }
+
+pub fn get_device_count() -> usize {
+    REGISTRY.lock().count
+}
+
+pub fn get_device(index: usize) -> Option<PurpleDevice> {
+    let reg = REGISTRY.lock();
+    if index < reg.count {
+        Some(reg.devices[index])
+    } else {
+        None
+    }
+}

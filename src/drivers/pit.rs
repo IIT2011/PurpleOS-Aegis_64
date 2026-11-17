@@ -67,3 +67,22 @@ pub fn delay_ms(ms: u64) {
         delay_us(1000);
     }
 }
+
+pub fn play_tone(freq_hz: u32, duration_ms: u32) {
+    if freq_hz == 0 || freq_hz > 20000 {
+        return;
+    }
+    let divisor = (PIT_BASE_FREQ / freq_hz) as u16;
+    unsafe {
+        outb(PIT_COMMAND, 0xB6); // Channel 2, square wave
+        outb(PIT_CHANNEL2, (divisor & 0xFF) as u8);
+        outb(PIT_CHANNEL2, ((divisor >> 8) & 0xFF) as u8);
+        let val = inb(0x61);
+        outb(0x61, val | 0x03);
+    }
+    delay_ms(duration_ms as u64);
+    unsafe {
+        let val = inb(0x61);
+        outb(0x61, val & !0x03);
+    }
+}

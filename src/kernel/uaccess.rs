@@ -116,14 +116,16 @@ pub fn copy_str_from_user(user_src: u64, kernel_dst: &mut [u8]) -> Result<usize,
     let mut curr_ptr = user_src;
 
     while copied < max_len {
-        let page = curr_ptr & !0xFFF;
-        match vmm::get_mapping(pml4, page) {
-            Some((_paddr, flags)) => {
-                if (flags & PAGE_PRESENT) == 0 || (flags & PAGE_USER) == 0 {
-                    return Err(-EFAULT);
+        if copied == 0 || (curr_ptr & 0xFFF) == 0 {
+            let page = curr_ptr & !0xFFF;
+            match vmm::get_mapping(pml4, page) {
+                Some((_paddr, flags)) => {
+                    if (flags & PAGE_PRESENT) == 0 || (flags & PAGE_USER) == 0 {
+                        return Err(-EFAULT);
+                    }
                 }
+                None => return Err(-EFAULT),
             }
-            None => return Err(-EFAULT),
         }
 
         let b = unsafe { core::ptr::read_volatile(curr_ptr as *const u8) };

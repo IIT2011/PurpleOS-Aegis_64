@@ -11,6 +11,9 @@ pub const COLOR_GRAY: u32 = 0x888888;
 pub const COLOR_RED: u32 = 0xFF3333;
 pub const COLOR_GREEN: u32 = 0x33FF33;
 
+pub const VIDEO_MAX_COLS: usize = 128;
+pub const VIDEO_MAX_ROWS: usize = 64;
+
 pub struct VideoState {
     pub fb_ptr: *mut u32,
     pub width: usize,
@@ -22,7 +25,7 @@ pub struct VideoState {
     pub fg_color: u32,
     pub bg_color: u32,
     pub available: bool,
-    pub text_buf: [u8; 128 * 64],
+    pub text_buf: [u8; VIDEO_MAX_COLS * VIDEO_MAX_ROWS],
 }
 
 unsafe impl Send for VideoState {}
@@ -149,10 +152,10 @@ fn scroll_up(v: &mut VideoState) {
         }
     }
 
-    let max_rows = (v.height / FONT_HEIGHT).min(64);
+    let max_rows = (v.height / FONT_HEIGHT).min(VIDEO_MAX_ROWS);
     if max_rows > 1 {
-        v.text_buf.copy_within(128..(max_rows * 128), 0);
-        v.text_buf[(max_rows - 1) * 128..max_rows * 128].fill(0);
+        v.text_buf.copy_within(VIDEO_MAX_COLS..(max_rows * VIDEO_MAX_COLS), 0);
+        v.text_buf[(max_rows - 1) * VIDEO_MAX_COLS..max_rows * VIDEO_MAX_COLS].fill(0);
     }
 }
 
@@ -173,8 +176,8 @@ fn putc_inner(v: &mut VideoState, c: u8) {
                 v.cursor_col -= 1;
                 let cr = v.cursor_row;
                 let cc = v.cursor_col;
-                if cr < 64 && cc < 128 {
-                    v.text_buf[cr * 128 + cc] = 0;
+                if cr < VIDEO_MAX_ROWS && cc < VIDEO_MAX_COLS {
+                    v.text_buf[cr * VIDEO_MAX_COLS + cc] = 0;
                 }
                 let x = v.cursor_col * FONT_WIDTH;
                 let y = v.cursor_row * FONT_HEIGHT;
@@ -256,4 +259,91 @@ pub fn get_width() -> usize {
 
 pub fn get_height() -> usize {
     VIDEO.lock().height
+}
+
+pub fn get_fb_info() -> Option<(usize, usize, usize, usize, u64)> {
+    let v = VIDEO.lock();
+    if v.available && !v.fb_ptr.is_null() {
+        Some((v.width, v.height, v.pitch, v.bpp, v.fb_ptr as u64))
+    } else {
+        None
+    }
+}
+
+pub fn blit_rect(src: &[u32], dst_x: usize, dst_y: usize, w: usize, h: usize, src_pitch: usize) -> usize {
+    let v = VIDEO.lock();
+    if !v.available || v.fb_ptr.is_null() || w == 0 || h == 0 || src_pitch == 0 {
+        return 0;
+    }
+    if dst_x >= v.width || dst_y >= v.height {
+        return 0;
+    }
+    let copy_w = w.min(v.width - dst_x);
+    let copy_h = h.min(v.height - dst_y);
+
+    let mut pixels_blitted = 0usize;
+    unsafe {
+        for row in 0..copy_h {
+            let src_offset = match row.checked_mul(src_pitch) {
+                Some(off) => off,
+                None => break,
+            };
+            if match src_offset.checked_add(copy_w) {
+                Some(end) => end > src.len(),
+                None => true,
+            } {
+                break;
+            }
+            let dst_offset = (dst_y + row) * v.pitch + dst_x;
+            core::ptr::copy_nonoverlapping(
+                src.as_ptr().add(src_offset),
+                v.fb_ptr.add(dst_offset),
+                copy_w,
+            );
+            pixels_blitted = pixels_blitted.saturating_add(copy_w);
+        }
+    }
+    pixels_blitted
+}
+
+pub fn draw_line(mut x0: usize, mut y0: usize, x1: usize, y1: usize, color: u32) {
+    let v = VIDEO.lock();
+    if !v.available || v.fb_ptr.is_null() {
+        return;
+    }
+    let pitch = v.pitch;
+    let width = v.width;
+    let height = v.height;
+
+    let dx = if x1 >= x0 { (x1 - x0) as isize } else { -((x0 - x1) as isize) };
+    let dy = if y1 >= y0 { -((y1 - y0) as isize) } else { (y0 - y1) as isize };
+    let sx: isize = if x0 < x1 { 1 } else { -1 };
+    let sy: isize = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+
+    unsafe {
+        loop {
+            if x0 < width && y0 < height {
+                *v.fb_ptr.add(y0 * pitch + x0) = color;
+            }
+            if x0 == x1 && y0 == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x0 = match (x0 as isize).checked_add(sx) {
+                    Some(nx) if nx >= 0 => nx as usize,
+                    _ => break,
+                };
+            }
+            if e2 <= dx {
+                err += dx;
+                y0 = match (y0 as isize).checked_add(sy) {
+                    Some(ny) if ny >= 0 => ny as usize,
+                    _ => break,
+                };
+            }
+        }
+    }
 }

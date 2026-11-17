@@ -80,16 +80,16 @@ fn print_core_msg(prefix: &str, cpu_id: u32, apic_id: u32, suffix: &str) {
 pub extern "C" fn smp_ap_entry() -> ! {
     let apic_id = crate::drivers::apic::get_id();
     let cpu_id = get_cpu_id();
-    let _ = ONLINE_CPUS.fetch_add(1, Ordering::SeqCst);
 
     crate::arch::x86_64::gdt::init_ap(cpu_id);
     crate::arch::x86_64::idt::load_idt();
     crate::kernel::syscall::init_ap(cpu_id);
     crate::drivers::apic::init_ap();
+    crate::kernel::task::init_ap(cpu_id);
 
     print_core_msg("SMP: AP core #", cpu_id as u32, apic_id, "started and operational");
 
-    crate::kernel::task::init_ap(cpu_id);
+    let _ = ONLINE_CPUS.fetch_add(1, Ordering::SeqCst);
 
     sti();
 
@@ -107,6 +107,9 @@ pub fn init() {
             APIC_TO_CPU_MAP[apic as usize] = idx as u8;
         }
     }
+
+    crate::arch::x86_64::idt::register_handler(LAPIC_IPI_RESCHED as usize, on_resched_ipi);
+    crate::arch::x86_64::idt::register_handler(LAPIC_IPI_HALT as usize, on_halt_ipi);
 
     if total_cpus <= 1 {
         crate::drivers::serial::println("SMP: Uniprocessor system detected (1 core)");
@@ -186,21 +189,30 @@ pub fn init() {
 
     let online = ONLINE_CPUS.load(Ordering::SeqCst) as u64;
     let total = total_cpus as u64;
-    let mut msg = [0u8; 64];
-    let prefix = b"SMP: Multiprocessing operational. ";
-    msg[..prefix.len()].copy_from_slice(prefix);
-    let mut idx = prefix.len();
-    msg[idx] = b'0' + (online as u8);
-    idx += 1;
-    msg[idx] = b'/';
-    idx += 1;
-    msg[idx] = b'0' + (total as u8);
-    idx += 1;
-    let suffix = b" CPUs online.";
-    msg[idx..idx + suffix.len()].copy_from_slice(suffix);
-    idx += suffix.len();
-    if let Ok(s) = core::str::from_utf8(&msg[..idx]) {
-        crate::drivers::serial::println(s);
+    let mut msg_buf = [0u8; 64];
+    let mut mlen = 0;
+    let p = b"SMP: Multiprocessing operational. ";
+    msg_buf[mlen..mlen + p.len()].copy_from_slice(p);
+    mlen += p.len();
+    if online >= 10 {
+        msg_buf[mlen] = b'0' + ((online / 10) as u8);
+        mlen += 1;
+    }
+    msg_buf[mlen] = b'0' + ((online % 10) as u8);
+    mlen += 1;
+    msg_buf[mlen] = b'/';
+    mlen += 1;
+    if total >= 10 {
+        msg_buf[mlen] = b'0' + ((total / 10) as u8);
+        mlen += 1;
+    }
+    msg_buf[mlen] = b'0' + ((total % 10) as u8);
+    mlen += 1;
+    let s = b" CPUs online.";
+    msg_buf[mlen..mlen + s.len()].copy_from_slice(s);
+    mlen += s.len();
+    if let Ok(st) = core::str::from_utf8(&msg_buf[..mlen]) {
+        crate::drivers::serial::println(st);
     }
 }
 
@@ -208,8 +220,25 @@ pub fn get_online_count() -> u32 {
     ONLINE_CPUS.load(Ordering::Relaxed)
 }
 
+fn on_resched_ipi(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
+    crate::kernel::task::schedule();
+}
+
+fn on_halt_ipi(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
+    loop {
+        crate::arch::x86_64::cpu::cli();
+        crate::arch::x86_64::cpu::hlt();
+    }
+}
+
 pub fn broadcast_resched() {
     if get_online_count() > 1 {
         send_ipi(0, ICR_DELIV_FIXED | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_ALL_EXC_SELF | (LAPIC_IPI_RESCHED as u32));
+    }
+}
+
+pub fn broadcast_halt() {
+    if get_online_count() > 1 {
+        send_ipi(0, ICR_DELIV_FIXED | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_ALL_EXC_SELF | (LAPIC_IPI_HALT as u32));
     }
 }

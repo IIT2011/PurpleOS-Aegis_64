@@ -242,17 +242,27 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
 
         // Apply relocations
         if hdr.reloc_count > 0 && hdr.reloc_offset > 0 {
-            let reloc_size = (hdr.reloc_count as usize)
-                .checked_mul(core::mem::size_of::<ApdrvReloc>())
-                .ok_or("Relocation table size calculation overflow")?;
+            let reloc_size = match (hdr.reloc_count as usize).checked_mul(core::mem::size_of::<ApdrvReloc>()) {
+                Some(s) => s,
+                None => {
+                    let _ = crate::mm::pmm::free_frames(base_phys, total_pages);
+                    return Err("Relocation table size calculation overflow");
+                }
+            };
             if (hdr.reloc_offset as usize + reloc_size) > image.len() {
+                let _ = crate::mm::pmm::free_frames(base_phys, total_pages);
                 return Err("Relocation table outside image bounds");
             }
             if hdr.import_count > 0 && hdr.import_offset > 0 {
-                let import_size = (hdr.import_count as usize)
-                    .checked_mul(core::mem::size_of::<ApdrvSymbol>())
-                    .ok_or("Import table size calculation overflow")?;
+                let import_size = match (hdr.import_count as usize).checked_mul(core::mem::size_of::<ApdrvSymbol>()) {
+                    Some(s) => s,
+                    None => {
+                        let _ = crate::mm::pmm::free_frames(base_phys, total_pages);
+                        return Err("Import table size calculation overflow");
+                    }
+                };
                 if (hdr.import_offset as usize + import_size) > image.len() {
+                    let _ = crate::mm::pmm::free_frames(base_phys, total_pages);
                     return Err("Import table outside image bounds");
                 }
             }
@@ -261,6 +271,7 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
             for i in 0..hdr.reloc_count as usize {
                 let r = core::ptr::read_unaligned(reloc_start.add(i));
                 if (r.offset as usize + 8) > total_pages * PAGE_SIZE {
+                    let _ = crate::mm::pmm::free_frames(base_phys, total_pages);
                     return Err("Relocation offset exceeds module memory bounds");
                 }
                 let target_ptr = (base_addr + r.offset as usize) as *mut u8;
@@ -396,6 +407,7 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
         }
     }
 
+    let _ = crate::mm::pmm::free_frames(base_phys, total_pages);
     Err("Module registry full (maximum 16 loaded modules)")
 }
 

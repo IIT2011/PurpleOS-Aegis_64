@@ -152,9 +152,25 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             (*pdpt).entries.fill(0);
             (*pml4).entries[pml4_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
         } else {
-            pdpt = ((*pml4).entries[pml4_i] & ENTRY_ADDR_MASK) as *mut PageTable;
-            if (flags & PAGE_USER) != 0 {
-                (*pml4).entries[pml4_i] |= PAGE_USER;
+            let curr_pdpt_entry = (*pml4).entries[pml4_i];
+            let curr_pdpt_addr = curr_pdpt_entry & ENTRY_ADDR_MASK;
+
+            // If modifying user space and pointing to shared kernel PDPT, unshare it by cloning
+            if (flags & PAGE_USER) != 0
+                && !KERNEL_PML4.is_null()
+                && pml4 != KERNEL_PML4
+                && curr_pdpt_addr == ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK)
+            {
+                let frame = alloc_frame().ok_or("Out of memory cloning PDPT")?;
+                let new_pdpt = frame as *mut PageTable;
+                core::ptr::copy_nonoverlapping(curr_pdpt_addr as *const u8, new_pdpt as *mut u8, PAGE_SIZE);
+                (*pml4).entries[pml4_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
+                pdpt = new_pdpt;
+            } else {
+                pdpt = curr_pdpt_addr as *mut PageTable;
+                if (flags & PAGE_USER) != 0 {
+                    (*pml4).entries[pml4_i] |= PAGE_USER;
+                }
             }
         }
 
@@ -165,9 +181,33 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             (*pd).entries.fill(0);
             (*pdpt).entries[pdpt_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
         } else {
-            pd = ((*pdpt).entries[pdpt_i] & ENTRY_ADDR_MASK) as *mut PageTable;
-            if (flags & PAGE_USER) != 0 {
-                (*pdpt).entries[pdpt_i] |= PAGE_USER;
+            let curr_pd_entry = (*pdpt).entries[pdpt_i];
+            let curr_pd_addr = curr_pd_entry & ENTRY_ADDR_MASK;
+
+            // If modifying user space and pointing to shared kernel PD, unshare it by cloning
+            let kernel_pd_addr = if !KERNEL_PML4.is_null() && ((*KERNEL_PML4).entries[pml4_i] & PAGE_PRESENT) != 0 {
+                let k_pdpt = ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK) as *const PageTable;
+                (*k_pdpt).entries[pdpt_i] & ENTRY_ADDR_MASK
+            } else {
+                0
+            };
+
+            if (flags & PAGE_USER) != 0
+                && !KERNEL_PML4.is_null()
+                && pml4 != KERNEL_PML4
+                && kernel_pd_addr != 0
+                && curr_pd_addr == kernel_pd_addr
+            {
+                let frame = alloc_frame().ok_or("Out of memory cloning PD")?;
+                let new_pd = frame as *mut PageTable;
+                core::ptr::copy_nonoverlapping(curr_pd_addr as *const u8, new_pd as *mut u8, PAGE_SIZE);
+                (*pdpt).entries[pdpt_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
+                pd = new_pd;
+            } else {
+                pd = curr_pd_addr as *mut PageTable;
+                if (flags & PAGE_USER) != 0 {
+                    (*pdpt).entries[pdpt_i] |= PAGE_USER;
+                }
             }
         }
 
@@ -218,13 +258,14 @@ pub fn unmap_page(pml4: *mut PageTable, vaddr: u64) -> Result<(), &'static str> 
         }
         let pd = ((*pdpt).entries[pdpt_i] & ENTRY_ADDR_MASK) as *mut PageTable;
 
+        if ((*pd).entries[pd_i] & PAGE_PRESENT) == 0 {
+            return Err("Not mapped");
+        }
+
         if ((*pd).entries[pd_i] & PAGE_HUGE) != 0 {
             split_huge_page(pml4, vaddr)?;
         }
 
-        if ((*pd).entries[pd_i] & PAGE_PRESENT) == 0 {
-            return Err("Not mapped");
-        }
         let pt = ((*pd).entries[pd_i] & ENTRY_ADDR_MASK) as *mut PageTable;
 
         if ((*pt).entries[pt_i] & PAGE_PRESENT) == 0 {
@@ -259,15 +300,16 @@ pub fn get_mapping(pml4: *mut PageTable, vaddr: u64) -> Option<(u64, u64)> {
         }
         let pd = ((*pdpt).entries[pdpt_i] & ENTRY_ADDR_MASK) as *mut PageTable;
 
+        if ((*pd).entries[pd_i] & PAGE_PRESENT) == 0 {
+            return None;
+        }
+
         if ((*pd).entries[pd_i] & PAGE_HUGE) != 0 {
             let paddr = ((*pd).entries[pd_i] & 0x000F_FFFF_FFE0_0000) + (vaddr & 0x1F_FFFF);
             let flags = (*pd).entries[pd_i] & (0xFFF | PAGE_NO_EXECUTE);
             return Some((paddr, flags));
         }
 
-        if ((*pd).entries[pd_i] & PAGE_PRESENT) == 0 {
-            return None;
-        }
         let pt = ((*pd).entries[pd_i] & ENTRY_ADDR_MASK) as *mut PageTable;
 
         if ((*pt).entries[pt_i] & PAGE_PRESENT) == 0 {
@@ -368,5 +410,93 @@ pub fn free_user_range(pml4: *mut PageTable, start: u64, end: u64) {
             Some(next) => next,
             None => break,
         };
+    }
+}
+
+/// Safely dismantles a user process's PML4 and frees all private page tables (PT, PD, PDPT)
+/// and the top-level PML4 frame back to the Physical Memory Manager.
+pub fn destroy_pml4(pml4: *mut PageTable) {
+    if pml4.is_null() || pml4 == unsafe { KERNEL_PML4 } {
+        return;
+    }
+
+    let _guard = VMM_LOCK.lock();
+
+    unsafe {
+        // Only inspect user PML4 entries (0..256)
+        for pml4_i in 0..256 {
+            let pml4_entry = (*pml4).entries[pml4_i];
+            if (pml4_entry & PAGE_PRESENT) == 0 {
+                continue;
+            }
+
+            let pdpt_addr = pml4_entry & ENTRY_ADDR_MASK;
+            if pdpt_addr == 0 {
+                continue;
+            }
+
+            // If entry points to kernel's master PDPT, do not free it
+            if !KERNEL_PML4.is_null() && pdpt_addr == ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK) {
+                continue;
+            }
+
+            let pdpt = pdpt_addr as *mut PageTable;
+
+            for pdpt_i in 0..512 {
+                let pdpt_entry = (*pdpt).entries[pdpt_i];
+                if (pdpt_entry & PAGE_PRESENT) == 0 || (pdpt_entry & PAGE_HUGE) != 0 {
+                    continue;
+                }
+
+                let pd_addr = pdpt_entry & ENTRY_ADDR_MASK;
+                if pd_addr == 0 {
+                    continue;
+                }
+
+                let k_pd_addr = if !KERNEL_PML4.is_null() && ((*KERNEL_PML4).entries[pml4_i] & PAGE_PRESENT) != 0 {
+                    let k_pdpt = ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK) as *const PageTable;
+                    (*k_pdpt).entries[pdpt_i] & ENTRY_ADDR_MASK
+                } else {
+                    0
+                };
+
+                // If pointing to kernel's master PD, do not free it
+                if pd_addr == k_pd_addr {
+                    continue;
+                }
+
+                let pd = pd_addr as *mut PageTable;
+
+                for pd_i in 0..512 {
+                    let pd_entry = (*pd).entries[pd_i];
+                    if (pd_entry & PAGE_PRESENT) == 0 || (pd_entry & PAGE_HUGE) != 0 {
+                        continue;
+                    }
+
+                    let pt_addr = pd_entry & ENTRY_ADDR_MASK;
+                    if pt_addr != 0 {
+                        let pt = pt_addr as *mut PageTable;
+                        for pt_i in 0..512 {
+                            let pt_entry = (*pt).entries[pt_i];
+                            if (pt_entry & PAGE_PRESENT) != 0 && (pt_entry & PAGE_USER) != 0 {
+                                let user_frame = pt_entry & ENTRY_ADDR_MASK;
+                                if user_frame != 0 {
+                                    let _ = super::pmm::free_frame(user_frame as usize);
+                                }
+                            }
+                        }
+                        let _ = super::pmm::free_frame(pt_addr as usize);
+                    }
+                }
+
+                let _ = super::pmm::free_frame(pd_addr as usize);
+            }
+
+            let _ = super::pmm::free_frame(pdpt_addr as usize);
+        }
+
+        // Free the PML4 frame itself
+        let pml4_addr = (pml4 as usize) & !(PAGE_SIZE - 1);
+        let _ = super::pmm::free_frame(pml4_addr);
     }
 }

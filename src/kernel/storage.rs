@@ -190,14 +190,19 @@ where
     let dev_idx = st.dev_index;
     let start_lba = st.partition_start_lba;
     let rw = st.read_write;
-    drop(st);
 
-    crate::drivers::block_dev::with_dev(dev_idx, |dev| {
+    let res = crate::drivers::block_dev::with_dev(dev_idx, |dev| {
         if let Ok(mut fs) = PurpleFsV2::mount(dev, start_lba) {
             fs.read_only = !rw;
             Some(f(&mut fs))
         } else {
             None
         }
-    }).flatten()
+    }).flatten();
+    drop(st);
+    res
+}
+
+pub fn sync() -> Result<(), &'static str> {
+    with_fs(|fs| fs.sync()).unwrap_or(Err("No filesystem mounted"))
 }

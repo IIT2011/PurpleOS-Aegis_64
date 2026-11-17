@@ -52,14 +52,41 @@ pub fn get_gateway() -> [u8; 4] {
     NET_CONFIG.lock().gateway
 }
 
+pub fn get_subnet() -> [u8; 4] {
+    NET_CONFIG.lock().subnet
+}
+
 pub fn set_ip(ip: [u8; 4]) {
     NET_CONFIG.lock().ip = ip;
+}
+
+pub fn set_config(ip: [u8; 4], gw: [u8; 4], subnet: [u8; 4]) {
+    let mut cfg = NET_CONFIG.lock();
+    cfg.ip = ip;
+    cfg.gateway = gw;
+    cfg.subnet = subnet;
+}
+
+pub fn get_my_mac() -> Option<[u8; 6]> {
+    if crate::drivers::e1000::is_ready() {
+        Some(crate::drivers::e1000::get_mac())
+    } else if crate::drivers::rtl8139::is_ready() {
+        Some(crate::drivers::rtl8139::get_mac())
+    } else {
+        None
+    }
 }
 
 pub fn poll() {
     let mut rx_buf = [0u8; 2048];
     if crate::drivers::e1000::is_ready() {
         let len = crate::drivers::e1000::recv(&mut rx_buf);
+        if len > 0 {
+            process_packet(&rx_buf[..len]);
+        }
+    }
+    if crate::drivers::rtl8139::is_ready() {
+        let len = crate::drivers::rtl8139::recv(&mut rx_buf);
         if len > 0 {
             process_packet(&rx_buf[..len]);
         }
@@ -80,10 +107,9 @@ pub fn process_packet(data: &[u8]) {
                 let my_ip = get_ip();
                 if arp_pkt.opcode == arp::ARP_OP_REQUEST && arp_pkt.target_ip == my_ip {
                     // Send ARP reply
-                    let my_mac = if crate::drivers::e1000::is_ready() {
-                        crate::drivers::e1000::get_mac()
-                    } else {
-                        [0x52, 0x54, 0x00, 0x12, 0x34, 0x56]
+                    let my_mac = match get_my_mac() {
+                        Some(m) => m,
+                        None => return,
                     };
 
                     let reply_arp = arp::ArpPacket {
@@ -146,10 +172,10 @@ pub fn process_packet(data: &[u8]) {
 
 pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
     let my_ip = get_ip();
-    if !crate::drivers::e1000::is_ready() {
-        return;
-    }
-    let my_mac = crate::drivers::e1000::get_mac();
+    let my_mac = match get_my_mac() {
+        Some(m) => m,
+        None => return,
+    };
     let dst_mac = match arp::lookup_mac(dst_ip) {
         Some(m) => m,
         None => return,
@@ -170,8 +196,13 @@ pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
         identifier: id,
         seq_no: seq,
     };
-    let mut icmp_buf = [0u8; 256];
-    let icmp_len = icmp_reply.write_to(payload, &mut icmp_buf);
+    if buf.len() < eth_len + 20 {
+        return;
+    }
+    let icmp_len = icmp_reply.write_to(payload, &mut buf[eth_len + 20..]);
+    if icmp_len == 0 {
+        return;
+    }
 
     let ip_hdr = ipv4::Ipv4Header {
         version_ihl: 0x45,
@@ -185,8 +216,10 @@ pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
         src_ip: my_ip,
         dst_ip,
     };
-    let ip_len = ip_hdr.write_to(&mut buf[eth_len..]);
-    buf[eth_len + ip_len..eth_len + ip_len + icmp_len].copy_from_slice(&icmp_buf[..icmp_len]);
+    let ip_len = ip_hdr.write_to(&mut buf[eth_len..eth_len + 20]);
+    if ip_len == 0 {
+        return;
+    }
 
     let total = eth_len + ip_len + icmp_len;
     let _ = send_raw(&buf[..total]);
@@ -201,9 +234,10 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         return Ok(1);
     }
 
-    if !crate::drivers::e1000::is_ready() {
-        return Err("No active Ethernet NIC online");
-    }
+    let my_mac = match get_my_mac() {
+        Some(m) => m,
+        None => return Err("No active Ethernet NIC online"),
+    };
 
     let net_cfg = NET_CONFIG.lock();
     let subnet = net_cfg.subnet;
@@ -236,7 +270,6 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         None => return Err("Destination host unreachable (ARP resolution failed)"),
     };
 
-    let my_mac = crate::drivers::e1000::get_mac();
     let ident: u16 = 0xAE64;
     let seq = PING_SEQ.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
 
@@ -324,6 +357,8 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
 pub fn send_raw(packet: &[u8]) -> Result<(), &'static str> {
     if crate::drivers::e1000::is_ready() {
         crate::drivers::e1000::send(packet)
+    } else if crate::drivers::rtl8139::is_ready() {
+        crate::drivers::rtl8139::send(packet)
     } else {
         Err("No network interface available for transmission")
     }

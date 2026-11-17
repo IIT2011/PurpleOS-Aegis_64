@@ -110,11 +110,9 @@ pub fn init(_mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
         }
 
         if count == 0 {
-            count = 4; // Fallback for 4 vCPUs
-            MADT_INFO.apic_ids[0] = 0;
-            MADT_INFO.apic_ids[1] = 1;
-            MADT_INFO.apic_ids[2] = 2;
-            MADT_INFO.apic_ids[3] = 3;
+            count = 1; // Fallback for uniprocessor system without ACPI MADT
+            let bsp_apic_id = (crate::drivers::apic::get_id() & 0xFF) as u8;
+            MADT_INFO.apic_ids[0] = bsp_apic_id;
         }
 
         MADT_INFO.lapic_phys_addr = lapic;

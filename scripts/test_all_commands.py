@@ -174,6 +174,11 @@ def main():
         ("posix test", ">>> ALL 12 POSIX SUBSYSTEM VALIDATION TESTS PASSED"),
         ("posixtest", ">>> ALL 12 POSIX SUBSYSTEM VALIDATION TESTS PASSED"),
 
+        # Group 11: PurpleOS Native System Call Subsystem & 68 Syscalls
+        ("native status", "Aegis64 / PurpleOS Native System Call Subsystem:"),
+        ("native list", "Aegis64 / PurpleOS Native System Call Catalog (68 Total):"),
+        ("native test", "Native Syscall Test Summary: 10/10 Subsystem Categories PASSED"),
+
         # Group 11: Natural Grammar Aliases
         ("show disks", "ATA Storage Devices & GPT Partition Status:"),
         ("show filesystem", "Filesystem Status (PurpleFS v3 / v2):"),

@@ -134,7 +134,11 @@ impl BlockDevice for NvmeController {
         if count == 0 {
             return BLOCK_DEV_OK;
         }
-        if lba + count as u64 > self.total_blocks || !self.is_ready {
+        let end_lba = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end_lba > self.total_blocks || !self.is_ready {
             return BLOCK_DEV_ERR_BOUNDS;
         }
         let bytes = (count as usize) * 512;
@@ -183,7 +187,11 @@ impl BlockDevice for NvmeController {
         if count == 0 {
             return BLOCK_DEV_OK;
         }
-        if lba + count as u64 > self.total_blocks || !self.is_ready {
+        let end_lba = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end_lba > self.total_blocks || !self.is_ready {
             return BLOCK_DEV_ERR_BOUNDS;
         }
         let bytes = (count as usize) * 512;

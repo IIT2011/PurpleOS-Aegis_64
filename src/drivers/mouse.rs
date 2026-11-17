@@ -1,4 +1,5 @@
 use crate::arch::x86_64::io::{inb, outb};
+use crate::drivers::video;
 use crate::sync::Spinlock;
 
 const MOUSE_DATA: u16 = 0x60;
@@ -107,8 +108,13 @@ pub fn handle_byte(b: u8) {
             }
 
             m.buttons = flags & 0x07;
-            m.x = (m.x + dx).clamp(0, 1920);
-            m.y = (m.y - dy).clamp(0, 1080);
+            let (max_x, max_y) = if video::is_available() {
+                ((video::get_width() as i32).saturating_sub(1), (video::get_height() as i32).saturating_sub(1))
+            } else {
+                (1023, 767)
+            };
+            m.x = (m.x + dx).clamp(0, max_x);
+            m.y = (m.y - dy).clamp(0, max_y);
         }
         _ => m.cycle = 0,
     }

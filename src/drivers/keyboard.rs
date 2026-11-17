@@ -235,11 +235,18 @@ pub fn process_scancode(sc: u8) {
     }
 
     if (sc as usize) < SCANCODE_TABLE.len() {
-        let is_shifted = ((k.modifiers & KBD_MOD_SHIFT) != 0) ^ ((k.modifiers & KBD_MOD_CAPS) != 0);
-        let ch = if is_shifted {
-            SCANCODE_SHIFT_TABLE[sc as usize]
+        let base_ch = SCANCODE_TABLE[sc as usize];
+        let ch = if (k.modifiers & KBD_MOD_SHIFT) != 0 {
+            let shift_ch = SCANCODE_SHIFT_TABLE[sc as usize];
+            if (k.modifiers & KBD_MOD_CAPS) != 0 && shift_ch >= b'A' && shift_ch <= b'Z' {
+                shift_ch + 32
+            } else {
+                shift_ch
+            }
+        } else if (k.modifiers & KBD_MOD_CAPS) != 0 && base_ch >= b'a' && base_ch <= b'z' {
+            base_ch - 32
         } else {
-            SCANCODE_TABLE[sc as usize]
+            base_ch
         };
 
         if ch != 0 {

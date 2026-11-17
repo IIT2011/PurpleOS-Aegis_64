@@ -159,8 +159,8 @@ impl Rtl8139Device {
             let status = core::ptr::read_volatile(header_ptr);
             let length = core::ptr::read_volatile(header_ptr.add(1)) as usize;
 
-            if (status & 0x01) == 0 || length == 0 || length > 1536 {
-                return 0; // Bad packet header
+            if (status & 0x01) == 0 || length < 4 || length > 1536 {
+                return 0; // Bad packet header or truncated packet
             }
 
             // Copy packet payload (skip 4-byte header and 4-byte CRC)
@@ -203,4 +203,16 @@ pub fn init() {
 
 pub fn is_ready() -> bool {
     RTL8139.lock().is_ready
+}
+
+pub fn get_mac() -> [u8; 6] {
+    RTL8139.lock().mac
+}
+
+pub fn recv(buf: &mut [u8]) -> usize {
+    RTL8139.lock().poll_receive(buf)
+}
+
+pub fn send(packet: &[u8]) -> Result<(), &'static str> {
+    RTL8139.lock().transmit(packet)
 }

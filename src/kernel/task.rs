@@ -24,6 +24,20 @@ pub enum TaskPriority {
     High = 3,
 }
 
+impl TaskPriority {
+    pub fn from_u32(val: u32) -> Self {
+        match val {
+            0 => TaskPriority::Idle,
+            1 => TaskPriority::Low,
+            2 => TaskPriority::Normal,
+            _ => TaskPriority::High,
+        }
+    }
+    pub fn as_u32(&self) -> u32 {
+        *self as u32
+    }
+}
+
 pub struct Task {
     pub id: u32,
     pub name: [u8; 16],
@@ -53,6 +67,7 @@ pub struct Task {
     pub sig_pending: u64,
     pub sig_mask: u64,
     pub sig_handlers: [u64; 64],
+    pub cap_mask: u64,
 }
 
 const fn default_fd_table() -> [crate::kernel::posix::FileDescriptor; crate::kernel::posix::MAX_FD_PER_TASK] {
@@ -89,6 +104,7 @@ impl Task {
             sig_pending: 0,
             sig_mask: 0,
             sig_handlers: [0; 64],
+            cap_mask: !0,
         }
     }
 }
@@ -121,6 +137,10 @@ extern "C" {
     fn task_trampoline();
     #[allow(dead_code)]
     fn user_trampoline();
+}
+
+pub fn task_trampoline_addr() -> u64 {
+    task_trampoline as *const () as usize as u64
 }
 
 #[unsafe(no_mangle)]
@@ -187,7 +207,7 @@ pub fn init_ap(cpu_id: usize) {
     }
 }
 
-fn alloc_task_slot(s: &mut SchedState) -> Option<usize> {
+pub(crate) fn alloc_task_slot(s: &mut SchedState) -> Option<usize> {
     for i in 0..MAX_TASKS {
         if s.tasks[i].state == TaskState::Unused {
             return Some(i);
@@ -198,7 +218,7 @@ fn alloc_task_slot(s: &mut SchedState) -> Option<usize> {
                 s.tasks[i].stack_base = 0;
             }
             if s.tasks[i].cr3 != 0 {
-                let _ = crate::mm::pmm::free_frame(s.tasks[i].cr3 as usize);
+                crate::mm::vmm::destroy_pml4(s.tasks[i].cr3 as *mut crate::mm::vmm::PageTable);
                 s.tasks[i].cr3 = 0;
             }
             s.tasks[i].state = TaskState::Unused;
@@ -307,6 +327,21 @@ pub fn get_current_cpu() -> usize {
     crate::kernel::smp::get_cpu_id()
 }
 
+pub fn get_current_task_id() -> u32 {
+    let cpu_id = get_current_cpu();
+    let s = SCHED.lock();
+    if let Some(idx) = s.current[cpu_id] {
+        s.tasks[idx].id
+    } else {
+        0
+    }
+}
+
+pub fn get_current_task_index() -> Option<usize> {
+    let cpu_id = get_current_cpu();
+    SCHED.lock().current[cpu_id]
+}
+
 pub fn yield_now() {
     schedule();
 }
@@ -345,7 +380,8 @@ pub fn kill(task_id: u32) -> Result<(), &'static str> {
     for i in 0..MAX_TASKS {
         if s.tasks[i].id == task_id && s.tasks[i].state != TaskState::Terminated && s.tasks[i].state != TaskState::Unused {
             s.tasks[i].state = TaskState::Terminated;
-            // Let alloc_task_slot safely reclaim the stack
+            drop(s);
+            crate::kernel::smp::broadcast_resched();
             return Ok(());
         }
     }
@@ -429,6 +465,14 @@ pub fn schedule() {
     }
 
     let raw_lock = SCHED.raw_lock_ptr();
+    let kernel_stack_top = if s.tasks[next_idx].stack_base != 0 {
+        s.tasks[next_idx].stack_base + TASK_STACK_SIZE as u64
+    } else {
+        crate::arch::x86_64::gdt::get_default_stack_top(cpu_id)
+    };
+    crate::arch::x86_64::gdt::set_tss_rsp0(cpu_id, kernel_stack_top);
+    crate::kernel::syscall::set_per_cpu_kernel_stack(cpu_id, kernel_stack_top);
+
     core::mem::forget(s);
 
     unsafe {

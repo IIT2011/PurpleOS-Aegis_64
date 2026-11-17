@@ -1,4 +1,5 @@
 use crate::arch::x86_64::cpu::{rdmsr, wrmsr};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 const IA32_APIC_BASE_MSR: u32 = 0x1B;
 const LAPIC_DEFAULT_PHYS: u64 = 0xFEE00000;
@@ -26,27 +27,30 @@ pub const ICR_LEVEL_ASSERT: u32 = 1 << 14;
 pub const ICR_DEST_PHYSICAL: u32 = 0 << 11;
 pub const ICR_DEST_ALL_EXC_SELF: u32 = 3 << 18;
 
-static mut LAPIC_BASE: u64 = LAPIC_DEFAULT_PHYS;
+static LAPIC_BASE: AtomicU64 = AtomicU64::new(LAPIC_DEFAULT_PHYS);
 
 #[inline]
 pub unsafe fn read_reg(reg: u32) -> u32 {
-    let ptr = (LAPIC_BASE + reg as u64) as *const u32;
+    let base = LAPIC_BASE.load(Ordering::Relaxed);
+    let ptr = (base + reg as u64) as *const u32;
     core::ptr::read_volatile(ptr)
 }
 
 #[inline]
 pub unsafe fn write_reg(reg: u32, val: u32) {
-    let ptr = (LAPIC_BASE + reg as u64) as *mut u32;
+    let base = LAPIC_BASE.load(Ordering::Relaxed);
+    let ptr = (base + reg as u64) as *mut u32;
     core::ptr::write_volatile(ptr, val);
 }
 
 pub fn init(base_phys: u64) -> Result<(), &'static str> {
     unsafe {
-        LAPIC_BASE = if base_phys != 0 { base_phys } else { LAPIC_DEFAULT_PHYS };
+        let base = if base_phys != 0 { base_phys } else { LAPIC_DEFAULT_PHYS };
+        LAPIC_BASE.store(base, Ordering::SeqCst);
 
         // Enable APIC via MSR (bit 11)
         let msr = rdmsr(IA32_APIC_BASE_MSR);
-        wrmsr(IA32_APIC_BASE_MSR, (msr & 0xFFF) | LAPIC_BASE | (1 << 11));
+        wrmsr(IA32_APIC_BASE_MSR, (msr & 0xFFF) | base | (1 << 11));
 
         // Enable spurious interrupt vector (Spurious vector = 0xFF, APIC Software Enable = bit 8)
         write_reg(LAPIC_SVR, 0x1FF);
@@ -61,7 +65,7 @@ pub fn init(base_phys: u64) -> Result<(), &'static str> {
         write_reg(LAPIC_LVT_LINT1, 0x00000400);
 
         crate::drivers::serial::print("Local APIC Initialized: Base=0x");
-        crate::drivers::serial::print_hex(LAPIC_BASE);
+        crate::drivers::serial::print_hex(base);
         crate::drivers::serial::println("");
 
         // Calibrate APIC timer against PIT Channel 2
@@ -70,7 +74,7 @@ pub fn init(base_phys: u64) -> Result<(), &'static str> {
     Ok(())
 }
 
-static mut APIC_TICKS_PER_10MS: u32 = 100000;
+static APIC_TICKS_PER_10MS: AtomicU32 = AtomicU32::new(100000);
 
 fn on_apic_timer(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
     crate::kernel::task::timer_tick();
@@ -93,28 +97,32 @@ pub fn calibrate_timer() -> u32 {
         let curr = read_reg(LAPIC_TIMER_CURR);
         let ticks_10ms = 0xFFFFFFFFu32.saturating_sub(curr);
 
-        APIC_TICKS_PER_10MS = if ticks_10ms > 1000 { ticks_10ms } else { 100000 };
+        let ticks = if ticks_10ms > 1000 { ticks_10ms } else { 100000 };
+        APIC_TICKS_PER_10MS.store(ticks, Ordering::SeqCst);
 
         // Register IDT handler for vector 48
         crate::arch::x86_64::idt::register_handler(48, on_apic_timer);
 
         // Set Periodic mode (bit 17 = 1) on Vector 48
         write_reg(LAPIC_LVT_TIMER, (1 << 17) | 48);
-        write_reg(LAPIC_TIMER_INIT, APIC_TICKS_PER_10MS);
+        write_reg(LAPIC_TIMER_INIT, ticks);
 
         crate::drivers::serial::print("Local APIC Timer: Calibrated via PIT (");
-        crate::drivers::serial::print_u64((APIC_TICKS_PER_10MS as u64) * 100);
+        crate::drivers::serial::print_u64((ticks as u64) * 100);
         crate::drivers::serial::println(" Hz base, 100 Hz periodic tick active)");
 
-        APIC_TICKS_PER_10MS
+        ticks
     }
 }
 
 pub fn init_ap() {
     unsafe {
+        let base = LAPIC_BASE.load(Ordering::Relaxed);
+        let ticks = APIC_TICKS_PER_10MS.load(Ordering::Relaxed);
+
         // Enable APIC via MSR (bit 11)
         let msr = rdmsr(IA32_APIC_BASE_MSR);
-        wrmsr(IA32_APIC_BASE_MSR, (msr & 0xFFF) | LAPIC_BASE | (1 << 11));
+        wrmsr(IA32_APIC_BASE_MSR, (msr & 0xFFF) | base | (1 << 11));
 
         write_reg(LAPIC_SVR, 0x1FF);
         write_reg(LAPIC_TPR, 0);
@@ -126,7 +134,7 @@ pub fn init_ap() {
         // Synchronize APIC timer on AP core with calibrated frequency
         write_reg(LAPIC_TIMER_DIV, 0x03);
         write_reg(LAPIC_LVT_TIMER, (1 << 17) | 48);
-        write_reg(LAPIC_TIMER_INIT, APIC_TICKS_PER_10MS);
+        write_reg(LAPIC_TIMER_INIT, ticks);
     }
 }
 

@@ -185,6 +185,9 @@ pub fn alloc_frames(count: usize) -> Option<usize> {
     }
 
     let mut state = PMM.lock();
+    if state.free_frames < count {
+        return None;
+    }
     let mut run_start = 0;
     let mut run_len = 0;
 

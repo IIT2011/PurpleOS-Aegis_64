@@ -140,16 +140,26 @@ pub fn count() -> usize {
     REGISTRY.lock().count
 }
 
-pub fn get_canonical_path(idx: usize) -> Option<&'static str> {
+pub fn with_canonical_path<F, R>(idx: usize, f: F) -> Option<R>
+where
+    F: FnOnce(&str) -> R,
+{
     let reg = REGISTRY.lock();
     if idx < reg.count {
         let len = reg.canonical_lens[idx];
-        let ptr = reg.canonical_paths[idx].as_ptr();
-        drop(reg);
-        unsafe {
-            let slice = core::slice::from_raw_parts(ptr, len);
-            core::str::from_utf8(slice).ok()
-        }
+        let slice = &reg.canonical_paths[idx][..len];
+        core::str::from_utf8(slice).ok().map(f)
+    } else {
+        None
+    }
+}
+
+pub fn copy_canonical_path(idx: usize, out: &mut [u8]) -> Option<usize> {
+    let reg = REGISTRY.lock();
+    if idx < reg.count {
+        let len = reg.canonical_lens[idx].min(out.len());
+        out[..len].copy_from_slice(&reg.canonical_paths[idx][..len]);
+        Some(len)
     } else {
         None
     }

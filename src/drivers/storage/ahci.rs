@@ -163,7 +163,11 @@ impl BlockDevice for AhciPort {
         if count == 0 {
             return BLOCK_DEV_OK;
         }
-        if lba + count as u64 > self.total_sectors || self.dma_buf.is_null() {
+        let end_lba = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end_lba > self.total_sectors || self.dma_buf.is_null() {
             return BLOCK_DEV_ERR_BOUNDS;
         }
 
@@ -220,7 +224,11 @@ impl BlockDevice for AhciPort {
         if count == 0 {
             return BLOCK_DEV_OK;
         }
-        if lba + count as u64 > self.total_sectors || self.dma_buf.is_null() {
+        let end_lba = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end_lba > self.total_sectors || self.dma_buf.is_null() {
             return BLOCK_DEV_ERR_BOUNDS;
         }
 

@@ -47,7 +47,14 @@ impl BlockDevice for SdCardDevice {
     }
 
     fn read_blocks(&mut self, lba: u64, count: u32, buf: &mut [u8]) -> i32 {
-        if lba + count as u64 > self.total_sectors {
+        if count == 0 {
+            return BLOCK_DEV_OK;
+        }
+        let end_lba = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end_lba > self.total_sectors {
             return BLOCK_DEV_ERR_BOUNDS;
         }
         let bytes = (count as usize) * 512;
@@ -58,7 +65,14 @@ impl BlockDevice for SdCardDevice {
     }
 
     fn write_blocks(&mut self, lba: u64, count: u32, buf: &[u8]) -> i32 {
-        if lba + count as u64 > self.total_sectors {
+        if count == 0 {
+            return BLOCK_DEV_OK;
+        }
+        let end_lba = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end_lba > self.total_sectors {
             return BLOCK_DEV_ERR_BOUNDS;
         }
         let bytes = (count as usize) * 512;

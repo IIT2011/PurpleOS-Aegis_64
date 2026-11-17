@@ -121,6 +121,13 @@ pub fn init_ap(cpu_id: usize) {
     }
 }
 
+pub fn set_per_cpu_kernel_stack(cpu: usize, stack_top: u64) {
+    let cpu = cpu.min(7);
+    unsafe {
+        PER_CPU_SYSCALL[cpu].kernel_rsp = stack_top;
+    }
+}
+
 pub fn validate_user_ptr(ptr: *const u8, len: usize) -> bool {
     uaccess::validate_user_range(ptr as u64, len, false).is_ok()
 }
@@ -135,6 +142,11 @@ pub extern "C" fn syscall_dispatch(
     a5: u64,
     a6: u64,
 ) -> i64 {
+    // PurpleOS Native First-Class System Calls (Strictly non-POSIX, native ABI)
+    if sys_no >= crate::kernel::purple_abi::SYS_PURPLE_BASE && sys_no <= crate::kernel::purple_abi::SYS_PURPLE_MAX {
+        return crate::kernel::purple_abi::dispatch_native_syscall(sys_no, a1, a2, a3, a4, a5, a6);
+    }
+
     match sys_no {
         // POSIX 0: sys_read(fd, buf, count)
         SYS_READ => {
@@ -186,7 +198,7 @@ pub extern "C" fn syscall_dispatch(
             let path_ptr = a1;
             let flags = a2 as u32;
             let mode = a3 as u32;
-            let mut path_buf = [0u8; 128];
+            let mut path_buf = [0u8; 256];
             match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
                 Ok(len) => {
                     if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
@@ -214,7 +226,7 @@ pub extern "C" fn syscall_dispatch(
         SYS_STAT => {
             let path_ptr = a1;
             let stat_ptr = a2;
-            let mut path_buf = [0u8; 128];
+            let mut path_buf = [0u8; 256];
             match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
                 Ok(len) => {
                     if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
@@ -400,7 +412,7 @@ pub extern "C" fn syscall_dispatch(
         SYS_ACCESS => {
             let path_ptr = a1;
             let mode = a2 as i32;
-            let mut path_buf = [0u8; 128];
+            let mut path_buf = [0u8; 256];
             match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
                 Ok(len) => {
                     if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
@@ -492,7 +504,7 @@ pub extern "C" fn syscall_dispatch(
         // POSIX 59: sys_execve(filename, argv, envp)
         SYS_EXECVE => {
             let path_ptr = a1;
-            let mut path_buf = [0u8; 128];
+            let mut path_buf = [0u8; 256];
             match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
                 Ok(len) => {
                     if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
@@ -552,10 +564,12 @@ pub extern "C" fn syscall_dispatch(
             if size == 0 {
                 return -posix::EINVAL;
             }
-            let mut kbuf = [0u8; 128];
-            match posix::posix_getcwd(&mut kbuf[..size.min(128)]) {
+            let mut kbuf = [0u8; 256];
+            let max_len = size.min(kbuf.len());
+            match posix::posix_getcwd(&mut kbuf[..max_len]) {
                 Ok(len) => {
-                    if let Err(e) = uaccess::copy_to_user(&kbuf[..len + 1], buf_ptr) {
+                    let copy_len = (len + 1).min(max_len);
+                    if let Err(e) = uaccess::copy_to_user(&kbuf[..copy_len], buf_ptr) {
                         return e;
                     }
                     len as i64
@@ -567,7 +581,7 @@ pub extern "C" fn syscall_dispatch(
         // POSIX 80: sys_chdir(path)
         SYS_CHDIR => {
             let path_ptr = a1;
-            let mut path_buf = [0u8; 128];
+            let mut path_buf = [0u8; 256];
             match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
                 Ok(len) => {
                     if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
@@ -587,7 +601,7 @@ pub extern "C" fn syscall_dispatch(
         SYS_MKDIR => {
             let path_ptr = a1;
             let mode = a2 as u32;
-            let mut path_buf = [0u8; 128];
+            let mut path_buf = [0u8; 256];
             match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
                 Ok(len) => {
                     if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
@@ -606,7 +620,7 @@ pub extern "C" fn syscall_dispatch(
         // POSIX 84: sys_rmdir(path)
         SYS_RMDIR => {
             let path_ptr = a1;
-            let mut path_buf = [0u8; 128];
+            let mut path_buf = [0u8; 256];
             match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
                 Ok(len) => {
                     if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
@@ -625,7 +639,7 @@ pub extern "C" fn syscall_dispatch(
         // POSIX 87: sys_unlink(path)
         SYS_UNLINK => {
             let path_ptr = a1;
-            let mut path_buf = [0u8; 128];
+            let mut path_buf = [0u8; 256];
             match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
                 Ok(len) => {
                     if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {

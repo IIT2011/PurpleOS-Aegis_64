@@ -88,6 +88,84 @@ impl<'a> PurpleFsV2<'a> {
         None
     }
 
+    pub fn get_file_size(&mut self, inode: u32) -> Option<usize> {
+        if inode == 0 || inode >= 256 {
+            return None;
+        }
+        let blk_idx = 2 + (inode / 32);
+        let ino_off = ((inode % 32) * 128) as usize;
+        let mut inode_block = [0u8; 4096];
+        if self.read_fs_block(blk_idx, &mut inode_block).is_err() {
+            return None;
+        }
+        let size_bytes = u64::from_le_bytes(
+            inode_block[ino_off + 8..ino_off + 16].try_into().unwrap(),
+        ) as usize;
+        Some(size_bytes)
+    }
+
+    pub fn read_file_at(&mut self, inode: u32, offset: usize, buf: &mut [u8]) -> usize {
+        if inode == 0 || inode >= 256 || buf.is_empty() {
+            return 0;
+        }
+
+        let blk_idx = 2 + (inode / 32);
+        let ino_off = ((inode % 32) * 128) as usize;
+
+        let mut inode_block = [0u8; 4096];
+        if self.read_fs_block(blk_idx, &mut inode_block).is_err() {
+            return 0;
+        }
+
+        let size_bytes = u64::from_le_bytes(
+            inode_block[ino_off + 8..ino_off + 16].try_into().unwrap(),
+        ) as usize;
+
+        if offset >= size_bytes {
+            return 0;
+        }
+
+        let mut bytes_copied = 0;
+        let mut block_buf = [0u8; 4096];
+
+        for i in 0..12 {
+            if bytes_copied >= buf.len() {
+                break;
+            }
+            let blk_start = i * 4096;
+            let blk_end = blk_start + 4096;
+            let current_pos = offset + bytes_copied;
+
+            if current_pos >= size_bytes {
+                break;
+            }
+
+            if current_pos >= blk_end {
+                continue;
+            }
+
+            let ptr_off = ino_off + 0x2C + i * 4;
+            let data_blk = u32::from_le_bytes(inode_block[ptr_off..ptr_off + 4].try_into().unwrap());
+            if data_blk == 0 {
+                break;
+            }
+
+            if self.read_fs_block(data_blk, &mut block_buf).is_ok() {
+                let off_in_blk = current_pos - blk_start;
+                let avail_in_blk = 4096 - off_in_blk;
+                let avail_in_file = size_bytes - current_pos;
+                let chunk_len = avail_in_blk.min(avail_in_file).min(buf.len() - bytes_copied);
+
+                buf[bytes_copied..bytes_copied + chunk_len].copy_from_slice(&block_buf[off_in_blk..off_in_blk + chunk_len]);
+                bytes_copied += chunk_len;
+            } else {
+                break;
+            }
+        }
+
+        bytes_copied
+    }
+
     pub fn read_file(&mut self, inode: u32, buf: &mut [u8]) -> usize {
         if inode == 0 || inode >= 256 {
             return 0;
@@ -236,8 +314,18 @@ impl<'a> PurpleFsV2<'a> {
     }
 
     pub fn write_file(&mut self, filename: &str, content: &[u8]) -> Result<usize, &'static str> {
+        self.write_file_at(filename, 0, content)
+    }
+
+    pub fn write_file_at(&mut self, filename: &str, offset: usize, content: &[u8]) -> Result<usize, &'static str> {
         if self.read_only {
             return Err("Filesystem is mounted read-only");
+        }
+        if content.is_empty() {
+            return Ok(0);
+        }
+        if offset >= 12 * 4096 {
+            return Err("File write offset exceeds maximum direct block capacity (48 KiB)");
         }
 
         let ino = match self.lookup(filename) {
@@ -245,41 +333,69 @@ impl<'a> PurpleFsV2<'a> {
             None => self.touch(filename)?,
         };
 
-        // Allocate a data block (find first free block in bitmap block 1)
-        let mut bitmap = [0u8; 4096];
-        self.read_fs_block(1, &mut bitmap)?;
-
-        let mut free_blk = None;
-        for b in 11..self.total_blocks {
-            let byte_idx = (b / 8) as usize;
-            let bit_idx = (b % 8) as usize;
-            if byte_idx < 4096 && (bitmap[byte_idx] & (1 << bit_idx)) == 0 {
-                bitmap[byte_idx] |= 1 << bit_idx;
-                free_blk = Some(b);
-                break;
-            }
-        }
-
-        let blk = free_blk.ok_or("No free data blocks available")?;
-        self.write_fs_block(1, &bitmap)?;
-
-        // Write content into block blk
-        let mut data_buf = [0u8; 4096];
-        let write_len = content.len().min(4096);
-        data_buf[0..write_len].copy_from_slice(&content[0..write_len]);
-        self.write_fs_block(blk, &data_buf)?;
-
-        // Update inode direct_blocks[0] and size
         let blk_idx = 2 + (ino / 32);
         let ino_off = ((ino % 32) * 128) as usize;
         let mut inode_block = [0u8; 4096];
         self.read_fs_block(blk_idx, &mut inode_block)?;
 
-        inode_block[ino_off + 8..ino_off + 16].copy_from_slice(&(write_len as u64).to_le_bytes());
-        inode_block[ino_off + 0x2C..ino_off + 0x30].copy_from_slice(&blk.to_le_bytes());
+        let current_size = u64::from_le_bytes(
+            inode_block[ino_off + 8..ino_off + 16].try_into().unwrap(),
+        ) as usize;
+
+        let mut bytes_written = 0usize;
+        let mut bitmap = [0u8; 4096];
+        let mut bitmap_loaded = false;
+
+        while bytes_written < content.len() {
+            let cur_pos = offset + bytes_written;
+            let block_idx = cur_pos / 4096;
+            if block_idx >= 12 {
+                break;
+            }
+            let off_in_block = cur_pos % 4096;
+            let avail_in_block = 4096 - off_in_block;
+            let chunk_len = (content.len() - bytes_written).min(avail_in_block);
+
+            let ptr_off = ino_off + 0x2C + (block_idx * 4);
+            let mut blk = u32::from_le_bytes(inode_block[ptr_off..ptr_off + 4].try_into().unwrap());
+
+            if blk == 0 {
+                if !bitmap_loaded {
+                    self.read_fs_block(1, &mut bitmap)?;
+                    bitmap_loaded = true;
+                }
+                let mut free_blk = None;
+                for b in 11..self.total_blocks {
+                    let byte_idx = (b / 8) as usize;
+                    let bit_idx = (b % 8) as usize;
+                    if byte_idx < 4096 && (bitmap[byte_idx] & (1 << bit_idx)) == 0 {
+                        bitmap[byte_idx] |= 1 << bit_idx;
+                        free_blk = Some(b);
+                        break;
+                    }
+                }
+                blk = free_blk.ok_or("No free data blocks available")?;
+                inode_block[ptr_off..ptr_off + 4].copy_from_slice(&blk.to_le_bytes());
+            }
+
+            let mut data_buf = [0u8; 4096];
+            if off_in_block > 0 || chunk_len < 4096 {
+                let _ = self.read_fs_block(blk, &mut data_buf);
+            }
+            data_buf[off_in_block..off_in_block + chunk_len].copy_from_slice(&content[bytes_written..bytes_written + chunk_len]);
+            self.write_fs_block(blk, &data_buf)?;
+            bytes_written += chunk_len;
+        }
+
+        if bitmap_loaded {
+            self.write_fs_block(1, &bitmap)?;
+        }
+
+        let new_size = current_size.max(offset + bytes_written);
+        inode_block[ino_off + 8..ino_off + 16].copy_from_slice(&(new_size as u64).to_le_bytes());
         self.write_fs_block(blk_idx, &inode_block)?;
 
-        Ok(write_len)
+        Ok(bytes_written)
     }
 
     pub fn copy_file(&mut self, src_name: &str, dst_name: &str) -> Result<usize, &'static str> {
@@ -287,9 +403,20 @@ impl<'a> PurpleFsV2<'a> {
             return Err("Filesystem is mounted read-only");
         }
         let ino = self.lookup(src_name).ok_or("Source file not found")?;
-        let mut buf = [0u8; 4096];
-        let bytes_read = self.read_file(ino, &mut buf);
-        self.write_file(dst_name, &buf[..bytes_read])
+        let file_size = self.get_file_size(ino).ok_or("Failed to get file size")?;
+
+        let mut total_copied = 0;
+        let mut chunk_buf = [0u8; 4096];
+        while total_copied < file_size {
+            let to_read = (file_size - total_copied).min(4096);
+            let n = self.read_file_at(ino, total_copied, &mut chunk_buf[..to_read]);
+            if n == 0 {
+                break;
+            }
+            self.write_file_at(dst_name, total_copied, &chunk_buf[..n])?;
+            total_copied += n;
+        }
+        Ok(total_copied)
     }
 
     pub fn move_file(&mut self, src_name: &str, dst_name: &str) -> Result<(), &'static str> {

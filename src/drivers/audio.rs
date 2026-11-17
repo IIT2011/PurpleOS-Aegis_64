@@ -64,6 +64,7 @@ pub const HDA_GCTL_CRST: u32 = 0x00000001; /* Controller Reset */
 /* CORB / RIRB Constants */
 pub const CORB_ENTRIES: usize = 256;
 pub const RIRB_ENTRIES: usize = 256;
+pub const HDA_DMA_BUFFER_SIZE: usize = 65536;
 
 #[repr(C, packed)]
 #[derive(Copy, Clone, Default)]
@@ -252,7 +253,7 @@ impl HdaController {
             self.bdl = bdl_ptr as *mut HdaBdlEntry;
             self.bdl_phys = bdl_phys;
 
-            let (buf_ptr, buf_phys) = alloc_coherent(65536).ok_or("Failed to alloc Audio DMA Buf")?;
+            let (buf_ptr, buf_phys) = alloc_coherent(HDA_DMA_BUFFER_SIZE).ok_or("Failed to alloc Audio DMA Buf")?;
             self.audio_buf = buf_ptr;
             self.audio_buf_phys = buf_phys;
 
@@ -337,9 +338,10 @@ impl HdaController {
     }
 
     pub fn set_volume(&mut self, vol: u8) {
-        self.volume = vol.min(100);
+        let clamped = vol.min(100);
+        self.volume = clamped;
         // Dispatch amplifier verb to Output Converter Node (NID 2, Set Amp Gain = 0x3A0)
-        let gain = (vol as u16 * 127) / 100;
+        let gain = (clamped as u16 * 127) / 100;
         self.send_verb(0, 2, 0x3A0, gain as u8);
     }
 }
@@ -377,6 +379,31 @@ pub fn set_volume(vol: u8) {
     HDA.lock().set_volume(vol);
 }
 
+pub fn get_volume() -> u8 {
+    HDA.lock().volume
+}
+
 pub fn is_available() -> bool {
     HDA.lock().is_ready
+}
+
+pub fn submit_pcm(data: &[u8]) -> usize {
+    let hda = HDA.lock();
+    if !hda.is_ready || hda.audio_buf.is_null() {
+        return 0;
+    }
+    let copy_len = data.len().min(HDA_DMA_BUFFER_SIZE);
+    unsafe {
+        core::ptr::copy_nonoverlapping(data.as_ptr(), hda.audio_buf, copy_len);
+    }
+    copy_len
+}
+
+pub fn get_stream_position() -> u32 {
+    let hda = HDA.lock();
+    if !hda.is_ready || hda.mmio_base == 0 {
+        return 0;
+    }
+    let lpib_ptr = (hda.mmio_base + HDA_SD0_OFFSET + HDA_SD_LPIB) as *const u32;
+    unsafe { core::ptr::read_volatile(lpib_ptr) }
 }

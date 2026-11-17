@@ -308,6 +308,7 @@ impl Shell {
                 serial::println("    mem / free / memory            Physical memory & heap status");
                 serial::println("    tasks / ps                     Process table & CPU affinity");
                 serial::println("    posix [status|test]            POSIX subsystem status & 12-test validation suite");
+                serial::println("    native [status|test|list]      Native PurpleOS 68-syscall engine & 10-test suite");
                 serial::println("    whoami / id                    Current user security level");
                 serial::println("    clear / cls                    Clear console display");
                 serial::println("    reboot / restart               Reboot hardware via 8042");
@@ -823,6 +824,36 @@ impl Shell {
                     serial::println("Use 'posix test' to run the in-kernel 12-test validation suite.");
                 }
             }
+            "native" | "nativetest" | "purple" | "purpletest" => {
+                let sub = parts.next().unwrap_or("");
+                if sub == "test" || cmd == "nativetest" || cmd == "purpletest" {
+                    crate::kernel::purple_abi::run_native_syscall_self_test();
+                } else if sub == "list" {
+                    serial::println("\nAegis64 / PurpleOS Native System Call Catalog (68 Total):");
+                    serial::println("  Category 1: GPU & Display Acceleration  (0x1000 - 0x1009) [10 Calls]");
+                    serial::println("  Category 2: Audio DSP & PCM Streaming   (0x1020 - 0x1027) [ 8 Calls]");
+                    serial::println("  Category 3: Fast Zero-Copy Channel IPC  (0x1030 - 0x1037) [ 8 Calls]");
+                    serial::println("  Category 4: Multi-Core SMP & Affinity   (0x1040 - 0x1048) [ 9 Calls]");
+                    serial::println("  Category 5: High-Precision Clocks/TSC   (0x1050 - 0x1056) [ 7 Calls]");
+                    serial::println("  Category 6: Raw Direct DMA Networking   (0x1060 - 0x1065) [ 6 Calls]");
+                    serial::println("  Category 7: Hardware & PMM Telemetry    (0x1070 - 0x1075) [ 6 Calls]");
+                    serial::println("  Category 8: Raw Block Storage I/O       (0x1080 - 0x1084) [ 5 Calls]");
+                    serial::println("  Category 9: Real-Time Input Subsystem   (0x1090 - 0x1092) [ 3 Calls]");
+                    serial::println("  Category 10: Task & Sandbox Security    (0x10A0 - 0x10A5) [ 6 Calls]\n");
+                    serial::println("Use 'native test' to run the 10-category validation suite.");
+                } else {
+                    serial::println("\nAegis64 / PurpleOS Native System Call Subsystem:");
+                    serial::println("  Architecture:    PurpleOS First-Class Native ABI (Non-POSIX, Non-Linux)");
+                    serial::println("  Syscall Range:   0x1000 - 0x10AF (68 High-Performance Native Calls)");
+                    serial::println("  Target Domain:   Heavy-Load Apps (3D GPU, Audio DSP, Direct DMA, SMP)");
+                    serial::println("  Security:        Hardware-Enforced Ring 3 Sandboxing & Capability Masks");
+                    serial::println("  Channel IPC:     Lockless/Bounded Ring Buffers (Zero-Copy Transfer)");
+                    serial::println("  Pure Rust:       100% Bare-Metal Rust #![no_std] (Zero C/C++ Code)\n");
+                    serial::println("Available commands:");
+                    serial::println("  native test  - Run full in-kernel 10-category validation suite");
+                    serial::println("  native list  - Display complete native system call catalog");
+                }
+            }
             "ksym" => self.show_symbols(),
 
             // Console & System Control
@@ -1306,7 +1337,7 @@ impl Shell {
         let ram_mib = (crate::mm::pmm::total_frames_count() * 4) / 1024;
         serial::print("  Memory:      ");
         serial::print_u64(ram_mib as u64);
-        serial::println(" MiB RAM (4-Level VMM & Dual-Bitmap PMM)\n");
+        serial::println(" MiB RAM (Dual-Bitmap PMM & 4-Level VMM)\n");
     }
 
     fn show_cpuinfo(&self) {

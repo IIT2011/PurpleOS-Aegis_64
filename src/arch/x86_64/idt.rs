@@ -130,6 +130,7 @@ pub extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
         }
 
         // Kernel panic
+        crate::kernel::smp::broadcast_halt();
         crate::drivers::serial::println("=================================================");
         crate::drivers::serial::print("!!! KERNEL PANIC: CPU EXCEPTION ");
         crate::drivers::serial::print(EXCEPTION_MESSAGES[int_no]);
@@ -183,7 +184,7 @@ pub extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
     if int_no >= 32 && int_no < 48 {
         crate::arch::x86_64::pic::send_eoi((int_no - 32) as u8);
     }
-    if int_no >= 48 && int_no <= 255 {
+    if int_no >= 48 && int_no < 255 {
         crate::drivers::apic::send_eoi();
     }
 }

@@ -175,44 +175,133 @@ pub fn classify_path(path: &str) -> (VfsMountType, &str) {
     }
 }
 
-pub fn read(path: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
+pub fn file_size(path: &str) -> Result<usize, &'static str> {
     let (mount, sub) = classify_path(path);
     match mount {
-        VfsMountType::DevFs => read_devfs(sub, buf),
-        VfsMountType::ProcFs => read_procfs(sub, buf),
-        VfsMountType::TmpFs => read_tmpfs(sub, buf),
-        VfsMountType::SsdDev => read_storage_node(path, buf),
-        VfsMountType::HddDev => read_storage_node(path, buf),
-        VfsMountType::UsbDev => read_storage_node(path, buf),
-        VfsMountType::SdxcDev => read_storage_node(path, buf),
-        VfsMountType::SdhcDev => read_storage_node(path, buf),
+        VfsMountType::DevFs => Ok(0),
+        VfsMountType::ProcFs => {
+            let mut buf = [0u8; 1024];
+            read_procfs(sub, &mut buf)
+        }
+        VfsMountType::TmpFs => {
+            let tmp = TMPFS.lock();
+            for entry in tmp.entries.iter() {
+                if entry.in_use {
+                    let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+                    if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
+                        if n == sub {
+                            return Ok(entry.len);
+                        }
+                    }
+                }
+            }
+            Err("File not found in /tmp")
+        }
+        VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
+        VfsMountType::SdxcDev | VfsMountType::SdhcDev => {
+            if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(path) {
+                let mut sz = 0;
+                let _ = crate::drivers::block_dev::with_dev(idx, |dev| {
+                    sz = (dev.total_blocks() * dev.block_size() as u64) as usize;
+                });
+                Ok(sz)
+            } else {
+                Err("Block device not found")
+            }
+        }
         VfsMountType::RootPurpleFs => {
             let res = crate::kernel::storage::with_fs(|fs| {
                 if let Some(ino) = fs.lookup(sub) {
-                    fs.read_file(ino, buf)
+                    fs.get_file_size(ino)
                 } else {
-                    0
+                    None
                 }
             });
             match res {
-                Some(len) if len > 0 => Ok(len),
+                Some(Some(len)) => Ok(len),
                 _ => Err("File not found on filesystem"),
             }
         }
     }
 }
 
+pub fn read(path: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
+    read_at(path, 0, buf)
+}
+
+pub fn read_at(path: &str, offset: usize, buf: &mut [u8]) -> Result<usize, &'static str> {
+    if buf.is_empty() {
+        return Ok(0);
+    }
+    let (mount, sub) = classify_path(path);
+    match mount {
+        VfsMountType::DevFs => read_devfs(sub, buf),
+        VfsMountType::ProcFs => {
+            let mut scratch = [0u8; 1024];
+            let total = read_procfs(sub, &mut scratch)?;
+            if offset >= total {
+                return Ok(0);
+            }
+            let avail = total - offset;
+            let to_copy = avail.min(buf.len());
+            buf[..to_copy].copy_from_slice(&scratch[offset..offset + to_copy]);
+            Ok(to_copy)
+        }
+        VfsMountType::TmpFs => {
+            let tmp = TMPFS.lock();
+            for entry in tmp.entries.iter() {
+                if entry.in_use {
+                    let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+                    if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
+                        if n == sub {
+                            if offset >= entry.len {
+                                return Ok(0);
+                            }
+                            let avail = entry.len - offset;
+                            let to_copy = avail.min(buf.len());
+                            buf[..to_copy].copy_from_slice(&entry.data[offset..offset + to_copy]);
+                            return Ok(to_copy);
+                        }
+                    }
+                }
+            }
+            Err("File not found in /tmp")
+        }
+        VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
+        VfsMountType::SdxcDev | VfsMountType::SdhcDev => {
+            read_storage_node(path, buf)
+        }
+        VfsMountType::RootPurpleFs => {
+            let res = crate::kernel::storage::with_fs(|fs| {
+                if let Some(ino) = fs.lookup(sub) {
+                    fs.read_file_at(ino, offset, buf)
+                } else {
+                    0
+                }
+            });
+            match res {
+                Some(len) => Ok(len),
+                None => Err("No persistent filesystem mounted"),
+            }
+        }
+    }
+}
+
 pub fn write(path: &str, content: &[u8]) -> Result<usize, &'static str> {
+    write_at(path, 0, content)
+}
+
+pub fn write_at(path: &str, offset: usize, content: &[u8]) -> Result<usize, &'static str> {
     let (mount, sub) = classify_path(path);
     match mount {
         VfsMountType::DevFs => write_devfs(sub, content),
         VfsMountType::ProcFs => Err("ProcFS is a read-only virtual filesystem"),
-        VfsMountType::TmpFs => write_tmpfs(sub, content),
+        VfsMountType::TmpFs => write_tmpfs_at(sub, offset, content),
         VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
         VfsMountType::SdxcDev | VfsMountType::SdhcDev => write_storage_node(path, content),
         VfsMountType::RootPurpleFs => {
             let res = crate::kernel::storage::with_fs(|fs| {
-                fs.write_file(sub, content)
+                fs.write_file_at(sub, offset, content)
             });
             match res {
                 Some(Ok(len)) => Ok(len),
@@ -433,24 +522,7 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
     }
 }
 
-fn read_tmpfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
-    let tmp = TMPFS.lock();
-    for entry in tmp.entries.iter() {
-        if entry.in_use {
-            let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
-            if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
-                if n == name {
-                    let len = entry.len.min(buf.len());
-                    buf[..len].copy_from_slice(&entry.data[..len]);
-                    return Ok(len);
-                }
-            }
-        }
-    }
-    Err("File not found in /tmp")
-}
-
-fn write_tmpfs(name: &str, content: &[u8]) -> Result<usize, &'static str> {
+fn write_tmpfs_at(name: &str, offset: usize, content: &[u8]) -> Result<usize, &'static str> {
     let mut tmp = TMPFS.lock();
     let mut slot = None;
 
@@ -477,15 +549,23 @@ fn write_tmpfs(name: &str, content: &[u8]) -> Result<usize, &'static str> {
 
     let idx = slot.ok_or("TmpFS full (maximum 8 files)")?;
     let entry = &mut tmp.entries[idx];
-    entry.name.fill(0);
-    let b = name.as_bytes();
-    let len = b.len().min(31);
-    entry.name[..len].copy_from_slice(&b[..len]);
+    if !entry.in_use {
+        entry.name.fill(0);
+        let b = name.as_bytes();
+        let len = b.len().min(31);
+        entry.name[..len].copy_from_slice(&b[..len]);
+        entry.len = 0;
+        entry.in_use = true;
+    }
 
-    let write_len = content.len().min(MAX_TMPFS_SIZE);
-    entry.data[..write_len].copy_from_slice(&content[..write_len]);
-    entry.len = write_len;
-    entry.in_use = true;
+    if offset >= MAX_TMPFS_SIZE {
+        return Err("Write offset exceeds maximum TmpFS file size");
+    }
+
+    let avail = MAX_TMPFS_SIZE - offset;
+    let write_len = content.len().min(avail);
+    entry.data[offset..offset + write_len].copy_from_slice(&content[..write_len]);
+    entry.len = entry.len.max(offset + write_len);
 
     Ok(write_len)
 }

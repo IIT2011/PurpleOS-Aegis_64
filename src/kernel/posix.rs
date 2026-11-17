@@ -50,6 +50,7 @@ pub const ENAMETOOLONG: i64  = 36; // File name too long
 pub const ENOSYS: i64       = 38; // Function not implemented
 pub const ENOTEMPTY: i64    = 39; // Directory not empty
 pub const ELOOP: i64        = 40; // Too many levels of symbolic links
+pub const EOVERFLOW: i64    = 75; // Value too large for defined data type
 pub const EOPNOTSUPP: i64   = 95; // Operation not supported on socket
 pub const ECONNREFUSED: i64  = 111; // Connection refused
 
@@ -149,7 +150,7 @@ pub enum FdType {
 #[derive(Copy, Clone, Debug)]
 pub struct OpenFileDescription {
     pub fd_type: FdType,
-    pub path: [u8; 64],
+    pub path: [u8; 128],
     pub path_len: usize,
     pub flags: u32,
     pub offset: usize,
@@ -160,7 +161,7 @@ impl OpenFileDescription {
     pub const fn unused() -> Self {
         Self {
             fd_type: FdType::Unused,
-            path: [0; 64],
+            path: [0; 128],
             path_len: 0,
             flags: 0,
             offset: 0,
@@ -173,7 +174,7 @@ pub static OPEN_FILE_TABLE: Spinlock<[OpenFileDescription; MAX_OPEN_FILES]> = Sp
     // Slots 0, 1, 2 for initial stdin, stdout, stderr
     OpenFileDescription {
         fd_type: FdType::ConsoleStdin,
-        path: [0; 64],
+        path: [0; 128],
         path_len: 0,
         flags: O_RDONLY,
         offset: 0,
@@ -181,7 +182,7 @@ pub static OPEN_FILE_TABLE: Spinlock<[OpenFileDescription; MAX_OPEN_FILES]> = Sp
     },
     OpenFileDescription {
         fd_type: FdType::ConsoleStdout,
-        path: [0; 64],
+        path: [0; 128],
         path_len: 0,
         flags: O_WRONLY,
         offset: 0,
@@ -189,7 +190,7 @@ pub static OPEN_FILE_TABLE: Spinlock<[OpenFileDescription; MAX_OPEN_FILES]> = Sp
     },
     OpenFileDescription {
         fd_type: FdType::ConsoleStderr,
-        path: [0; 64],
+        path: [0; 128],
         path_len: 0,
         flags: O_WRONLY,
         offset: 0,
@@ -381,6 +382,15 @@ fn is_leap_year(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
 }
 
+pub fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &b in bytes {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 // ============================================================================
 // 7. Core POSIX System Call Implementations
 // ============================================================================
@@ -392,8 +402,7 @@ pub fn posix_open(path: &str, flags: u32, _mode: u32) -> Result<usize, i64> {
     }
 
     if (flags & O_CREAT) != 0 {
-        let mut probe = [0u8; 1];
-        if crate::fs::vfs::read(clean, &mut probe).is_err() {
+        if crate::fs::vfs::file_size(clean).is_err() {
             let _ = crate::fs::vfs::write(clean, b"");
         }
     }
@@ -428,16 +437,18 @@ pub fn posix_open(path: &str, flags: u32, _mode: u32) -> Result<usize, i64> {
 
     let mut initial_offset = 0;
     if (flags & O_APPEND) != 0 {
-        let mut tmp = [0u8; 1];
-        if let Ok(file_len) = crate::fs::vfs::read(clean, &mut tmp) {
+        if let Ok(file_len) = crate::fs::vfs::file_size(clean) {
             initial_offset = file_len;
         }
     }
 
-    let mut path_arr = [0u8; 64];
+    let mut path_arr = [0u8; 128];
     let b = clean.as_bytes();
-    let len = b.len().min(63);
-    path_arr[..len].copy_from_slice(&b[..len]);
+    if b.len() >= path_arr.len() {
+        return Err(-ENAMETOOLONG);
+    }
+    let len = b.len();
+    path_arr[..len].copy_from_slice(b);
 
     oft[d_slot] = OpenFileDescription {
         fd_type: FdType::VfsFile,
@@ -474,7 +485,7 @@ pub fn posix_close(fd: usize) -> Result<(), i64> {
     drop(s);
 
     let mut oft = OPEN_FILE_TABLE.lock();
-    if desc_idx < MAX_OPEN_FILES && oft[desc_idx].ref_count > 0 {
+    if desc_idx >= 3 && desc_idx < MAX_OPEN_FILES && oft[desc_idx].ref_count > 0 {
         oft[desc_idx].ref_count -= 1;
         if oft[desc_idx].ref_count == 0 {
             match oft[desc_idx].fd_type {
@@ -534,17 +545,10 @@ pub fn posix_read(fd: usize, buf: &mut [u8]) -> Result<usize, i64> {
         FdType::VfsFile => {
             let path_str = core::str::from_utf8(&desc.path[..desc.path_len]).unwrap_or("");
             let offset = desc.offset;
-            let mut file_buf = [0u8; 4096];
-            match crate::fs::vfs::read(path_str, &mut file_buf) {
-                Ok(total_size) => {
-                    if offset >= total_size {
-                        return Ok(0); // EOF
-                    }
-                    let avail = total_size - offset;
-                    let to_copy = avail.min(buf.len());
-                    buf[..to_copy].copy_from_slice(&file_buf[offset..offset + to_copy]);
-                    desc.offset += to_copy;
-                    Ok(to_copy)
+            match crate::fs::vfs::read_at(path_str, offset, buf) {
+                Ok(read_bytes) => {
+                    desc.offset = desc.offset.saturating_add(read_bytes);
+                    Ok(read_bytes)
                 }
                 Err(_) => Err(-ENOENT),
             }
@@ -598,9 +602,10 @@ pub fn posix_write(fd: usize, data: &[u8]) -> Result<usize, i64> {
         FdType::ConsoleStdin => Err(-EBADF),
         FdType::VfsFile => {
             let path_str = core::str::from_utf8(&desc.path[..desc.path_len]).unwrap_or("");
-            match crate::fs::vfs::write(path_str, data) {
+            let offset = desc.offset;
+            match crate::fs::vfs::write_at(path_str, offset, data) {
                 Ok(written) => {
-                    desc.offset += written;
+                    desc.offset = desc.offset.saturating_add(written);
                     Ok(written)
                 }
                 Err(_) => Err(-EIO),
@@ -644,12 +649,11 @@ pub fn posix_lseek(fd: usize, offset: i64, whence: i32) -> Result<i64, i64> {
             let cur = desc.offset as i64;
             let target = match whence {
                 SEEK_SET => offset,
-                SEEK_CUR => cur + offset,
+                SEEK_CUR => cur.checked_add(offset).ok_or(-EOVERFLOW)?,
                 SEEK_END => {
                     let path_str = core::str::from_utf8(&desc.path[..desc.path_len]).unwrap_or("");
-                    let mut tmp = [0u8; 1];
-                    let file_size = crate::fs::vfs::read(path_str, &mut tmp).unwrap_or(0) as i64;
-                    file_size + offset
+                    let file_size = crate::fs::vfs::file_size(path_str).unwrap_or(0) as i64;
+                    file_size.checked_add(offset).ok_or(-EOVERFLOW)?
                 }
                 _ => return Err(-EINVAL),
             };
@@ -683,46 +687,51 @@ pub fn posix_stat(path: &str, statbuf: &mut PosixStat) -> Result<(), i64> {
     statbuf.st_ctime = epoch;
     statbuf.st_blksize = 4096;
 
-    if clean == "/" || clean == "." {
-        statbuf.st_ino = 1;
+    if clean == "/" || clean == "." || clean == ".." || crate::fs::vfs::is_directory(clean) {
+        statbuf.st_ino = fnv1a_64(clean.as_bytes());
         statbuf.st_mode = S_IFDIR | 0o755;
         statbuf.st_size = 4096;
         statbuf.st_blocks = 8;
         return Ok(());
     }
 
-    if clean.starts_with("/dev") || clean.starts_with("dev") {
+    if clean == "/dev" || clean == "dev" {
         statbuf.st_ino = 2;
+        statbuf.st_mode = S_IFDIR | 0o755;
+        statbuf.st_size = 4096;
+        statbuf.st_blocks = 8;
+        return Ok(());
+    }
+
+    if clean.starts_with("/dev/") || clean.starts_with("dev/") {
+        statbuf.st_ino = fnv1a_64(clean.as_bytes());
         statbuf.st_mode = S_IFCHR | 0o666;
         statbuf.st_size = 0;
         return Ok(());
     }
 
     if clean.starts_with("/ssd") || clean.starts_with("/hdd") || clean.starts_with("/usb") || clean.starts_with("/sdxc") || clean.starts_with("/sdhc") {
-        statbuf.st_ino = 3;
+        statbuf.st_ino = fnv1a_64(clean.as_bytes());
         statbuf.st_mode = S_IFBLK | 0o660;
-        let mut total_bytes: i64 = 0;
-        let mut blk_count: i64 = 0;
         if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(clean) {
+            let mut total_bytes: i64 = 0;
+            let mut blk_count: i64 = 0;
             let _ = crate::drivers::block_dev::with_dev(idx, |dev| {
                 let bytes = dev.total_blocks() * (dev.block_size() as u64);
                 total_bytes = bytes as i64;
                 blk_count = (bytes / 512) as i64;
             });
+            statbuf.st_size = total_bytes;
+            statbuf.st_blocks = blk_count;
+            return Ok(());
+        } else {
+            return Err(-ENOENT);
         }
-        if total_bytes == 0 {
-            total_bytes = 131072 * 512;
-            blk_count = 131072;
-        }
-        statbuf.st_size = total_bytes;
-        statbuf.st_blocks = blk_count;
-        return Ok(());
     }
 
-    let mut probe = [0u8; 1];
-    match crate::fs::vfs::read(clean, &mut probe) {
+    match crate::fs::vfs::file_size(clean) {
         Ok(sz) => {
-            statbuf.st_ino = (clean.as_bytes().iter().map(|&b| b as u64).sum::<u64>()) + 10;
+            statbuf.st_ino = fnv1a_64(clean.as_bytes());
             statbuf.st_mode = S_IFREG | 0o644;
             statbuf.st_size = sz as i64;
             statbuf.st_blocks = ((sz as i64) + 511) / 512;
@@ -765,8 +774,8 @@ pub fn posix_fstat(fd: usize, statbuf: &mut PosixStat) -> Result<(), i64> {
             Ok(())
         }
         FdType::VfsFile => {
-            let mut path_buf = [0u8; 64];
-            let len = desc.path_len.min(64);
+            let mut path_buf = [0u8; 128];
+            let len = desc.path_len.min(128);
             path_buf[..len].copy_from_slice(&desc.path[..len]);
             drop(oft);
             let path_str = core::str::from_utf8(&path_buf[..len]).unwrap_or("");
@@ -792,8 +801,20 @@ pub fn posix_pipe(pipefd: &mut [i32; 2]) -> Result<(), i64> {
             }
         }
     }
-    let rd_slot = r_desc.ok_or(-ENFILE)?;
-    let wd_slot = w_desc.ok_or(-ENFILE)?;
+    let rd_slot = match r_desc {
+        Some(s) => s,
+        None => {
+            crate::kernel::ipc::destroy_pipe(pipe_id);
+            return Err(-ENFILE);
+        }
+    };
+    let wd_slot = match w_desc {
+        Some(s) => s,
+        None => {
+            crate::kernel::ipc::destroy_pipe(pipe_id);
+            return Err(-ENFILE);
+        }
+    };
 
     let mut s = crate::kernel::task::SCHED.lock();
     let cpu = crate::kernel::smp::get_current_cpu();
@@ -814,12 +835,24 @@ pub fn posix_pipe(pipefd: &mut [i32; 2]) -> Result<(), i64> {
         }
     }
 
-    let r_slot = read_slot.ok_or(-EMFILE)?;
-    let w_slot = write_slot.ok_or(-EMFILE)?;
+    let r_slot = match read_slot {
+        Some(s) => s,
+        None => {
+            crate::kernel::ipc::destroy_pipe(pipe_id);
+            return Err(-EMFILE);
+        }
+    };
+    let w_slot = match write_slot {
+        Some(s) => s,
+        None => {
+            crate::kernel::ipc::destroy_pipe(pipe_id);
+            return Err(-EMFILE);
+        }
+    };
 
     oft[rd_slot] = OpenFileDescription {
         fd_type: FdType::PipeRead(pipe_id),
-        path: [0; 64],
+        path: [0; 128],
         path_len: 0,
         flags: O_RDONLY,
         offset: 0,
@@ -828,7 +861,7 @@ pub fn posix_pipe(pipefd: &mut [i32; 2]) -> Result<(), i64> {
 
     oft[wd_slot] = OpenFileDescription {
         fd_type: FdType::PipeWrite(pipe_id),
-        path: [0; 64],
+        path: [0; 128],
         path_len: 0,
         flags: O_WRONLY,
         offset: 0,
@@ -895,7 +928,7 @@ pub fn posix_dup2(oldfd: usize, newfd: usize) -> Result<usize, i64> {
 
     let mut s = crate::kernel::task::SCHED.lock();
     let cpu = crate::kernel::smp::get_current_cpu();
-    let cur_idx = s.current[cpu].unwrap_or(0);
+    let mut cur_idx = s.current[cpu].unwrap_or(0);
     let task = &mut s.tasks[cur_idx];
 
     let desc_idx = task.fd_table[oldfd].desc_idx.ok_or(-EBADF)?;
@@ -908,6 +941,7 @@ pub fn posix_dup2(oldfd: usize, newfd: usize) -> Result<usize, i64> {
         drop(s);
         let _ = posix_close(newfd);
         s = crate::kernel::task::SCHED.lock();
+        cur_idx = s.current[cpu].unwrap_or(0);
     }
 
     let mut oft = OPEN_FILE_TABLE.lock();
@@ -1057,6 +1091,12 @@ pub fn posix_ioctl(fd: usize, req: u64, arg: u64) -> Result<i64, i64> {
     }
 }
 
+extern "C" fn fork_child_trampoline(_arg: *mut u8) {
+    loop {
+        crate::kernel::task::yield_now();
+    }
+}
+
 pub fn posix_fork() -> Result<u32, i64> {
     let mut s = crate::kernel::task::SCHED.lock();
     let cpu = crate::kernel::smp::get_current_cpu();
@@ -1071,14 +1111,25 @@ pub fn posix_fork() -> Result<u32, i64> {
 
     let new_pml4 = crate::mm::vmm::create_pml4().ok_or(-ENOMEM)?;
 
-    let mut child_idx = None;
-    for i in 0..crate::kernel::task::MAX_TASKS {
-        if s.tasks[i].state == crate::kernel::task::TaskState::Unused {
-            child_idx = Some(i);
-            break;
+    // Allocate 16 KiB kernel stack for child task
+    let stack_frames = 4;
+    let stack_base = match crate::mm::pmm::alloc_frames(stack_frames) {
+        Some(b) => b,
+        None => {
+            crate::mm::vmm::destroy_pml4(new_pml4);
+            return Err(-ENOMEM);
         }
-    }
-    let c_idx = child_idx.ok_or(-EAGAIN)?;
+    };
+    let stack_top = stack_base + (stack_frames * 4096);
+
+    let c_idx = match crate::kernel::task::alloc_task_slot(&mut s) {
+        Some(idx) => idx,
+        None => {
+            let _ = crate::mm::pmm::free_frames(stack_base, stack_frames);
+            crate::mm::vmm::destroy_pml4(new_pml4);
+            return Err(-EAGAIN);
+        }
+    };
     let child_pid = s.next_id;
     s.next_id += 1;
 
@@ -1095,6 +1146,39 @@ pub fn posix_fork() -> Result<u32, i64> {
     // Clone standard user stack area (0x0000_7FFF_FF00_0000 .. 0x0000_7FFF_FFFF_0000)
     let _ = crate::mm::vmm::clone_user_range(parent_pml4, new_pml4, 0x0000_7FFF_FF00_0000, 0x0000_7FFF_FFFF_0000);
 
+    // Setup initial kernel stack frame for child for switch_context
+    let child_rsp = unsafe {
+        let mut sp = stack_top as *mut u64;
+
+        // Arguments for task_trampoline
+        sp = sp.sub(1);
+        *sp = 0; // arg pointer
+        sp = sp.sub(1);
+        *sp = fork_child_trampoline as *const () as usize as u64; // entry function pointer
+
+        // Trampoline return address
+        sp = sp.sub(1);
+        *sp = crate::kernel::task::task_trampoline_addr();
+
+        // Callee-saved registers pushed by switch_context
+        sp = sp.sub(1);
+        *sp = 0x202; // RFLAGS (IF=1, bit 1=1)
+        sp = sp.sub(1);
+        *sp = 0; // RBX
+        sp = sp.sub(1);
+        *sp = 0; // RBP
+        sp = sp.sub(1);
+        *sp = 0; // R12
+        sp = sp.sub(1);
+        *sp = 0; // R13
+        sp = sp.sub(1);
+        *sp = 0; // R14
+        sp = sp.sub(1);
+        *sp = 0; // R15
+
+        sp as u64
+    };
+
     // Clone parent state into child task slot
     let mut child = crate::kernel::task::Task::empty();
     child.id = child_pid;
@@ -1102,6 +1186,8 @@ pub fn posix_fork() -> Result<u32, i64> {
     child.pgid = parent.pgid;
     child.priority = parent.priority;
     child.cr3 = new_pml4 as u64;
+    child.rsp = child_rsp;
+    child.stack_base = stack_base as u64;
     child.is_user = true;
     child.fd_table = parent.fd_table;
     child.vmas = parent.vmas;
@@ -1121,7 +1207,7 @@ pub fn posix_fork() -> Result<u32, i64> {
     let mut oft = OPEN_FILE_TABLE.lock();
     for fd in child.fd_table.iter() {
         if let Some(desc_idx) = fd.desc_idx {
-            if desc_idx < MAX_OPEN_FILES && oft[desc_idx].ref_count > 0 {
+            if desc_idx < MAX_OPEN_FILES && desc_idx >= 3 && oft[desc_idx].ref_count > 0 {
                 oft[desc_idx].ref_count += 1;
                 match oft[desc_idx].fd_type {
                     FdType::PipeRead(id) => crate::kernel::ipc::pipe_add_reader(id),
@@ -1134,6 +1220,7 @@ pub fn posix_fork() -> Result<u32, i64> {
     drop(oft);
 
     s.tasks[c_idx] = child;
+    crate::kernel::smp::broadcast_resched();
     Ok(child_pid)
 }
 
@@ -1174,7 +1261,12 @@ pub fn posix_execve(path: &str, _argv: &[&str], _envp: &[&str]) -> Result<(), i6
     let cpu = crate::kernel::smp::get_current_cpu();
     let cur_idx = s.current[cpu].unwrap_or(0);
     let t = &mut s.tasks[cur_idx];
+    let old_cr3 = t.cr3;
     t.cr3 = new_pml4 as u64;
+    crate::mm::vmm::switch_pml4(new_pml4);
+    if old_cr3 != 0 && old_cr3 != crate::mm::vmm::get_kernel_pml4() as u64 {
+        crate::mm::vmm::destroy_pml4(old_cr3 as *mut crate::mm::vmm::PageTable);
+    }
     t.is_user = true;
     t.vmas = [Vma::empty(); MAX_VMAS_PER_TASK];
     t.brk_start = 0x0000_0000_1000_0000;
@@ -1191,6 +1283,14 @@ pub fn posix_execve(path: &str, _argv: &[&str], _envp: &[&str]) -> Result<(), i6
 }
 
 pub fn posix_wait4(target_pid: i32, status_ptr: *mut i32, options: i32) -> Result<i32, i64> {
+    if !status_ptr.is_null() {
+        crate::kernel::uaccess::validate_user_range(
+            status_ptr as u64,
+            core::mem::size_of::<i32>(),
+            true,
+        )?;
+    }
+
     let mut s = crate::kernel::task::SCHED.lock();
     let cpu = crate::kernel::smp::get_current_cpu();
     let cur_idx = s.current[cpu].unwrap_or(0);
@@ -1202,14 +1302,20 @@ pub fn posix_wait4(target_pid: i32, status_ptr: *mut i32, options: i32) -> Resul
             if t.is_zombie || t.state == crate::kernel::task::TaskState::Terminated {
                 let pid = t.id as i32;
                 let exit_code = t.exit_code;
+                if t.stack_base != 0 {
+                    let _ = crate::mm::pmm::free_frames(t.stack_base as usize, 4);
+                }
+                if t.cr3 != 0 {
+                    crate::mm::vmm::destroy_pml4(t.cr3 as *mut crate::mm::vmm::PageTable);
+                }
                 *t = crate::kernel::task::Task::empty();
+                drop(s);
 
                 if !status_ptr.is_null() {
                     let exit_status = (exit_code & 0xFF) << 8;
                     let slice = unsafe {
                         core::slice::from_raw_parts(&exit_status as *const i32 as *const u8, core::mem::size_of::<i32>())
                     };
-                    drop(s);
                     let _ = crate::kernel::uaccess::copy_to_user(slice, status_ptr as u64);
                 }
                 return Ok(pid);
@@ -1240,6 +1346,9 @@ pub fn posix_kill(pid: i32, sig: i32) -> Result<(), i64> {
                 t.state = crate::kernel::task::TaskState::Terminated;
                 t.is_zombie = true;
                 t.exit_code = 128 + sig;
+                drop(s);
+                crate::kernel::smp::broadcast_resched();
+                return Ok(());
             } else {
                 t.sig_pending |= 1u64 << (sig - 1);
             }
@@ -1330,31 +1439,38 @@ pub fn posix_brk(addr: u64) -> Result<u64, i64> {
         crate::mm::vmm::get_kernel_pml4()
     };
 
+    let cur_page_top = (task.brk_current + 4095) & !4095;
+    let new_page_top = (addr + 4095) & !4095;
+
     if addr > task.brk_current {
-        let diff = addr - task.brk_current;
-        let frames_needed = ((diff as usize) + 4095) / 4096;
-        if let Some(paddr) = crate::mm::pmm::alloc_frames(frames_needed) {
-            unsafe {
-                core::ptr::write_bytes(paddr as *mut u8, 0, frames_needed * 4096);
+        if new_page_top > cur_page_top {
+            let diff = new_page_top - cur_page_top;
+            let frames_needed = (diff as usize) / 4096;
+            if let Some(paddr) = crate::mm::pmm::alloc_frames(frames_needed) {
+                unsafe {
+                    core::ptr::write_bytes(paddr as *mut u8, 0, frames_needed * 4096);
+                }
+                for i in 0..frames_needed {
+                    let page_v = cur_page_top + (i as u64 * 4096);
+                    let page_p = (paddr as u64) + (i as u64 * 4096);
+                    let _ = crate::mm::vmm::map_page(
+                        pml4,
+                        page_v,
+                        page_p,
+                        crate::mm::vmm::PAGE_PRESENT | crate::mm::vmm::PAGE_WRITABLE | crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_NO_EXECUTE,
+                    );
+                }
+            } else {
+                return Err(-ENOMEM);
             }
-            for i in 0..frames_needed {
-                let page_v = (task.brk_current + (i as u64 * 4096)) & !0xFFF;
-                let page_p = (paddr as u64) + (i as u64 * 4096);
-                let _ = crate::mm::vmm::map_page(
-                    pml4,
-                    page_v,
-                    page_p,
-                    crate::mm::vmm::PAGE_PRESENT | crate::mm::vmm::PAGE_WRITABLE | crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_NO_EXECUTE,
-                );
-            }
-            task.brk_current = addr;
-            Ok(task.brk_current)
-        } else {
-            Err(-ENOMEM)
         }
+        task.brk_current = addr;
+        Ok(task.brk_current)
     } else {
         // Heap contraction
-        crate::mm::vmm::free_user_range(pml4, addr, task.brk_current);
+        if new_page_top < cur_page_top {
+            crate::mm::vmm::free_user_range(pml4, new_page_top, cur_page_top);
+        }
         task.brk_current = addr;
         Ok(task.brk_current)
     }
@@ -1365,12 +1481,12 @@ pub fn posix_mmap(addr: u64, len: usize, prot: i32, flags: i32, fd: i32, offset:
         return Err(-EINVAL);
     }
 
-    let aligned_len = (len + 4095) & !4095;
+    let aligned_len = len.checked_add(4095).ok_or(-ENOMEM)? & !4095;
     let frames_needed = aligned_len / 4096;
 
     let mut s = crate::kernel::task::SCHED.lock();
     let cpu = crate::kernel::smp::get_current_cpu();
-    let cur_idx = s.current[cpu].unwrap_or(0);
+    let mut cur_idx = s.current[cpu].unwrap_or(0);
     let task = &mut s.tasks[cur_idx];
 
     let vaddr = if addr != 0 && (flags & MAP_FIXED) != 0 {
@@ -1405,13 +1521,25 @@ pub fn posix_mmap(addr: u64, len: usize, prot: i32, flags: i32, fd: i32, offset:
         drop(s);
         let mut tmp_buf = [0u8; 4096];
         let _ = posix_lseek(fd as usize, offset, SEEK_SET);
-        let n = posix_read(fd as usize, &mut tmp_buf).unwrap_or(0);
-        if n > 0 {
-            unsafe {
-                core::ptr::copy_nonoverlapping(tmp_buf.as_ptr(), phys_frame as *mut u8, n.min(aligned_len));
+        let mut bytes_copied = 0usize;
+        while bytes_copied < aligned_len {
+            let chunk = (aligned_len - bytes_copied).min(tmp_buf.len());
+            let n = posix_read(fd as usize, &mut tmp_buf[..chunk]).unwrap_or(0);
+            if n == 0 {
+                break;
             }
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    tmp_buf.as_ptr(),
+                    (phys_frame + bytes_copied) as *mut u8,
+                    n,
+                );
+            }
+            bytes_copied += n;
         }
         s = crate::kernel::task::SCHED.lock();
+        let cpu = crate::kernel::smp::get_current_cpu();
+        cur_idx = s.current[cpu].unwrap_or(0);
     }
 
     let mut page_flags = crate::mm::vmm::PAGE_PRESENT | crate::mm::vmm::PAGE_USER;
@@ -1430,6 +1558,7 @@ pub fn posix_mmap(addr: u64, len: usize, prot: i32, flags: i32, fd: i32, offset:
 
     // Record VMA
     let task = &mut s.tasks[cur_idx];
+    let mut recorded = false;
     for vma in task.vmas.iter_mut() {
         if !vma.in_use {
             *vma = Vma {
@@ -1439,8 +1568,14 @@ pub fn posix_mmap(addr: u64, len: usize, prot: i32, flags: i32, fd: i32, offset:
                 flags,
                 in_use: true,
             };
+            recorded = true;
             break;
         }
+    }
+
+    if !recorded {
+        crate::mm::vmm::free_user_range(pml4, vaddr, vaddr + aligned_len as u64);
+        return Err(-ENOMEM);
     }
 
     Ok(vaddr)
@@ -1450,7 +1585,7 @@ pub fn posix_munmap(addr: u64, len: usize) -> Result<(), i64> {
     if addr == 0 || (addr & 0xFFF) != 0 || len == 0 {
         return Err(-EINVAL);
     }
-    let aligned_len = (len + 4095) & !4095;
+    let aligned_len = len.checked_add(4095).ok_or(-EINVAL)? & !4095;
 
     let mut s = crate::kernel::task::SCHED.lock();
     let cpu = crate::kernel::smp::get_current_cpu();
@@ -1478,7 +1613,7 @@ pub fn posix_mprotect(addr: u64, len: usize, prot: i32) -> Result<(), i64> {
     if addr == 0 || (addr & 0xFFF) != 0 || len == 0 {
         return Err(-EINVAL);
     }
-    let aligned_len = (len + 4095) & !4095;
+    let aligned_len = len.checked_add(4095).ok_or(-EINVAL)? & !4095;
     let end = addr.saturating_add(aligned_len as u64);
 
     let mut s = crate::kernel::task::SCHED.lock();
@@ -1538,7 +1673,10 @@ pub fn posix_nanosleep(req: &Timespec, _rem: Option<&mut Timespec>) -> Result<()
     if req.tv_sec < 0 || req.tv_nsec < 0 || req.tv_nsec >= 1_000_000_000 {
         return Err(-EINVAL);
     }
-    let ticks = (req.tv_sec as u64 * 100) + ((req.tv_nsec as u64) / 10_000_000);
+    let mut ticks = (req.tv_sec as u64 * 100) + ((req.tv_nsec as u64 + 9_999_999) / 10_000_000);
+    if ticks == 0 && (req.tv_sec > 0 || req.tv_nsec > 0) {
+        ticks = 1;
+    }
     if ticks > 0 {
         crate::kernel::task::sleep(ticks);
     }
@@ -1586,16 +1724,27 @@ pub fn posix_chdir(path: &str) -> Result<(), i64> {
         return Err(-ENOENT);
     }
 
+    if !crate::fs::vfs::is_directory(clean) {
+        if crate::fs::vfs::file_size(clean).is_ok() {
+            return Err(-ENOTDIR);
+        } else {
+            return Err(-ENOENT);
+        }
+    }
+
     let mut s = crate::kernel::task::SCHED.lock();
     let cpu = crate::kernel::smp::get_current_cpu();
     let cur_idx = s.current[cpu].unwrap_or(0);
     let task = &mut s.tasks[cur_idx];
 
-    task.cwd.fill(0);
     let b = clean.as_bytes();
-    let len = b.len().min(63);
-    task.cwd[..len].copy_from_slice(&b[..len]);
-    task.cwd_len = len;
+    if b.len() >= task.cwd.len() {
+        return Err(-ENAMETOOLONG);
+    }
+
+    task.cwd.fill(0);
+    task.cwd[..b.len()].copy_from_slice(b);
+    task.cwd_len = b.len();
     Ok(())
 }
 
@@ -1604,27 +1753,65 @@ pub fn posix_mkdir(path: &str, _mode: u32) -> Result<(), i64> {
     if clean.is_empty() {
         return Err(-ENOENT);
     }
-    let _ = crate::fs::vfs::write(clean, b"");
-    Ok(())
+    match crate::fs::vfs::mkdir(clean) {
+        Ok(()) => Ok(()),
+        Err("Directory already exists") => Err(-EEXIST),
+        Err("Cannot create root directory") => Err(-EEXIST),
+        Err(_) => Err(-ENOSPC),
+    }
 }
 
 pub fn posix_rmdir(path: &str) -> Result<(), i64> {
     let clean = path.trim();
-    crate::fs::vfs::delete(clean).map_err(|_| -ENOENT)
+    if clean.is_empty() {
+        return Err(-ENOENT);
+    }
+    match crate::fs::vfs::rmdir(clean) {
+        Ok(()) => Ok(()),
+        Err("Cannot remove root directory") | Err("Cannot remove system mountpoint") => Err(-EBUSY),
+        Err(_) => Err(-ENOENT),
+    }
 }
 
 pub fn posix_unlink(path: &str) -> Result<(), i64> {
     let clean = path.trim();
+    if clean.is_empty() {
+        return Err(-ENOENT);
+    }
+    if crate::fs::vfs::is_directory(clean) {
+        return Err(-EISDIR);
+    }
     crate::fs::vfs::delete(clean).map_err(|_| -ENOENT)
 }
 
-pub fn posix_access(path: &str, _mode: i32) -> Result<(), i64> {
+pub fn posix_access(path: &str, mode: i32) -> Result<(), i64> {
     let clean = path.trim();
     if clean.is_empty() {
         return Err(-ENOENT);
     }
-    let mut probe = [0u8; 1];
-    crate::fs::vfs::read(clean, &mut probe).map(|_| ()).map_err(|_| -ENOENT)
+    let mut statbuf = PosixStat::default();
+    posix_stat(clean, &mut statbuf)?;
+
+    // Check write permission
+    if (mode & 2) != 0 {
+        if (statbuf.st_mode & 0o222) == 0 {
+            return Err(-EACCES);
+        }
+    }
+    // Check read permission
+    if (mode & 4) != 0 {
+        if (statbuf.st_mode & 0o444) == 0 {
+            return Err(-EACCES);
+        }
+    }
+    // Check execute permission
+    if (mode & 1) != 0 {
+        if (statbuf.st_mode & 0o111) == 0 {
+            return Err(-EACCES);
+        }
+    }
+
+    Ok(())
 }
 
 pub fn posix_umask(mask: u32) -> u32 {
@@ -1645,21 +1832,82 @@ pub fn posix_getdents64(fd: usize, dirp: *mut LinuxDirent64, count: usize) -> Re
         return Err(-EINVAL);
     }
 
-    let mut entry = LinuxDirent64 {
-        d_ino: 1,
-        d_off: 0,
-        d_reclen: core::mem::size_of::<LinuxDirent64>() as u16,
-        d_type: 4, // DT_DIR
-        d_name: [0; 256],
+    let desc_idx = {
+        let s = crate::kernel::task::SCHED.lock();
+        let cpu = crate::kernel::smp::get_current_cpu();
+        let cur_idx = s.current[cpu].unwrap_or(0);
+        s.tasks[cur_idx].fd_table[fd].desc_idx.ok_or(-EBADF)?
     };
-    entry.d_name[0] = b'.';
 
-    let slice = unsafe {
-        core::slice::from_raw_parts(&entry as *const LinuxDirent64 as *const u8, core::mem::size_of::<LinuxDirent64>())
-    };
-    crate::kernel::uaccess::copy_to_user(slice, dirp as u64)?;
+    let oft = OPEN_FILE_TABLE.lock();
+    if desc_idx >= MAX_OPEN_FILES || oft[desc_idx].ref_count == 0 {
+        return Err(-EBADF);
+    }
 
-    Ok(core::mem::size_of::<LinuxDirent64>() as i64)
+    let desc = &oft[desc_idx];
+    let mut path_buf = [0u8; 128];
+    let plen = desc.path_len.min(128);
+    path_buf[..plen].copy_from_slice(&desc.path[..plen]);
+    drop(oft);
+
+    let path_str = core::str::from_utf8(&path_buf[..plen]).unwrap_or("/");
+
+    crate::kernel::uaccess::validate_user_range(dirp as u64, count, true)?;
+
+    let mut written_bytes = 0usize;
+    let mut current_dirp = dirp as *mut u8;
+
+    let dot_entries: [(&str, u8); 2] = [(".", 4), ("..", 4)];
+    for (name, dtype) in dot_entries.iter() {
+        let name_bytes = name.as_bytes();
+        let reclen = core::mem::size_of::<LinuxDirent64>();
+        if written_bytes + reclen > count {
+            break;
+        }
+
+        let mut entry = LinuxDirent64 {
+            d_ino: fnv1a_64(name_bytes),
+            d_off: (written_bytes + reclen) as i64,
+            d_reclen: reclen as u16,
+            d_type: *dtype,
+            d_name: [0; 256],
+        };
+        entry.d_name[..name_bytes.len()].copy_from_slice(name_bytes);
+        entry.d_name[name_bytes.len()] = 0;
+
+        let slice = unsafe {
+            core::slice::from_raw_parts(&entry as *const LinuxDirent64 as *const u8, reclen)
+        };
+        crate::kernel::uaccess::copy_to_user(slice, current_dirp as u64)?;
+        written_bytes += reclen;
+        current_dirp = unsafe { current_dirp.add(reclen) };
+    }
+
+    let _ = crate::fs::vfs::list_directory(path_str, |name, _size, is_dir| {
+        let name_bytes = name.as_bytes();
+        let reclen = core::mem::size_of::<LinuxDirent64>();
+        if written_bytes + reclen <= count {
+            let mut entry = LinuxDirent64 {
+                d_ino: fnv1a_64(name_bytes),
+                d_off: (written_bytes + reclen) as i64,
+                d_reclen: reclen as u16,
+                d_type: if is_dir { 4 } else { 8 },
+                d_name: [0; 256],
+            };
+            let copy_len = name_bytes.len().min(255);
+            entry.d_name[..copy_len].copy_from_slice(&name_bytes[..copy_len]);
+            entry.d_name[copy_len] = 0;
+
+            let slice = unsafe {
+                core::slice::from_raw_parts(&entry as *const LinuxDirent64 as *const u8, reclen)
+            };
+            let _ = crate::kernel::uaccess::copy_to_user(slice, current_dirp as u64);
+            written_bytes += reclen;
+            current_dirp = unsafe { current_dirp.add(reclen) };
+        }
+    });
+
+    Ok(written_bytes as i64)
 }
 
 // ============================================================================

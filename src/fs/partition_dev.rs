@@ -30,14 +30,22 @@ impl<'a> BlockDevice for PartitionDevice<'a> {
     }
 
     fn read_blocks(&mut self, lba: u64, count: u32, buf: &mut [u8]) -> i32 {
-        if lba + count as u64 > self.sector_count {
+        let end = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end > self.sector_count {
             return BLOCK_DEV_ERR_BOUNDS;
         }
         self.parent.read_blocks(self.start_lba + lba, count, buf)
     }
 
     fn write_blocks(&mut self, lba: u64, count: u32, buf: &[u8]) -> i32 {
-        if lba + count as u64 > self.sector_count {
+        let end = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end > self.sector_count {
             return BLOCK_DEV_ERR_BOUNDS;
         }
         self.parent.write_blocks(self.start_lba + lba, count, buf)

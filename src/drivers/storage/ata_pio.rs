@@ -160,7 +160,21 @@ impl BlockDevice for AtaDevice {
     }
 
     fn read_blocks(&mut self, lba: u64, count: u32, buf: &mut [u8]) -> i32 {
-        if lba + count as u64 > self.total_sectors {
+        if count == 0 {
+            return BLOCK_DEV_OK;
+        }
+        let end_lba = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end_lba > self.total_sectors {
+            return BLOCK_DEV_ERR_BOUNDS;
+        }
+        let required_bytes = match (count as usize).checked_mul(512) {
+            Some(b) => b,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if buf.len() < required_bytes {
             return BLOCK_DEV_ERR_BOUNDS;
         }
 
@@ -197,7 +211,21 @@ impl BlockDevice for AtaDevice {
     }
 
     fn write_blocks(&mut self, lba: u64, count: u32, buf: &[u8]) -> i32 {
-        if lba + count as u64 > self.total_sectors {
+        if count == 0 {
+            return BLOCK_DEV_OK;
+        }
+        let end_lba = match lba.checked_add(count as u64) {
+            Some(e) => e,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if end_lba > self.total_sectors {
+            return BLOCK_DEV_ERR_BOUNDS;
+        }
+        let required_bytes = match (count as usize).checked_mul(512) {
+            Some(b) => b,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if buf.len() < required_bytes {
             return BLOCK_DEV_ERR_BOUNDS;
         }
 
