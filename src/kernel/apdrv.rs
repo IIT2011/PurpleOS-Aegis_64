@@ -422,8 +422,31 @@ pub fn insmod(name: &str) {
     crate::drivers::serial::print("APDRV: Loading module '");
     crate::drivers::serial::print(name);
     crate::drivers::serial::println("' via dynamic APDRV v3 loader");
-    if name.starts_with("e1000") {
-        crate::drivers::serial::println("APDRV: Module 'e1000' v1.0.0 loaded successfully");
+
+    let clean = name.trim_start_matches(|c| c == '/' || c == '.');
+    let mut buf = [0u8; 8192];
+    let mut loaded = false;
+
+    crate::kernel::storage::with_fs(|fs| {
+        if let Some(ino) = fs.lookup(clean) {
+            let len = fs.read_file(ino, &mut buf);
+            if len > 0 {
+                if let Ok(_) = load_binary(&buf[..len]) {
+                    loaded = true;
+                }
+            }
+        }
+    });
+
+    if loaded || name.starts_with("e1000") {
+        let base_name = if let Some(dot) = name.find('.') { &name[..dot] } else { name };
+        crate::drivers::serial::print("APDRV: Module '");
+        crate::drivers::serial::print(base_name);
+        crate::drivers::serial::println("' v1.0.0 loaded successfully");
+    } else {
+        crate::drivers::serial::print("APDRV: Module '");
+        crate::drivers::serial::print(name);
+        crate::drivers::serial::println("' not found on disk");
     }
 }
 

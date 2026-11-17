@@ -50,24 +50,26 @@ pub fn init() {
             }
         }
 
-        // AHCI scan from PCI
-        if let Some(dev) = crate::drivers::pci::find_device(0x8086, 0x2922) { // Intel ICH9 AHCI
-            crate::drivers::serial::print("AHCI: Found controller at PCI [");
-            crate::drivers::serial::print_u64(dev.bus as u64);
-            crate::drivers::serial::print(":");
-            crate::drivers::serial::print_u64(dev.slot as u64);
-            crate::drivers::serial::println("]");
-            crate::drivers::pci::enable_bus_mastering(dev.bus, dev.slot, dev.func);
-            let bar5 = (dev.bar5 & !0xF) as u64;
-            let _ = crate::mm::vmm::map_mmio_range(bar5, 0x2000);
-            let ghc = (bar5 + 0x04) as *mut u32;
-            core::ptr::write_volatile(ghc, core::ptr::read_volatile(ghc) | 0x80000000);
-            let ahci_ref = &mut *core::ptr::addr_of_mut!(AHCI0);
-            if ahci_ref.init((bar5 + 0x100) as *mut u8).is_ok() {
-                crate::drivers::serial::println("AHCI: Port 0 link active");
-                crate::drivers::block_dev::register(ahci_ref);
+        // AHCI scan from PCI (Class 0x01 = Mass Storage, Subclass 0x06 = SATA)
+        crate::drivers::pci::for_each_device(|dev| {
+            if dev.class_id == 0x01 && dev.subclass_id == 0x06 {
+                crate::drivers::serial::print("AHCI: Found controller at PCI [");
+                crate::drivers::serial::print_u64(dev.bus as u64);
+                crate::drivers::serial::print(":");
+                crate::drivers::serial::print_u64(dev.slot as u64);
+                crate::drivers::serial::println("]");
+                crate::drivers::pci::enable_bus_mastering(dev.bus, dev.slot, dev.func);
+                let bar5 = (dev.bar5 & !0xF) as u64;
+                let _ = crate::mm::vmm::map_mmio_range(bar5, 0x2000);
+                let ghc = (bar5 + 0x04) as *mut u32;
+                core::ptr::write_volatile(ghc, core::ptr::read_volatile(ghc) | 0x80000000);
+                let ahci_ref = &mut *core::ptr::addr_of_mut!(AHCI0);
+                if ahci_ref.init((bar5 + 0x100) as *mut u8).is_ok() {
+                    crate::drivers::serial::println("AHCI: Port 0 link active");
+                    crate::drivers::block_dev::register(ahci_ref);
+                }
             }
-        }
+        });
 
         // NVMe scan from PCI
         crate::drivers::pci::for_each_device(|dev| {

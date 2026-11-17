@@ -22,7 +22,11 @@ impl<'a> PurpleFsV3<'a> {
 
         let mut label = [0u8; 32];
         label.copy_from_slice(&sb[0x70..0x70 + 32]);
-        let total = if sector_count >= 8 { sector_count / 8 } else { 76800 };
+
+        let sb_total = u32::from_le_bytes(sb[24..28].try_into().unwrap_or([0; 4])) as u64;
+        let sb_free = u32::from_le_bytes(sb[28..32].try_into().unwrap_or([0; 4])) as u64;
+        let total = if sector_count >= 8 { sector_count / 8 } else { sb_total };
+        let free = if sb_free > 0 { sb_free } else { total };
 
         Ok(Self {
             dev,
@@ -30,7 +34,7 @@ impl<'a> PurpleFsV3<'a> {
             sector_count,
             volume_label: label,
             total_blocks: total,
-            free_blocks: total.saturating_sub(6800),
+            free_blocks: free,
         })
     }
 

@@ -276,14 +276,13 @@ impl Shell {
             }
             "peek" => {
                 if let Some(file) = parts.next() {
-                    if file == "/" || file == "/dir/file.txt" {
+                    let clean = file.trim_start_matches(|c| c == '/' || c == '.');
+                    if clean.is_empty() || clean.contains('/') || clean.ends_with('/') {
                         serial::print("Error: Invalid or unsupported file path '");
                         serial::print(file);
                         serial::println("'.");
                         return;
                     }
-
-                    let clean = file.trim_start_matches(|c| c == '/' || c == '.');
                     let mut found = false;
                     let mut buf = [0u8; 4096];
 
@@ -407,8 +406,14 @@ impl Shell {
                 serial::println("  Status:        ONLINE (Enforcing Cryptographic W^X)");
                 serial::println("  Hash Engine:   SHA-256 / HMAC-SHA256");
                 if crate::kernel::storage::is_mounted() {
-                    crate::security::aegis_detect::verify_storage();
-                    serial::println("  Verification:  3 total, 3 trusted, 0 tampered/missing\n");
+                    let (verified, total) = crate::security::aegis_detect::verify_storage();
+                    serial::print("  Verification:  ");
+                    serial::print_u64(total as u64);
+                    serial::print(" total, ");
+                    serial::print_u64(verified as u64);
+                    serial::print(" trusted, ");
+                    serial::print_u64(total.saturating_sub(verified) as u64);
+                    serial::println(" tampered/missing\n");
                 } else {
                     serial::println("  Verification:  Storage not mounted; standby mode.\n");
                 }
@@ -643,10 +648,16 @@ impl Shell {
             serial::println(name_str);
             serial::print("  Total Blocks:  ");
             serial::print_u64(st.total_blocks as u64);
-            serial::println(" (300 MiB)");
+            let total_mib = (st.total_blocks as u64 * 4096) / (1024 * 1024);
+            serial::print(" (");
+            serial::print_u64(total_mib);
+            serial::println(" MiB)");
             serial::print("  Free Blocks:   ");
             serial::print_u64(st.free_blocks as u64);
-            serial::println(" (273 MiB)\n");
+            let free_mib = (st.free_blocks as u64 * 4096) / (1024 * 1024);
+            serial::print(" (");
+            serial::print_u64(free_mib);
+            serial::println(" MiB)\n");
         } else {
             serial::println("  Mount State:   NOT MOUNTED (No volume detected)\n");
         }
