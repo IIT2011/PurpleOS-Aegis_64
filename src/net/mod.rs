@@ -29,6 +29,17 @@ pub static NET_CONFIG: Spinlock<NetConfig> = Spinlock::new(NetConfig {
     subnet: [255, 255, 255, 0],
 });
 
+pub struct PendingPing {
+    pub target_ip: [u8; 4],
+    pub identifier: u16,
+    pub seq_no: u16,
+    pub received: bool,
+    pub reply_time_ticks: u64,
+}
+
+static PENDING_PING: Spinlock<Option<PendingPing>> = Spinlock::new(None);
+static PING_SEQ: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(1);
+
 pub fn init() {
     crate::drivers::serial::println("Network: Pure Rust L2/L3/L4 TCP/IP Stack initialized");
 }
@@ -111,8 +122,19 @@ pub fn process_packet(data: &[u8]) {
                 if ip_hdr.protocol == ipv4::IP_PROTO_ICMP {
                     if let Some((icmp_pkt, icmp_payload)) = icmp::IcmpEcho::parse(ip_payload) {
                         if icmp_pkt.msg_type == icmp::ICMP_TYPE_ECHO_REQUEST {
-                            // Automatically answer ping
+                            // Automatically answer ping directed at us
                             send_icmp_reply(ip_hdr.src_ip, icmp_pkt.identifier, icmp_pkt.seq_no, icmp_payload);
+                        } else if icmp_pkt.msg_type == icmp::ICMP_TYPE_ECHO_REPLY {
+                            let mut pending = PENDING_PING.lock();
+                            if let Some(ref mut p) = *pending {
+                                if !p.received
+                                    && p.identifier == icmp_pkt.identifier
+                                    && p.seq_no == icmp_pkt.seq_no
+                                {
+                                    p.received = true;
+                                    p.reply_time_ticks = crate::drivers::pit::get_ticks();
+                                }
+                            }
                         }
                     }
                 }
@@ -124,12 +146,14 @@ pub fn process_packet(data: &[u8]) {
 
 pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
     let my_ip = get_ip();
-    let my_mac = if crate::drivers::e1000::is_ready() {
-        crate::drivers::e1000::get_mac()
-    } else {
-        [0x52, 0x54, 0x00, 0x12, 0x34, 0x56]
+    if !crate::drivers::e1000::is_ready() {
+        return;
+    }
+    let my_mac = crate::drivers::e1000::get_mac();
+    let dst_mac = match arp::lookup_mac(dst_ip) {
+        Some(m) => m,
+        None => return,
     };
-    let dst_mac = arp::lookup_mac(dst_ip).unwrap_or([0xFF; 6]);
 
     let mut buf = [0u8; 1500];
     let eth_hdr = eth::EthHeader {
@@ -153,7 +177,7 @@ pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
         version_ihl: 0x45,
         dscp_ecn: 0,
         total_len: (20 + icmp_len) as u16,
-        id: 0x1234,
+        id: seq,
         flags_frag: 0x4000,
         ttl: 64,
         protocol: ipv4::IP_PROTO_ICMP,
@@ -181,8 +205,52 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         return Err("No active Ethernet NIC online");
     }
 
+    let net_cfg = NET_CONFIG.lock();
+    let subnet = net_cfg.subnet;
+    let gateway = net_cfg.gateway;
+    drop(net_cfg);
+
+    let is_local = (target_ip[0] & subnet[0] == my_ip[0] & subnet[0])
+        && (target_ip[1] & subnet[1] == my_ip[1] & subnet[1])
+        && (target_ip[2] & subnet[2] == my_ip[2] & subnet[2])
+        && (target_ip[3] & subnet[3] == my_ip[3] & subnet[3]);
+
+    let next_hop = if is_local { target_ip } else { gateway };
+
+    // Resolve next-hop MAC via dynamic ARP cache or request
+    let mut dst_mac_opt = arp::lookup_mac(next_hop);
+    if dst_mac_opt.is_none() {
+        let _ = arp::send_arp_request(next_hop);
+        for _ in 0..60 {
+            poll();
+            if let Some(m) = arp::lookup_mac(next_hop) {
+                dst_mac_opt = Some(m);
+                break;
+            }
+            crate::drivers::pit::delay_ms(2);
+        }
+    }
+
+    let dst_mac = match dst_mac_opt {
+        Some(m) => m,
+        None => return Err("Destination host unreachable (ARP resolution failed)"),
+    };
+
     let my_mac = crate::drivers::e1000::get_mac();
-    let dst_mac = arp::lookup_mac(target_ip).unwrap_or([0xFF; 6]);
+    let ident: u16 = 0xAE64;
+    let seq = PING_SEQ.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+
+    // Register pending ping before sending
+    {
+        let mut pending = PENDING_PING.lock();
+        *pending = Some(PendingPing {
+            target_ip,
+            identifier: ident,
+            seq_no: seq,
+            received: false,
+            reply_time_ticks: 0,
+        });
+    }
 
     let mut buf = [0u8; 1500];
     let eth_hdr = eth::EthHeader {
@@ -197,8 +265,8 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         msg_type: icmp::ICMP_TYPE_ECHO_REQUEST,
         code: 0,
         checksum: 0,
-        identifier: 0x4145, // 'AE'
-        seq_no: 1,
+        identifier: ident,
+        seq_no: seq,
     };
     let mut icmp_buf = [0u8; 256];
     let icmp_len = icmp_echo.write_to(payload, &mut icmp_buf);
@@ -207,7 +275,7 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         version_ihl: 0x45,
         dscp_ecn: 0,
         total_len: (20 + icmp_len) as u16,
-        id: 0x5678,
+        id: seq,
         flags_frag: 0x4000,
         ttl: 64,
         protocol: ipv4::IP_PROTO_ICMP,
@@ -218,19 +286,39 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
     let ip_len = ip_hdr.write_to(&mut buf[eth_len..]);
     buf[eth_len + ip_len..eth_len + ip_len + icmp_len].copy_from_slice(&icmp_buf[..icmp_len]);
 
-    let total = eth_len + ip_len + icmp_len;
+    let total = (eth_len + ip_len + icmp_len).max(60);
     send_raw(&buf[..total])?;
 
-    // Quick hardware poll for reply
-    let start_tick = crate::drivers::pit::get_ticks();
-    for _ in 0..100 {
+    // Hardware poll loop waiting for actual ICMP Echo Reply
+    let mut reply_received = false;
+    let mut elapsed_ms: u64 = 0;
+
+    for i in 1..=60 {
         poll();
-        if crate::drivers::pit::get_ticks() > start_tick + 20 {
-            break;
+        {
+            let pending = PENDING_PING.lock();
+            if let Some(ref p) = *pending {
+                if p.received {
+                    reply_received = true;
+                    elapsed_ms = (i * 2).max(1);
+                    break;
+                }
+            }
         }
+        crate::drivers::pit::delay_ms(2);
     }
-    let elapsed = (crate::drivers::pit::get_ticks().saturating_sub(start_tick) * 10).max(1);
-    Ok(elapsed)
+
+    // Clear pending state
+    {
+        let mut pending = PENDING_PING.lock();
+        *pending = None;
+    }
+
+    if reply_received {
+        Ok(elapsed_ms)
+    } else {
+        Err("Request timed out (no ICMP Echo Reply received)")
+    }
 }
 
 pub fn send_raw(packet: &[u8]) -> Result<(), &'static str> {

@@ -116,6 +116,38 @@ pub fn update_arp_cache(ip: [u8; 4], mac: [u8; 6]) {
     cache[0] = ArpEntry { ip, mac, valid: true };
 }
 
+pub fn send_arp_request(target_ip: [u8; 4]) -> Result<(), &'static str> {
+    if !crate::drivers::e1000::is_ready() {
+        return Err("No active Ethernet NIC");
+    }
+    let my_mac = crate::drivers::e1000::get_mac();
+    let my_ip = crate::net::get_ip();
+
+    let arp_req = ArpPacket {
+        htype: 1,
+        ptype: crate::net::eth::ETHERTYPE_IPV4,
+        hlen: 6,
+        plen: 4,
+        opcode: ARP_OP_REQUEST,
+        sender_mac: my_mac,
+        sender_ip: my_ip,
+        target_mac: [0x00; 6],
+        target_ip,
+    };
+
+    let eth_hdr = crate::net::eth::EthHeader {
+        dst_mac: [0xFF; 6], // Broadcast
+        src_mac: my_mac,
+        ether_type: crate::net::eth::ETHERTYPE_ARP,
+    };
+
+    let mut buf = [0u8; 64];
+    let eth_len = eth_hdr.write_to(&mut buf);
+    let arp_len = arp_req.write_to(&mut buf[eth_len..]);
+    let total = (eth_len + arp_len).max(60);
+    crate::net::send_raw(&buf[..total])
+}
+
 pub fn lookup_mac(ip: [u8; 4]) -> Option<[u8; 6]> {
     // Broadcast IP
     if ip == [255, 255, 255, 255] {
@@ -126,10 +158,6 @@ pub fn lookup_mac(ip: [u8; 4]) -> Option<[u8; 6]> {
         if entry.valid && entry.ip == ip {
             return Some(entry.mac);
         }
-    }
-    // Default QEMU SLIRP gateway fallback: 52:54:00:12:34:02
-    if ip == [10, 0, 2, 2] {
-        return Some([0x52, 0x54, 0x00, 0x12, 0x34, 0x02]);
     }
     None
 }

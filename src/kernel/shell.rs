@@ -625,15 +625,11 @@ impl Shell {
                 if target == "to" {
                     target = parts.next().unwrap_or("");
                 }
-                let mut gw_buf = [0u8; 16];
-                let effective_target = if target.is_empty() {
-                    let gw = crate::net::get_gateway();
-                    let len = format_ip(gw, &mut gw_buf);
-                    core::str::from_utf8(&gw_buf[..len]).unwrap_or("10.0.2.2")
+                if target.is_empty() {
+                    serial::println("Usage: ping <ip_address> (e.g. ping 10.0.2.2 or ping 8.8.8.8)");
                 } else {
-                    target
-                };
-                self.do_ping(effective_target);
+                    self.do_ping(target);
+                }
             }
 
             // System Information
@@ -2060,25 +2056,4 @@ extern "C" fn background_task_entry(_arg: *mut u8) {
     loop {
         crate::kernel::task::yield_now();
     }
-}
-
-fn format_ip(ip: [u8; 4], out: &mut [u8]) -> usize {
-    let mut pos = 0;
-    for (i, &octet) in ip.iter().enumerate() {
-        if octet >= 100 {
-            out[pos] = b'0' + (octet / 100);
-            pos += 1;
-        }
-        if octet >= 10 {
-            out[pos] = b'0' + ((octet % 100) / 10);
-            pos += 1;
-        }
-        out[pos] = b'0' + (octet % 10);
-        pos += 1;
-        if i < 3 {
-            out[pos] = b'.';
-            pos += 1;
-        }
-    }
-    pos
 }
