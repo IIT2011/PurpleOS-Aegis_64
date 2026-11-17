@@ -339,12 +339,18 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
             Ok(written)
         }
         "meminfo" => {
+            let total = crate::mm::pmm::total_frames_count();
+            let total_kb = (total * 4) as u64;
             let free = crate::mm::pmm::free_frames_count();
-            let free_mib = free * 4 / 1024;
-            write_str("MemTotal:        4194304 kB\n");
-            write_str("MemFree:         ");
+            let free_kb = (free * 4) as u64;
+            write_str("MemTotal:        ");
             let mut num_buf = [0u8; 16];
-            let num_len = format_u64((free_mib * 1024) as u64, &mut num_buf);
+            let num_len = format_u64(total_kb, &mut num_buf);
+            if let Ok(s) = core::str::from_utf8(&num_buf[..num_len]) {
+                write_str(s);
+            }
+            write_str(" kB\nMemFree:         ");
+            let num_len = format_u64(free_kb, &mut num_buf);
             if let Ok(s) = core::str::from_utf8(&num_buf[..num_len]) {
                 write_str(s);
             }

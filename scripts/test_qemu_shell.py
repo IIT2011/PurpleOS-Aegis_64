@@ -23,8 +23,16 @@ def main():
         bufsize=0
     )
 
+    import threading
+    captured_chunks = []
+    def read_stdout():
+        for line in iter(proc.stdout.readline, ''):
+            captured_chunks.append(line)
+    t = threading.Thread(target=read_stdout, daemon=True)
+    t.start()
+
     # Allow kernel to initialize and print prompt
-    time.sleep(1.0)
+    time.sleep(2.5)
 
     commands = [
         "sysinfo\n",
@@ -36,18 +44,22 @@ def main():
     ]
 
     for c in commands:
-        proc.stdin.write(c)
-        proc.stdin.flush()
-        time.sleep(0.3)
+        for ch in c:
+            proc.stdin.write(ch)
+            proc.stdin.flush()
+            time.sleep(0.01)
+        time.sleep(0.5)
 
     # Wait another second to collect output
-    time.sleep(1.0)
+    time.sleep(2.5)
     proc.terminate()
     try:
-        stdout, stderr = proc.communicate(timeout=2)
+        proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
         proc.kill()
-        stdout, stderr = proc.communicate()
+        proc.wait()
+
+    stdout = "".join(captured_chunks)
 
     print("=== Captured Kernel & Shell Output ===")
     print(stdout)

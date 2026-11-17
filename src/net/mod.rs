@@ -37,6 +37,10 @@ pub fn get_ip() -> [u8; 4] {
     NET_CONFIG.lock().ip
 }
 
+pub fn get_gateway() -> [u8; 4] {
+    NET_CONFIG.lock().gateway
+}
+
 pub fn set_ip(ip: [u8; 4]) {
     NET_CONFIG.lock().ip = ip;
 }

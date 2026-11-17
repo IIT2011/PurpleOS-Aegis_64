@@ -68,10 +68,12 @@ pub fn init(mbi: Option<&MultibootInfo>, kernel_start: usize, kernel_end: usize)
 
     state.alloc_bitmap.fill(0xFF);
     state.reserved_bitmap.fill(0xFF);
-    state.total_frames = TOTAL_FRAMES;
+    state.total_frames = 0;
     state.free_frames = 0;
-    state.allocated_frames = TOTAL_FRAMES;
-    state.reserved_frames = TOTAL_FRAMES;
+    state.allocated_frames = 0;
+    state.reserved_frames = 0;
+
+    let mut detected_max_addr: usize = 0;
 
     if let Some(info) = mbi {
         if (info.flags & MULTIBOOT_INFO_MEM_MAP) != 0 && info.mmap_length > 0 {
@@ -90,6 +92,9 @@ pub fn init(mbi: Option<&MultibootInfo>, kernel_start: usize, kernel_end: usize)
 
                     if base < MAX_PHYS_ADDR {
                         let limit = (base + len).min(MAX_PHYS_ADDR);
+                        if limit > detected_max_addr {
+                            detected_max_addr = limit;
+                        }
                         let start_f = (base + PAGE_SIZE - 1) / PAGE_SIZE;
                         let end_f = limit / PAGE_SIZE;
 
@@ -98,8 +103,6 @@ pub fn init(mbi: Option<&MultibootInfo>, kernel_start: usize, kernel_end: usize)
                                 bitmap_clear(&mut state.reserved_bitmap, f);
                                 bitmap_clear(&mut state.alloc_bitmap, f);
                                 state.free_frames += 1;
-                                state.allocated_frames -= 1;
-                                state.reserved_frames -= 1;
                             }
                         }
                     }
@@ -114,13 +117,17 @@ pub fn init(mbi: Option<&MultibootInfo>, kernel_start: usize, kernel_end: usize)
         crate::drivers::serial::println("PMM: Safe fallback memory pool (16 MiB - 256 MiB)");
         let start_f = (16 * 1024 * 1024) / PAGE_SIZE;
         let end_f = (256 * 1024 * 1024) / PAGE_SIZE;
+        detected_max_addr = 256 * 1024 * 1024;
         for f in start_f..end_f {
             bitmap_clear(&mut state.reserved_bitmap, f);
             bitmap_clear(&mut state.alloc_bitmap, f);
             state.free_frames += 1;
-            state.allocated_frames -= 1;
-            state.reserved_frames -= 1;
         }
+    }
+
+    state.total_frames = (detected_max_addr + PAGE_SIZE - 1) / PAGE_SIZE;
+    if state.total_frames == 0 {
+        state.total_frames = TOTAL_FRAMES;
     }
 
     // Always reserve low 16 MiB (DMA, BIOS, AP trampoline at 0x8000, video)
@@ -128,6 +135,9 @@ pub fn init(mbi: Option<&MultibootInfo>, kernel_start: usize, kernel_end: usize)
 
     // Reserve kernel image
     mark_region_reserved(&mut state, kernel_start, kernel_end);
+
+    state.reserved_frames = state.total_frames.saturating_sub(state.free_frames);
+    state.allocated_frames = 0;
 
     crate::drivers::serial::print("PMM Initialized: Managed Frames=");
     crate::drivers::serial::print_u64(state.total_frames as u64);
@@ -232,4 +242,16 @@ pub fn free_frames(paddr: usize, count: usize) -> Result<(), &'static str> {
 
 pub fn free_frames_count() -> usize {
     PMM.lock().free_frames
+}
+
+pub fn total_frames_count() -> usize {
+    PMM.lock().total_frames
+}
+
+pub fn allocated_frames_count() -> usize {
+    PMM.lock().allocated_frames
+}
+
+pub fn reserved_frames_count() -> usize {
+    PMM.lock().reserved_frames
 }

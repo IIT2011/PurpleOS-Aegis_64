@@ -435,8 +435,8 @@ pub fn schedule() {
         if !old_rsp_ptr.is_null() {
             switch_context(old_rsp_ptr, new_rsp, raw_lock);
         } else {
-            let mut dummy: u64 = 0;
-            switch_context(&mut dummy, new_rsp, raw_lock);
+            let mut discard_prev_rsp: u64 = 0;
+            switch_context(&mut discard_prev_rsp, new_rsp, raw_lock);
         }
     }
 }

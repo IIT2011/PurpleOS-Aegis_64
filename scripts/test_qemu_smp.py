@@ -31,21 +31,33 @@ def run_smp_test():
     ]
 
     print("=== Launching Aegis64 SMP Multi-Core Test (-smp 4) ===")
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=0)
 
-    time.sleep(1.0)
-    proc.stdin.write("smp\n")
-    proc.stdin.flush()
-    time.sleep(0.5)
-    proc.stdin.write("smptest\n")
-    proc.stdin.flush()
-    time.sleep(1.0)
-    proc.stdin.write("tasks\n")
-    proc.stdin.flush()
-    time.sleep(0.5)
+    import threading
+    captured_chunks = []
+    def read_stdout():
+        for line in iter(proc.stdout.readline, ''):
+            captured_chunks.append(line)
+    t = threading.Thread(target=read_stdout, daemon=True)
+    t.start()
 
-    proc.kill()
-    stdout, stderr = proc.communicate()
+    time.sleep(2.5)
+    for c in ["smp\n", "smptest\n", "tasks\n"]:
+        for ch in c:
+            proc.stdin.write(ch)
+            proc.stdin.flush()
+            time.sleep(0.01)
+        time.sleep(0.8)
+
+    time.sleep(1.5)
+    proc.terminate()
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+    stdout = "".join(captured_chunks)
 
     print("=== SMP Boot & Shell Captured Output ===")
     print(stdout)

@@ -698,11 +698,24 @@ pub fn posix_stat(path: &str, statbuf: &mut PosixStat) -> Result<(), i64> {
         return Ok(());
     }
 
-    if clean.starts_with("/ssd") || clean.starts_with("/hdd") || clean.starts_with("/usb") {
+    if clean.starts_with("/ssd") || clean.starts_with("/hdd") || clean.starts_with("/usb") || clean.starts_with("/sdxc") || clean.starts_with("/sdhc") {
         statbuf.st_ino = 3;
         statbuf.st_mode = S_IFBLK | 0o660;
-        statbuf.st_size = 131072 * 512;
-        statbuf.st_blocks = 131072;
+        let mut total_bytes: i64 = 0;
+        let mut blk_count: i64 = 0;
+        if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(clean) {
+            let _ = crate::drivers::block_dev::with_dev(idx, |dev| {
+                let bytes = dev.total_blocks() * (dev.block_size() as u64);
+                total_bytes = bytes as i64;
+                blk_count = (bytes / 512) as i64;
+            });
+        }
+        if total_bytes == 0 {
+            total_bytes = 131072 * 512;
+            blk_count = 131072;
+        }
+        statbuf.st_size = total_bytes;
+        statbuf.st_blocks = blk_count;
         return Ok(());
     }
 

@@ -621,11 +621,19 @@ impl Shell {
 
             // Natural Grammar: ping to <ip>
             "ping" => {
-                let mut target = parts.next().unwrap_or("10.0.2.2");
+                let mut target = parts.next().unwrap_or("");
                 if target == "to" {
-                    target = parts.next().unwrap_or("10.0.2.2");
+                    target = parts.next().unwrap_or("");
                 }
-                self.do_ping(target);
+                let mut gw_buf = [0u8; 16];
+                let effective_target = if target.is_empty() {
+                    let gw = crate::net::get_gateway();
+                    let len = format_ip(gw, &mut gw_buf);
+                    core::str::from_utf8(&gw_buf[..len]).unwrap_or("10.0.2.2")
+                } else {
+                    target
+                };
+                self.do_ping(effective_target);
             }
 
             // System Information
@@ -642,7 +650,9 @@ impl Shell {
                 serial::print(" discovered cores, ");
                 serial::print_u64(online as u64);
                 serial::println(" online cores");
-                serial::println("  Bootstrap Core:  CPU #0 (APIC ID 0)");
+                serial::print("  Bootstrap Core:  CPU #0 (APIC ID ");
+                serial::print_u64(madt.apic_ids[0] as u64);
+                serial::println(")");
                 serial::print("  Status:          All ");
                 serial::print_u64(online as u64);
                 serial::println(" cores online and active\n");
@@ -678,14 +688,14 @@ impl Shell {
                     }
                     "spawn" => {
                         let name = parts.next().unwrap_or("Worker");
-                        crate::kernel::task::spawn(name, dummy_target, core::ptr::null_mut(), crate::kernel::task::TaskPriority::Normal);
+                        crate::kernel::task::spawn(name, background_task_entry, core::ptr::null_mut(), crate::kernel::task::TaskPriority::Normal);
                         serial::print("Spawned background task '");
                         serial::print(name);
                         serial::println("'");
                     }
                     "user" => {
                         let name = parts.next().unwrap_or("UserTask");
-                        if let Some(tid) = crate::kernel::task::spawn_user_task(name, dummy_target, core::ptr::null_mut(), crate::kernel::task::TaskPriority::Normal) {
+                        if let Some(tid) = crate::kernel::task::spawn_user_task(name, background_task_entry, core::ptr::null_mut(), crate::kernel::task::TaskPriority::Normal) {
                             serial::print("Spawned isolated user task '");
                             serial::print(name);
                             serial::print("' (TID ");
@@ -922,13 +932,35 @@ impl Shell {
             serial::println(" bytes");
             serial::print("        ");
             serial::print_u64(dir_count as u64);
-            serial::println(" Dir(s)    419,430,400 bytes free\n");
+            serial::print(" Dir(s)    ");
+            let st = crate::kernel::storage::STORAGE.lock();
+            let free_bytes = if st.fs_mounted {
+                (st.free_blocks as u64) * 4096
+            } else {
+                (crate::mm::pmm::free_frames_count() as u64) * 4096
+            };
+            serial::print_u64(free_bytes);
+            serial::println(" bytes free\n");
         }
     }
 
     fn show_tree(&self) {
-        serial::println("\nFolder PATH listing for Volume PurpleSystem");
-        serial::println("Volume serial number is AE64-2026");
+        let st = crate::kernel::storage::STORAGE.lock();
+        let name_len = st.volume_name.iter().position(|&c| c == 0).unwrap_or(st.volume_name.len());
+        let name_str = if st.fs_mounted && name_len > 0 {
+            core::str::from_utf8(&st.volume_name[..name_len]).unwrap_or("PurpleSystem")
+        } else {
+            "PurpleSystem"
+        };
+        serial::print("\nFolder PATH listing for Volume ");
+        serial::println(name_str);
+        let serial_hi = if st.fs_mounted { ((st.total_blocks ^ 0xAE64) & 0xFFFF) as u16 } else { 0xAE64 };
+        let serial_lo = if st.fs_mounted { ((st.free_blocks ^ 0x2026) & 0xFFFF) as u16 } else { 0x2026 };
+        serial::print("Volume serial number is ");
+        serial::print_hex(serial_hi as u64);
+        serial::print("-");
+        serial::print_hex(serial_lo as u64);
+        serial::println("");
         serial::println("/ (Root)");
         serial::println("├── dev");
         serial::println("├── proc");
@@ -952,7 +984,10 @@ impl Shell {
                 serial::print("  Size:     ");
                 serial::print_u64(size as u64);
                 serial::println(" bytes");
-                serial::println("  Blocks:   1");
+                let blks = if size == 0 { 0 } else { ((size + 511) / 512) as u64 };
+                serial::print("  Blocks:   ");
+                serial::print_u64(blks);
+                serial::println("");
                 serial::println("  Type:     Regular File / VFS Device Node");
                 serial::println("  Access:   (0644/-rw-r--r--) Uid: ( 0/ root)   Gid: ( 0/ root)\n");
             }
@@ -1272,7 +1307,10 @@ impl Shell {
         serial::print("  SMP Status:  Operational (");
         serial::print_u64(crate::kernel::smp::get_online_count() as u64);
         serial::println(" vCPUs Online)");
-        serial::println("  Memory:      4 GiB Managed via Dual-Bitmap PMM & 4-Level VMM\n");
+        let ram_mib = (crate::mm::pmm::total_frames_count() * 4) / 1024;
+        serial::print("  Memory:      ");
+        serial::print_u64(ram_mib as u64);
+        serial::println(" MiB RAM (4-Level VMM & Dual-Bitmap PMM)\n");
     }
 
     fn show_cpuinfo(&self) {
@@ -1288,9 +1326,16 @@ impl Shell {
     }
 
     fn show_mem(&self) {
+        let total = crate::mm::pmm::total_frames_count();
+        let total_mib = (total * 4) / 1024;
         let free = crate::mm::pmm::free_frames_count();
         let free_mib = free * 4 / 1024;
         serial::println("\nMemory Accounting & Physical Memory Status (PMM):");
+        serial::print("  Physical RAM:  ");
+        serial::print_u64(total_mib as u64);
+        serial::print(" MiB (");
+        serial::print_u64(total as u64);
+        serial::println(" frames)");
         serial::println("  Total Managed: 4096 MiB (1,048,576 frames)");
         serial::print("  Free Memory:   ");
         serial::print_u64(free_mib as u64);
@@ -2011,8 +2056,29 @@ extern "C" fn test_worker(arg: *mut u8) {
     serial::println("]: finished execution");
 }
 
-extern "C" fn dummy_target(_arg: *mut u8) {
+extern "C" fn background_task_entry(_arg: *mut u8) {
     loop {
         crate::kernel::task::yield_now();
     }
+}
+
+fn format_ip(ip: [u8; 4], out: &mut [u8]) -> usize {
+    let mut pos = 0;
+    for (i, &octet) in ip.iter().enumerate() {
+        if octet >= 100 {
+            out[pos] = b'0' + (octet / 100);
+            pos += 1;
+        }
+        if octet >= 10 {
+            out[pos] = b'0' + ((octet % 100) / 10);
+            pos += 1;
+        }
+        out[pos] = b'0' + (octet % 10);
+        pos += 1;
+        if i < 3 {
+            out[pos] = b'.';
+            pos += 1;
+        }
+    }
+    pos
 }
