@@ -12,6 +12,8 @@ pub const KBD_MOD_CAPS: u8 = 1 << 3;
 struct KbdState {
     modifiers: u8,
     extended: bool,
+    last_scancode: u8,
+    last_tick: u64,
     buf: [u8; 256],
     head: usize,
     tail: usize,
@@ -20,6 +22,8 @@ struct KbdState {
 static KBD: Spinlock<KbdState> = Spinlock::new(KbdState {
     modifiers: 0,
     extended: false,
+    last_scancode: 0,
+    last_tick: 0,
     buf: [0; 256],
     head: 0,
     tail: 0,
@@ -73,7 +77,20 @@ pub fn init() {
         wait_write();
         outb(KBD_STATUS_PORT, 0xAE);
 
-        // 5. Send Enable Scanning (0xF4) command to keyboard
+        // 5. Configure Typematic Rate & Delay (cmd 0xF3)
+        // Delay: 1000 ms (0b11 << 5 = 0x60), Rate: 2 Hz (0b11111 = 0x1F) -> 0x7F
+        wait_write();
+        outb(KBD_DATA_PORT, 0xF3);
+        if wait_read() {
+            let _ = inb(KBD_DATA_PORT);
+        }
+        wait_write();
+        outb(KBD_DATA_PORT, 0b01111111);
+        if wait_read() {
+            let _ = inb(KBD_DATA_PORT);
+        }
+
+        // 6. Send Enable Scanning (0xF4) command to keyboard
         wait_write();
         outb(KBD_DATA_PORT, 0xF4);
         if wait_read() {
@@ -157,6 +174,7 @@ pub fn process_scancode(sc: u8) {
         k.extended = false;
         // Extended release code
         if (sc & 0x80) != 0 {
+            k.last_scancode = 0;
             return;
         }
         let ch = match sc {
@@ -176,8 +194,9 @@ pub fn process_scancode(sc: u8) {
         return;
     }
 
-    // Check release bit
+    // Check release bit (Break code)
     if (sc & 0x80) != 0 {
+        k.last_scancode = 0;
         let code = sc & 0x7F;
         if code == 0x2A || code == 0x36 {
             k.modifiers &= !KBD_MOD_SHIFT;
@@ -188,6 +207,15 @@ pub fn process_scancode(sc: u8) {
         }
         return;
     }
+
+    // Typematic repeat debounce:
+    // If the identical make code arrives before key release, suppress repeat within 350 ms (35 PIT ticks)
+    let now = crate::drivers::pit::get_ticks();
+    if sc == k.last_scancode && now.saturating_sub(k.last_tick) < 35 {
+        return;
+    }
+    k.last_scancode = sc;
+    k.last_tick = now;
 
     if sc == 0x2A || sc == 0x36 {
         k.modifiers |= KBD_MOD_SHIFT;
