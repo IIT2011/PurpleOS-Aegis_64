@@ -136,45 +136,27 @@ fn scroll_up(v: &mut VideoState) {
     if !v.available || v.fb_ptr.is_null() {
         return;
     }
-    let max_cols = (v.width / FONT_WIDTH).min(128);
-    let max_rows = (v.height / FONT_HEIGHT).min(64);
-
-    // 1. Shift fast in-memory text buffer (L1 cache operation)
-    v.text_buf.copy_within(128..(max_rows * 128), 0);
-    v.text_buf[(max_rows - 1) * 128..max_rows * 128].fill(0);
-
-    // 2. Redraw text lines using pure write stream (no PCIe readback)
-    let fb_slice = unsafe { core::slice::from_raw_parts_mut(v.fb_ptr, v.pitch * v.height) };
-    let bg = v.bg_color;
-    let fg = v.fg_color;
     let pitch = v.pitch;
     let height = v.height;
+    let scroll_pixels = FONT_HEIGHT * pitch;
+    let total_pixels = height * pitch;
 
-    for row in 0..max_rows {
-        let y = row * FONT_HEIGHT;
-        for col in 0..max_cols {
-            let ch = v.text_buf[row * 128 + col];
-            let x = col * FONT_WIDTH;
-            if ch != 0 {
-                draw_char(fb_slice, pitch, height, x, y, ch, fg, bg);
-            } else {
-                for py in 0..FONT_HEIGHT {
-                    let off = (y + py) * pitch + x;
-                    for px in 0..FONT_WIDTH {
-                        fb_slice[off + px] = bg;
-                    }
-                }
-            }
+    unsafe {
+        let fb_slice = core::slice::from_raw_parts_mut(v.fb_ptr, total_pixels);
+        if total_pixels > scroll_pixels {
+            fb_slice.copy_within(scroll_pixels..total_pixels, 0);
+            fb_slice[(total_pixels - scroll_pixels)..total_pixels].fill(v.bg_color);
         }
+    }
+
+    let max_rows = (v.height / FONT_HEIGHT).min(64);
+    if max_rows > 1 {
+        v.text_buf.copy_within(128..(max_rows * 128), 0);
+        v.text_buf[(max_rows - 1) * 128..max_rows * 128].fill(0);
     }
 }
 
-pub fn putc(c: u8) {
-    let mut v = VIDEO.lock();
-    if !v.available || v.fb_ptr.is_null() {
-        return;
-    }
-
+fn putc_inner(v: &mut VideoState, c: u8) {
     let max_cols = v.width / FONT_WIDTH;
     let max_rows = v.height / FONT_HEIGHT;
 
@@ -214,7 +196,7 @@ pub fn putc(c: u8) {
                 v.cursor_row += 1;
             }
             if v.cursor_row >= max_rows {
-                scroll_up(&mut v);
+                scroll_up(v);
                 v.cursor_row = max_rows.saturating_sub(1);
             }
 
@@ -233,14 +215,26 @@ pub fn putc(c: u8) {
     }
 
     if v.cursor_row >= max_rows {
-        scroll_up(&mut v);
+        scroll_up(v);
         v.cursor_row = max_rows.saturating_sub(1);
     }
 }
 
+pub fn putc(c: u8) {
+    let mut v = VIDEO.lock();
+    if !v.available || v.fb_ptr.is_null() {
+        return;
+    }
+    putc_inner(&mut v, c);
+}
+
 pub fn puts(s: &str) {
+    let mut v = VIDEO.lock();
+    if !v.available || v.fb_ptr.is_null() {
+        return;
+    }
     for b in s.bytes() {
-        putc(b);
+        putc_inner(&mut v, b);
     }
 }
 

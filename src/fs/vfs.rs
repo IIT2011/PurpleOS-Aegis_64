@@ -46,6 +46,99 @@ impl TmpFs {
 
 static TMPFS: Spinlock<TmpFs> = Spinlock::new(TmpFs::new());
 
+#[derive(Clone, Copy)]
+pub struct VfsDir {
+    pub in_use: bool,
+    pub path: [u8; 64],
+    pub len: usize,
+}
+
+pub static VFS_DIRS: Spinlock<[VfsDir; 16]> = Spinlock::new([VfsDir {
+    in_use: false,
+    path: [0; 64],
+    len: 0,
+}; 16]);
+
+pub fn is_directory(path: &str) -> bool {
+    let p = path.trim_start_matches('/').trim_end_matches('/');
+    if p.is_empty() {
+        return true;
+    }
+    match p {
+        "dev" | "proc" | "tmp" | "ssd" | "hdd" | "usb" | "sdxc" | "sdhc" => return true,
+        _ => {}
+    }
+    {
+        let dirs = VFS_DIRS.lock();
+        for d in dirs.iter() {
+            if d.in_use {
+                if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
+                    if s == p {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    let mut is_dir = false;
+    let _ = crate::kernel::storage::with_fs(|fs| {
+        fs.list_files(|_ino, ftype, _fsize, name| {
+            if name == p && ftype == 2 {
+                is_dir = true;
+            }
+        });
+    });
+    is_dir
+}
+
+pub fn mkdir(path: &str) -> Result<(), &'static str> {
+    let p = path.trim_start_matches('/').trim_end_matches('/');
+    if p.is_empty() {
+        return Err("Cannot create root directory");
+    }
+    if is_directory(p) {
+        return Err("Directory already exists");
+    }
+    let mut dirs = VFS_DIRS.lock();
+    for d in dirs.iter_mut() {
+        if !d.in_use {
+            d.path.fill(0);
+            let b = p.as_bytes();
+            let len = b.len().min(63);
+            d.path[..len].copy_from_slice(&b[..len]);
+            d.len = len;
+            d.in_use = true;
+            return Ok(());
+        }
+    }
+    Err("VFS directory table full (maximum 16 custom directories)")
+}
+
+pub fn rmdir(path: &str) -> Result<(), &'static str> {
+    let p = path.trim_start_matches('/').trim_end_matches('/');
+    if p.is_empty() {
+        return Err("Cannot remove root directory");
+    }
+    match p {
+        "dev" | "proc" | "tmp" | "ssd" | "hdd" | "usb" | "sdxc" | "sdhc" => {
+            return Err("Cannot remove system mountpoint");
+        }
+        _ => {}
+    }
+    let mut dirs = VFS_DIRS.lock();
+    for d in dirs.iter_mut() {
+        if d.in_use {
+            if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
+                if s == p {
+                    d.in_use = false;
+                    return Ok(());
+                }
+            }
+        }
+    }
+    Err("Directory not found")
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum VfsMountType {
     RootPurpleFs,
@@ -283,10 +376,51 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
             Ok(written)
         }
         "tasks" => {
-            write_str("PID  NAME       STATUS      CR3\n");
-            write_str("------------------------------------\n");
-            write_str("0    IdleTask   RUNNING     0x1000\n");
-            write_str("1    AegisInit  READY       0x1000\n");
+            write_str("PID   NAME             STATUS      CPU  CR3\n");
+            write_str("----------------------------------------------------\n");
+            let s = crate::kernel::task::SCHED.lock();
+            for i in 0..crate::kernel::task::MAX_TASKS {
+                let t = &s.tasks[i];
+                if t.state != crate::kernel::task::TaskState::Unused {
+                    let mut num_buf = [0u8; 16];
+                    let nlen = format_u64(t.id as u64, &mut num_buf);
+                    if let Ok(ns) = core::str::from_utf8(&num_buf[..nlen]) {
+                        write_str(ns);
+                        for _ in ns.len()..6 { write_str(" "); }
+                    }
+                    let name_len = t.name.iter().position(|&c| c == 0).unwrap_or(t.name.len());
+                    if let Ok(name_str) = core::str::from_utf8(&t.name[..name_len]) {
+                        write_str(name_str);
+                        for _ in name_str.len()..17 { write_str(" "); }
+                    } else {
+                        write_str("unknown          ");
+                    }
+                    if t.is_zombie {
+                        write_str("ZOMBIE      ");
+                    } else {
+                        match t.state {
+                            crate::kernel::task::TaskState::Running => write_str("RUNNING     "),
+                            crate::kernel::task::TaskState::Ready =>   write_str("READY       "),
+                            crate::kernel::task::TaskState::Blocked => write_str("BLOCKED     "),
+                            crate::kernel::task::TaskState::Sleeping =>write_str("SLEEPING    "),
+                            crate::kernel::task::TaskState::Terminated => write_str("TERMINATED  "),
+                            _ => write_str("UNKNOWN     "),
+                        }
+                    }
+                    let clen = format_u64(t.last_cpu as u64, &mut num_buf);
+                    if let Ok(cs) = core::str::from_utf8(&num_buf[..clen]) {
+                        write_str(cs);
+                        for _ in cs.len()..5 { write_str(" "); }
+                    }
+                    write_str("0x");
+                    let mut hex_buf = [0u8; 16];
+                    let hlen = format_hex(t.cr3, &mut hex_buf);
+                    if let Ok(hs) = core::str::from_utf8(&hex_buf[..hlen]) {
+                        write_str(hs);
+                    }
+                    write_str("\n");
+                }
+            }
             Ok(written)
         }
         _ => Err("File not found in /proc"),
@@ -426,27 +560,79 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
             Ok(())
         }
         VfsMountType::RootPurpleFs => {
-            // Root virtual mount folders
-            cb("dev", 0, true);
-            cb("proc", 0, true);
-            cb("tmp", 0, true);
-            cb("ssd", 0, true);
-            cb("hdd", 0, true);
-            cb("usb", 0, true);
-            cb("sdxc", 0, true);
-            cb("sdhc", 0, true);
+            if sub.is_empty() {
+                // Root virtual mount folders
+                cb("dev", 0, true);
+                cb("proc", 0, true);
+                cb("tmp", 0, true);
+                cb("ssd", 0, true);
+                cb("hdd", 0, true);
+                cb("usb", 0, true);
+                cb("sdxc", 0, true);
+                cb("sdhc", 0, true);
 
-            // PurpleFS persistent files
-            crate::kernel::storage::with_fs(|fs| {
-                fs.list_files(|_ino, ftype, fsize, name| {
-                    if sub.is_empty() || name.starts_with(sub) {
-                        cb(name, fsize as usize, ftype == 2);
+                // Registered custom VFS directories
+                {
+                    let dirs = VFS_DIRS.lock();
+                    for d in dirs.iter() {
+                        if d.in_use {
+                            if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
+                                cb(s, 0, true);
+                            }
+                        }
                     }
+                }
+
+                // PurpleFS persistent files
+                crate::kernel::storage::with_fs(|fs| {
+                    fs.list_files(|_ino, ftype, fsize, name| {
+                        cb(name, fsize as usize, ftype == 2);
+                    });
                 });
-            });
-            Ok(())
+                Ok(())
+            } else if is_directory(path) {
+                // Subdirectory listing
+                crate::kernel::storage::with_fs(|fs| {
+                    fs.list_files(|_ino, ftype, fsize, name| {
+                        if name.starts_with(sub) && name.len() > sub.len() {
+                            let rel = &name[sub.len()..];
+                            let rel_clean = rel.trim_start_matches('/');
+                            if !rel_clean.is_empty() && !rel_clean.contains('/') {
+                                cb(rel_clean, fsize as usize, ftype == 2);
+                            }
+                        }
+                    });
+                });
+                Ok(())
+            } else {
+                Err("No such file or directory")
+            }
         }
     }
+}
+
+pub fn format_hex(val: u64, buf: &mut [u8]) -> usize {
+    const HEX: &[u8] = b"0123456789abcdef";
+    if val == 0 {
+        if !buf.is_empty() {
+            buf[0] = b'0';
+            return 1;
+        }
+        return 0;
+    }
+    let mut temp = [0u8; 16];
+    let mut i = 0;
+    let mut v = val;
+    while v > 0 && i < 16 {
+        temp[i] = HEX[(v & 0xF) as usize];
+        v >>= 4;
+        i += 1;
+    }
+    let len = i.min(buf.len());
+    for j in 0..len {
+        buf[j] = temp[i - 1 - j];
+    }
+    len
 }
 
 pub fn format_u64(mut n: u64, buf: &mut [u8]) -> usize {

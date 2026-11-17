@@ -34,13 +34,7 @@ Purple OS establishes a secure, human-readable, single-root hierarchical directo
 │   │   └── kernel.sym                         # Dynamic export symbol table
 │   │
 │   ├── Applications/                          # Core System Applications
-│   │   ├── PurpleTerminal.apapplication       # Interactive command terminal
-│   │   ├── PurpleFiles.apapplication          # Graphical file manager
-│   │   ├── PurpleSettings.apapplication       # System preferences & hardware control
-│   │   ├── PurpleViewer.apapplication         # Image and text viewer
-│   │   ├── SysMon.apapplication               # Task & CPU performance monitor
-│   │   └── DiskMgr.apapplication              # GPT & PurpleFS volume manager
-│   │
+|   |   |__<app>.apapplication
 │   ├── Drivers/                               # Relocatable W^X APDRV Kernel Modules
 │   │   ├── Storage.apdrv                      # SATA AHCI & NVMe block storage
 │   │   ├── Graphics.apdrv                     # GPU & Bochs VBE display engine
@@ -72,12 +66,9 @@ Purple OS establishes a secure, human-readable, single-root hierarchical directo
 │   ├── Libraries/                             # Shared Dynamic Relocatable Libraries (.lib)
 │   │   └── libc.lib                           # Pure Rust ABI compatibility runtime
 │   │
-│   ├── Users/                                 # User Accounts & Profiles
-│   │   ├── aegis/                             # Default Interactive User
+|── Users/                                     # User Accounts & Profiles
+│   │   ├── <Username>/                        # Default Interactive User
 │   │   │   ├── Applications/                  # User-Installed .apapplication Bundles
-│   │   │   │   ├── VLC.apapplication          # Multimedia playback player
-│   │   │   │   ├── Calculator.apapplication   # Desk calculator
-│   │   │   │   └── TextEditor.apapplication   # Plain-text and code editor
 │   │   │   ├── Desktop/                       # User desktop shortcuts & documents
 │   │   │   ├── Documents/                     # User files & project files
 │   │   │   ├── Downloads/                     # Downloaded artifacts
@@ -93,7 +84,7 @@ Purple OS establishes a secure, human-readable, single-root hierarchical directo
 │   │       ├── Desktop/
 │   │       └── Documents/
 │   │
-│   └── manifest.aegis                         # Cryptographic SHA-256 Trusted Baseline
+│   └── .manifest.aegis                         # Cryptographic SHA-256 Trusted Baseline (Hidden)
 │
 └── Recovery/                                  # Mount point for Partition 3 (RO)
     └── (Dedicated fallback rescue environment, kernel, and diagnostic tools)

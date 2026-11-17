@@ -12,6 +12,8 @@ pub const LAPIC_ESR: u32 = 0x280;
 pub const LAPIC_ICR_LOW: u32 = 0x300;
 pub const LAPIC_ICR_HIGH: u32 = 0x310;
 pub const LAPIC_LVT_TIMER: u32 = 0x320;
+pub const LAPIC_LVT_LINT0: u32 = 0x350;
+pub const LAPIC_LVT_LINT1: u32 = 0x360;
 pub const LAPIC_TIMER_INIT: u32 = 0x380;
 pub const LAPIC_TIMER_CURR: u32 = 0x390;
 pub const LAPIC_TIMER_DIV: u32 = 0x3E0;
@@ -51,6 +53,12 @@ pub fn init(base_phys: u64) -> Result<(), &'static str> {
 
         // Clear task priority register to accept all interrupts
         write_reg(LAPIC_TPR, 0);
+
+        // Configure LVT LINT0 to ExtINT mode (0x700): Routes legacy 8259 PIC interrupts to the CPU
+        write_reg(LAPIC_LVT_LINT0, 0x00000700);
+
+        // Configure LVT LINT1 to NMI mode (0x400)
+        write_reg(LAPIC_LVT_LINT1, 0x00000400);
 
         crate::drivers::serial::print("Local APIC Initialized: Base=0x");
         crate::drivers::serial::print_hex(LAPIC_BASE);
@@ -110,6 +118,10 @@ pub fn init_ap() {
 
         write_reg(LAPIC_SVR, 0x1FF);
         write_reg(LAPIC_TPR, 0);
+
+        // Secondary AP cores: Mask LINT0 and LINT1 to avoid conflicting ExtINT delivery
+        write_reg(LAPIC_LVT_LINT0, 0x00010000);
+        write_reg(LAPIC_LVT_LINT1, 0x00010000);
 
         // Synchronize APIC timer on AP core with calibrated frequency
         write_reg(LAPIC_TIMER_DIV, 0x03);

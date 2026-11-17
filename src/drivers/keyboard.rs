@@ -1,4 +1,4 @@
-use crate::arch::x86_64::io::inb;
+use crate::arch::x86_64::io::{inb, outb};
 use crate::sync::Spinlock;
 
 const KBD_DATA_PORT: u16 = 0x60;
@@ -11,6 +11,7 @@ pub const KBD_MOD_CAPS: u8 = 1 << 3;
 
 struct KbdState {
     modifiers: u8,
+    extended: bool,
     buf: [u8; 256],
     head: usize,
     tail: usize,
@@ -18,26 +19,97 @@ struct KbdState {
 
 static KBD: Spinlock<KbdState> = Spinlock::new(KbdState {
     modifiers: 0,
+    extended: false,
     buf: [0; 256],
     head: 0,
     tail: 0,
 });
 
+unsafe fn wait_write() {
+    let mut timeout = 100000;
+    while (inb(KBD_STATUS_PORT) & 2) != 0 && timeout > 0 {
+        core::hint::spin_loop();
+        timeout -= 1;
+    }
+}
+
+unsafe fn wait_read() -> bool {
+    let mut timeout = 100000;
+    while (inb(KBD_STATUS_PORT) & 1) == 0 && timeout > 0 {
+        core::hint::spin_loop();
+        timeout -= 1;
+    }
+    (inb(KBD_STATUS_PORT) & 1) != 0
+}
+
 pub fn init() {
+    unsafe {
+        // 1. Drain any pending bytes from 8042 controller output buffer
+        let mut drain_limit = 64;
+        while (inb(KBD_STATUS_PORT) & 1) != 0 && drain_limit > 0 {
+            let _ = inb(KBD_DATA_PORT);
+            drain_limit -= 1;
+        }
+
+        // 2. Read 8042 Controller Configuration Byte (cmd 0x20)
+        wait_write();
+        outb(KBD_STATUS_PORT, 0x20);
+        let mut config = if wait_read() { inb(KBD_DATA_PORT) } else { 0x01 | 0x40 };
+
+        // Bit 0: First PS/2 port interrupt enable (1)
+        // Bit 4: First PS/2 port clock disable (0 = enabled)
+        // Bit 6: First PS/2 port translation (1 = scancode translation to Set 1)
+        config |= 0x01;  // Enable IRQ 1
+        config &= !0x10; // Enable clock
+        config |= 0x40;  // Enable scancode translation
+
+        // 3. Write Controller Configuration Byte (cmd 0x60)
+        wait_write();
+        outb(KBD_STATUS_PORT, 0x60);
+        wait_write();
+        outb(KBD_DATA_PORT, config);
+
+        // 4. Enable First PS/2 port (cmd 0xAE)
+        wait_write();
+        outb(KBD_STATUS_PORT, 0xAE);
+
+        // 5. Send Enable Scanning (0xF4) command to keyboard
+        wait_write();
+        outb(KBD_DATA_PORT, 0xF4);
+        if wait_read() {
+            let _ack = inb(KBD_DATA_PORT);
+        }
+    }
+
     crate::arch::x86_64::pic::clear_mask(1); // Unmask IRQ 1 (Keyboard)
     crate::arch::x86_64::idt::register_handler(33, on_interrupt);
     crate::drivers::serial::println("Keyboard: 8042 controller initialized, IRQ 1 unmasked");
     crate::drivers::serial::println("Keyboard: PS/2 Keyboard Initialized (256-Byte Ring Buffer Active)");
 }
 
-fn on_interrupt(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
+pub fn poll_hardware() {
     unsafe {
-        // Drain 8042 controller output buffer completely
-        while (inb(KBD_STATUS_PORT) & 1) != 0 {
-            let scancode = inb(KBD_DATA_PORT);
-            process_scancode(scancode);
+        let mut limit = 64;
+        while limit > 0 {
+            let status = inb(KBD_STATUS_PORT);
+            if (status & 1) == 0 {
+                break;
+            }
+            let data = inb(KBD_DATA_PORT);
+            if (status & 0x20) == 0 {
+                // First PS/2 port (Keyboard)
+                process_scancode(data);
+            } else {
+                // Second PS/2 port (Mouse)
+                crate::drivers::mouse::handle_byte(data);
+            }
+            limit -= 1;
         }
     }
+}
+
+fn on_interrupt(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
+    poll_hardware();
 }
 
 const SCANCODE_TABLE: [u8; 135] = [
@@ -49,9 +121,10 @@ const SCANCODE_TABLE: [u8; 135] = [
     b'\\', b'z', b'x', b'c', b'v', b'b', b'n', b'm', b',', b'.', b'/',
     0, /* Right Shift */
     b'*', 0, /* Alt */ b' ', 0, /* Caps */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, /* F1-F10 */
-    0, 0, /* Num/Scroll lock */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, /* F1-F10: 0x3B..0x44 */
+    0, 0, /* Num/Scroll lock: 0x45, 0x46 */
+    b'7', b'8', b'9', b'-', b'4', b'5', b'6', b'+', b'1', b'2', b'3', b'0', b'.', /* Keypad: 0x47..0x53 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
@@ -64,14 +137,44 @@ const SCANCODE_SHIFT_TABLE: [u8; 135] = [
     b'|', b'Z', b'X', b'C', b'V', b'B', b'N', b'M', b'<', b'>', b'?',
     0, /* Right Shift */
     b'*', 0, /* Alt */ b' ', 0, /* Caps */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, /* F1-F10: 0x3B..0x44 */
+    0, 0, /* Num/Scroll lock: 0x45, 0x46 */
+    b'7', b'8', b'9', b'-', b'4', b'5', b'6', b'+', b'1', b'2', b'3', b'0', b'.', /* Keypad: 0x47..0x53 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 pub fn process_scancode(sc: u8) {
     let mut k = KBD.lock();
+
+    // Check extended scancode prefix
+    if sc == 0xE0 {
+        k.extended = true;
+        return;
+    }
+
+    if k.extended {
+        k.extended = false;
+        // Extended release code
+        if (sc & 0x80) != 0 {
+            return;
+        }
+        let ch = match sc {
+            0x1C => b'\n', // Keypad Enter
+            0x35 => b'/',  // Keypad /
+            0x53 => 127,   // Delete key
+            _ => 0,
+        };
+        if ch != 0 {
+            let next = (k.head + 1) % k.buf.len();
+            if next != k.tail {
+                let head = k.head;
+                k.buf[head] = ch;
+                k.head = next;
+            }
+        }
+        return;
+    }
 
     // Check release bit
     if (sc & 0x80) != 0 {
@@ -123,11 +226,13 @@ pub fn process_scancode(sc: u8) {
 }
 
 pub fn has_char() -> bool {
+    poll_hardware();
     let k = KBD.lock();
     k.head != k.tail
 }
 
 pub fn try_getchar() -> Option<u8> {
+    poll_hardware();
     let mut k = KBD.lock();
     if k.head != k.tail {
         let ch = k.buf[k.tail];

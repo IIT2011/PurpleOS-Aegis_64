@@ -66,6 +66,7 @@ pub fn init() {
         mouse_write(0xF4); // Enable packet streaming
         let _ = mouse_read();
 
+        crate::arch::x86_64::pic::clear_mask(2); // Slave PIC cascade line
         crate::arch::x86_64::pic::clear_mask(12); // Unmask IRQ 12
         crate::arch::x86_64::idt::register_handler(44, on_interrupt);
     }
@@ -74,16 +75,10 @@ pub fn init() {
 }
 
 fn on_interrupt(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
-    unsafe {
-        let status = inb(MOUSE_CMD);
-        if (status & 0x20) != 0 {
-            let data = inb(MOUSE_DATA);
-            handle_byte(data);
-        }
-    }
+    crate::drivers::keyboard::poll_hardware();
 }
 
-fn handle_byte(b: u8) {
+pub fn handle_byte(b: u8) {
     let mut m = MOUSE.lock();
     match m.cycle {
         0 => {

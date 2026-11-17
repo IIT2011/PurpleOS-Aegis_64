@@ -1,4 +1,93 @@
-use crate::drivers::serial;
+#[allow(dead_code)]
+mod con {
+    use crate::drivers::{serial, video};
+
+    #[inline]
+    pub fn print(s: &str) {
+        serial::print(s);
+        if video::is_available() {
+            video::puts(s);
+        }
+    }
+
+    #[inline]
+    pub fn println(s: &str) {
+        serial::println(s);
+        if video::is_available() {
+            video::puts(s);
+            video::putc(b'\n');
+        }
+    }
+
+    #[inline]
+    pub fn print_u64(n: u64) {
+        serial::print_u64(n);
+        if video::is_available() {
+            let mut buf = [0u8; 20];
+            let mut i = 0;
+            let mut val = n;
+            if val == 0 {
+                video::putc(b'0');
+                return;
+            }
+            while val > 0 {
+                buf[i] = b'0' + (val % 10) as u8;
+                val /= 10;
+                i += 1;
+            }
+            while i > 0 {
+                i -= 1;
+                video::putc(buf[i]);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn print_hex(n: u64) {
+        serial::print_hex(n);
+        if video::is_available() {
+            let mut buf = [0u8; 16];
+            let mut i = 0;
+            let mut val = n;
+            let hex_chars = b"0123456789abcdef";
+            if val == 0 {
+                video::putc(b'0');
+                return;
+            }
+            while val > 0 {
+                buf[i] = hex_chars[(val & 0xF) as usize];
+                val >>= 4;
+                i += 1;
+            }
+            while i > 0 {
+                i -= 1;
+                video::putc(buf[i]);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn print_hex_u64(n: u64) {
+        serial::print_hex_u64(n);
+        if video::is_available() {
+            let hex_chars = b"0123456789abcdef";
+            for i in (0..16).rev() {
+                let digit = ((n >> (i * 4)) & 0xF) as usize;
+                video::putc(hex_chars[digit]);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn putchar(c: u8) {
+        serial::putchar(c);
+        if video::is_available() {
+            video::putc(c);
+        }
+    }
+}
+
+use self::con as serial;
 use crate::drivers::video;
 use crate::drivers::keyboard;
 
@@ -31,7 +120,7 @@ impl Shell {
                 video::set_colors(video::COLOR_WHITE, video::COLOR_PURPLE_BG);
                 video::puts("purple:~$ ");
             }
-            serial::print("aegis64@purple:~$ ");
+            crate::drivers::serial::print("aegis64@purple:~$ ");
         } else {
             let cwd_str = core::str::from_utf8(&self.cwd[..self.cwd_len]).unwrap_or("/");
             if video::is_available() {
@@ -44,9 +133,9 @@ impl Shell {
                 video::puts(cwd_str);
                 video::puts("$ ");
             }
-            serial::print("aegis64@purple:");
-            serial::print(cwd_str);
-            serial::print("$ ");
+            crate::drivers::serial::print("aegis64@purple:");
+            crate::drivers::serial::print(cwd_str);
+            crate::drivers::serial::print("$ ");
         }
     }
 
@@ -55,7 +144,7 @@ impl Shell {
         self.cwd[0] = b'/';
         self.cwd_len = 1;
         let banner = "\n=======================================================================\n  Welcome to Purple OS / Aegis64 (Native 64-bit Kernel - Pure Rust)\n  Command Environment: AegisShell 2.5 (MS-DOS & Linux POSIX Hybrid)\n  Type 'help' for commands, 'dir' or 'ls' to view files.\n=======================================================================\n\n";
-        serial::print(banner);
+        crate::drivers::serial::print(banner);
         if video::is_available() {
             video::puts(banner);
         }
@@ -66,11 +155,11 @@ impl Shell {
         let mut got_char = false;
         let mut c: u8 = 0;
 
-        if keyboard::has_char() {
-            c = keyboard::getchar();
+        if let Some(ch) = keyboard::try_getchar() {
+            c = ch;
             got_char = true;
-        } else if serial::has_char() {
-            c = serial::getchar();
+        } else if crate::drivers::serial::has_char() {
+            c = crate::drivers::serial::getchar();
             got_char = true;
         }
 
@@ -79,7 +168,7 @@ impl Shell {
         }
 
         if c == b'\n' || c == b'\r' {
-            serial::print("\n");
+            crate::drivers::serial::print("\n");
             if video::is_available() {
                 video::putc(b'\n');
             }
@@ -96,7 +185,7 @@ impl Shell {
         } else if c == b'\x08' || c == 127 {
             if self.len > 0 {
                 self.len -= 1;
-                serial::print("\x08 \x08");
+                crate::drivers::serial::print("\x08 \x08");
                 if video::is_available() {
                     video::putc(b'\x08');
                 }
@@ -104,59 +193,65 @@ impl Shell {
         } else if (32..=126).contains(&c) && self.len < self.buf.len() - 1 {
             self.buf[self.len] = c;
             self.len += 1;
-            serial::putchar(c);
+            crate::drivers::serial::putchar(c);
             if video::is_available() {
                 video::putc(c);
             }
         }
     }
 
-    pub fn resolve_path<'a>(&self, input: &'a str, out: &'a mut [u8; 128]) -> &'a str {
+    pub fn normalize_path<'a>(&self, input: &'a str, out: &'a mut [u8; 128]) -> &'a str {
         let clean = input.trim();
-        if clean.starts_with('/') {
-            clean
-        } else if clean.starts_with("./") {
-            let sub = &clean[2..];
-            if self.cwd_len == 1 && self.cwd[0] == b'/' {
-                clean
-            } else {
-                let mut pos = 0;
-                for i in 0..self.cwd_len {
-                    out[pos] = self.cwd[i];
-                    pos += 1;
+        let is_abs = clean.starts_with('/');
+
+        let mut components: [&str; 16] = [""; 16];
+        let mut comp_count = 0usize;
+
+        if !is_abs {
+            let cwd_str = core::str::from_utf8(&self.cwd[..self.cwd_len]).unwrap_or("/");
+            for part in cwd_str.split('/') {
+                if !part.is_empty() && comp_count < 16 {
+                    components[comp_count] = part;
+                    comp_count += 1;
                 }
-                if pos < out.len() && out[pos - 1] != b'/' {
-                    out[pos] = b'/';
-                    pos += 1;
-                }
-                for &b in sub.as_bytes() {
-                    if pos < out.len() {
-                        out[pos] = b;
-                        pos += 1;
-                    }
-                }
-                core::str::from_utf8(&out[..pos]).unwrap_or(clean)
             }
-        } else if self.cwd_len == 1 && self.cwd[0] == b'/' {
-            clean
-        } else {
-            let mut pos = 0;
-            for i in 0..self.cwd_len {
-                out[pos] = self.cwd[i];
-                pos += 1;
+        }
+
+        for part in clean.split('/') {
+            if part.is_empty() || part == "." {
+                continue;
+            } else if part == ".." {
+                if comp_count > 0 {
+                    comp_count -= 1;
+                }
+            } else if comp_count < 16 {
+                components[comp_count] = part;
+                comp_count += 1;
             }
-            if pos < out.len() && out[pos - 1] != b'/' {
+        }
+
+        out[0] = b'/';
+        let mut pos = 1usize;
+
+        for i in 0..comp_count {
+            let comp = components[i];
+            if i > 0 && pos < out.len() {
                 out[pos] = b'/';
                 pos += 1;
             }
-            for &b in clean.as_bytes() {
+            for &b in comp.as_bytes() {
                 if pos < out.len() {
                     out[pos] = b;
                     pos += 1;
                 }
             }
-            core::str::from_utf8(&out[..pos]).unwrap_or(clean)
         }
+
+        core::str::from_utf8(&out[..pos]).unwrap_or("/")
+    }
+
+    pub fn resolve_path<'a>(&self, input: &'a str, out: &'a mut [u8; 128]) -> &'a str {
+        self.normalize_path(input, out)
     }
 
     pub fn execute(&mut self, line: &str) {
@@ -239,15 +334,16 @@ impl Shell {
 
             // Linux: ls
             "ls" => {
-                let mut arg = parts.next().unwrap_or("");
-                if arg == "-l" || arg == "-la" || arg == "-al" {
-                    arg = parts.next().unwrap_or("");
+                let mut long_fmt = false;
+                let mut arg = "";
+                while let Some(part) = parts.next() {
+                    if part == "-l" || part == "-la" || part == "-al" {
+                        long_fmt = true;
+                    } else if !part.is_empty() {
+                        arg = part;
+                    }
                 }
-                if arg.is_empty() && self.cwd_len == 1 && self.cwd[0] == b'/' {
-                    self.show_list();
-                } else {
-                    self.show_dos_dir(arg);
-                }
+                self.show_list(arg, long_fmt);
             }
 
             // Tree command
@@ -325,9 +421,21 @@ impl Shell {
                 if dir_name.is_empty() {
                     serial::println("Usage: mkdir <directory_name>");
                 } else {
-                    serial::print("Directory '");
-                    serial::print(dir_name);
-                    serial::println("' registered in VFS namespace.");
+                    let mut path_buf = [0u8; 128];
+                    let resolved = self.resolve_path(dir_name, &mut path_buf);
+                    match crate::fs::vfs::mkdir(resolved) {
+                        Ok(()) => {
+                            serial::print("Directory '");
+                            serial::print(dir_name);
+                            serial::println("' registered in VFS namespace.");
+                        }
+                        Err(err) => {
+                            serial::print("mkdir: cannot create directory '");
+                            serial::print(dir_name);
+                            serial::print("': ");
+                            serial::println(err);
+                        }
+                    }
                 }
             }
             "rmdir" | "rd" => {
@@ -335,9 +443,21 @@ impl Shell {
                 if dir_name.is_empty() {
                     serial::println("Usage: rmdir <directory_name>");
                 } else {
-                    serial::print("Directory '");
-                    serial::print(dir_name);
-                    serial::println("' removed.");
+                    let mut path_buf = [0u8; 128];
+                    let resolved = self.resolve_path(dir_name, &mut path_buf);
+                    match crate::fs::vfs::rmdir(resolved) {
+                        Ok(()) => {
+                            serial::print("Directory '");
+                            serial::print(dir_name);
+                            serial::println("' removed.");
+                        }
+                        Err(err) => {
+                            serial::print("rmdir: failed to remove '");
+                            serial::print(dir_name);
+                            serial::print("': ");
+                            serial::println(err);
+                        }
+                    }
                 }
             }
 
@@ -361,7 +481,7 @@ impl Shell {
                     "video" | "display" => self.show_video(None),
                     "3d" | "gpu3d" => self.show_gpu3d(),
                     "mouse" => self.show_mouse(),
-                    "files" | "directory" => self.show_list(),
+                    "files" | "directory" => self.show_list("", false),
                     _ => {
                         serial::println("Usage: show <disks|filesystem|memory|cpu|system|uptime|time|tasks|devices|pci|network|modules|files>");
                     }
@@ -619,7 +739,7 @@ impl Shell {
             "list" => {
                 let sub = parts.next().unwrap_or("");
                 if sub == "files" || sub == "all" {
-                    self.show_list();
+                    self.show_list("", false);
                 } else {
                     serial::println("Usage: list files");
                 }
@@ -733,60 +853,35 @@ impl Shell {
             return;
         }
 
-        if clean == ".." {
-            if self.cwd_len > 1 {
-                let mut last_slash = 0;
-                for i in 0..self.cwd_len {
-                    if self.cwd[i] == b'/' {
-                        last_slash = i;
-                    }
-                }
-                if last_slash == 0 {
-                    self.cwd[0] = b'/';
-                    self.cwd_len = 1;
-                } else {
-                    self.cwd_len = last_slash;
-                }
+        let mut candidate = [0u8; 128];
+        let normalized = self.normalize_path(clean, &mut candidate);
+
+        if !crate::fs::vfs::is_directory(normalized) {
+            let mut buf = [0u8; 1];
+            if crate::fs::vfs::read(normalized, &mut buf).is_ok() {
+                serial::print("cd: '");
+                serial::print(target);
+                serial::println("': Not a directory.");
+            } else {
+                serial::print("cd: '");
+                serial::print(target);
+                serial::println("': No such file or directory.");
             }
             return;
         }
 
-        let mut candidate = [0u8; 64];
-        let mut pos = 0;
-        if clean.starts_with('/') {
-            for &b in clean.as_bytes() {
-                if pos < candidate.len() { candidate[pos] = b; pos += 1; }
-            }
-        } else {
-            for i in 0..self.cwd_len {
-                if pos < candidate.len() { candidate[pos] = self.cwd[i]; pos += 1; }
-            }
-            if pos < candidate.len() && candidate[pos - 1] != b'/' {
-                candidate[pos] = b'/';
-                pos += 1;
-            }
-            for &b in clean.as_bytes() {
-                if pos < candidate.len() { candidate[pos] = b; pos += 1; }
-            }
-        }
-
-        // Verify valid directory in VFS
-        let cand_str = core::str::from_utf8(&candidate[..pos]).unwrap_or("/");
-        if crate::fs::vfs::list_directory(cand_str, |_n, _s, _d| {}).is_ok() {
-            self.cwd[..pos].copy_from_slice(&candidate[..pos]);
-            self.cwd_len = pos;
-        } else {
-            serial::print("Directory '");
-            serial::print(target);
-            serial::println("' not found.");
-        }
+        let b = normalized.as_bytes();
+        let len = b.len().min(self.cwd.len());
+        self.cwd[..len].copy_from_slice(&b[..len]);
+        self.cwd_len = len;
     }
 
     fn show_dos_dir(&self, target: &str) {
+        let mut path_buf = [0u8; 128];
         let path = if target.is_empty() {
             core::str::from_utf8(&self.cwd[..self.cwd_len]).unwrap_or("/")
         } else {
-            target
+            self.resolve_path(target, &mut path_buf)
         };
 
         serial::println("\n Volume in drive is PurpleSystem");
@@ -1119,7 +1214,25 @@ impl Shell {
 
     fn show_mounts(&self) {
         serial::println("\nActive VFS Mountpoints & Filesystems:");
-        serial::println("  /        on /ssd/ssd2 (PurpleFS v2 block storage, ro/rw)");
+        let st = crate::kernel::storage::STORAGE.lock();
+        if st.fs_mounted {
+            serial::print("  /        on ");
+            let mut found_canon = "/hdd/hdd1";
+            crate::drivers::block_dev::for_each_dev(|idx, canon, _dev| {
+                if idx == st.dev_index {
+                    found_canon = canon;
+                }
+            });
+            serial::print(found_canon);
+            serial::print(" (PurpleFS v2 block storage, ");
+            if st.read_write {
+                serial::println("read-write)");
+            } else {
+                serial::println("read-only)");
+            }
+        } else {
+            serial::println("  /        on ramfs (volatile root, no block storage mounted)");
+        }
         serial::println("  /dev     on devfs (character devices: null, zero, console)");
         serial::println("  /proc    on procfs (virtual system introspection)");
         serial::println("  /tmp     on tmpfs (volatile in-memory RAM disk)");
@@ -1294,25 +1407,30 @@ impl Shell {
             let w = if w_str == "800" { 800 } else { 1024 };
             let h = if h_str == "600" { 600 } else { 768 };
             crate::drivers::gpu::GPU.lock().set_vbe_mode(w as u16, h as u16, 32);
-            let mut v = crate::drivers::video::VIDEO.lock();
-            v.width = w;
-            v.height = h;
-            v.pitch = w;
+            {
+                let mut v = crate::drivers::video::VIDEO.lock();
+                v.width = w;
+                v.height = h;
+                v.pitch = w;
+            }
             serial::print("Video mode switched to ");
             serial::print_u64(w as u64);
             serial::print("x");
             serial::print_u64(h as u64);
             serial::println("@32bpp");
         } else {
-            let v = crate::drivers::video::VIDEO.lock();
+            let (w, h, bpp) = {
+                let v = crate::drivers::video::VIDEO.lock();
+                (v.width, v.height, v.bpp)
+            };
             serial::println("\nVideo Display Configuration:");
             serial::println("  Bochs VBE:  Supported (Ports 0x1CE/0x1CF, PCI 1234:1111)");
             serial::print("  Resolution: ");
-            serial::print_u64(v.width as u64);
+            serial::print_u64(w as u64);
             serial::print("x");
-            serial::print_u64(v.height as u64);
+            serial::print_u64(h as u64);
             serial::print("@");
-            serial::print_u64(v.bpp as u64);
+            serial::print_u64(bpp as u64);
             serial::println("bpp");
             serial::println("  Console:    Active (CP437 Text Windowing Engine)\n");
         }
@@ -1451,39 +1569,67 @@ impl Shell {
         }
     }
 
-    fn show_list(&self) {
-        if !crate::kernel::storage::is_mounted() {
-            serial::println("\nNo filesystem mounted. Attach a PurpleFS volume.\n");
-            return;
-        }
+    fn show_list(&self, target: &str, _long_fmt: bool) {
+        let mut path_buf = [0u8; 128];
+        let path = if target.is_empty() {
+            core::str::from_utf8(&self.cwd[..self.cwd_len]).unwrap_or("/")
+        } else {
+            self.resolve_path(target, &mut path_buf)
+        };
 
-        serial::println("\nDirectory Listing of / (PurpleFS Root):");
-        serial::println("  INODE   TYPE    SIZE (BYTES)  NAME");
-        serial::println("  --------------------------------------------------");
+        if path == "/" {
+            serial::println("\nDirectory Listing of / (PurpleFS Root):");
+            serial::println("  INODE   TYPE    SIZE (BYTES)  NAME");
+            serial::println("  --------------------------------------------------");
 
-        let mut count = 0usize;
-        crate::kernel::storage::with_fs(|fs| {
-            fs.list_files(|ino, ftype, fsize, name| {
+            let mut count = 0usize;
+            let _ = crate::fs::vfs::list_directory(path, |name, size, is_dir| {
                 count += 1;
                 serial::print("     ");
-                serial::print_u64(ino as u64);
+                serial::print_u64(count as u64);
                 serial::print("   ");
-                if ftype == 2 {
+                if is_dir {
                     serial::print("<DIR> ");
                 } else {
                     serial::print("<FILE>");
                 }
                 serial::print("        ");
-                serial::print_u64(fsize);
+                serial::print_u64(size as u64);
                 serial::print("   ");
                 serial::println(name);
             });
-        });
 
-        serial::println("  --------------------------------------------------");
-        serial::print("  Total: ");
-        serial::print_u64(count as u64);
-        serial::println(" item(s)\n");
+            serial::println("  --------------------------------------------------");
+            serial::print("  Total: ");
+            serial::print_u64(count as u64);
+            serial::println(" item(s)\n");
+        } else {
+            serial::print("\nDirectory Listing of ");
+            serial::print(path);
+            serial::println(":");
+            serial::println("  PERMISSIONS  SIZE (BYTES)  NAME");
+            serial::println("  --------------------------------------------------");
+            let mut count = 0usize;
+            let res = crate::fs::vfs::list_directory(path, |name, size, is_dir| {
+                count += 1;
+                if is_dir {
+                    serial::print("  drwxr-xr-x   ");
+                } else {
+                    serial::print("  -rw-r--r--   ");
+                }
+                serial::print_u64(size as u64);
+                serial::print("       ");
+                serial::println(name);
+            });
+            if res.is_err() {
+                serial::println("  (Directory not found or unreadable)");
+            } else {
+                serial::println("  --------------------------------------------------");
+                serial::print("  Total: ");
+                serial::print_u64(count as u64);
+                serial::println(" item(s)\n");
+            }
+        }
     }
 
     fn do_peek(&self, file: &str) {
@@ -1524,11 +1670,24 @@ impl Shell {
     }
 
     fn do_create(&self, filename: &str) {
+        let mut path_buf = [0u8; 128];
+        let resolved = self.resolve_path(filename, &mut path_buf);
+
+        if resolved.starts_with("/tmp/") || resolved == "/tmp" {
+            if crate::fs::vfs::write(resolved, b"").is_ok() {
+                serial::print("Successfully created file '");
+                serial::print(filename);
+                serial::println("'.");
+                return;
+            }
+        }
+
         if !crate::kernel::storage::is_read_write() {
             serial::println("Error: Filesystem is mounted read-only.");
             return;
         }
-        let res = crate::kernel::storage::with_fs(|fs| fs.touch(filename));
+        let clean = resolved.trim_start_matches('/');
+        let res = crate::kernel::storage::with_fs(|fs| fs.touch(clean));
         match res {
             Some(Ok(_)) => {
                 serial::print("Successfully created file '");
@@ -1548,12 +1707,36 @@ impl Shell {
     }
 
     fn do_write(&self, filename: &str, content: &str) {
+        let mut path_buf = [0u8; 128];
+        let resolved = self.resolve_path(filename, &mut path_buf);
+
+        if resolved.starts_with("/tmp/") || resolved.starts_with("/dev/") {
+            match crate::fs::vfs::write(resolved, content.as_bytes()) {
+                Ok(bytes) => {
+                    serial::print("Successfully wrote ");
+                    serial::print_u64(bytes as u64);
+                    serial::print(" bytes to '");
+                    serial::print(filename);
+                    serial::println("'.");
+                    return;
+                }
+                Err(err) => {
+                    serial::print("Failed to write to '");
+                    serial::print(filename);
+                    serial::print("': ");
+                    serial::println(err);
+                    return;
+                }
+            }
+        }
+
         if !crate::kernel::storage::is_read_write() {
             serial::println("Error: Filesystem is mounted read-only.");
             return;
         }
+        let clean = resolved.trim_start_matches('/');
         let res = crate::kernel::storage::with_fs(|fs| {
-            fs.write_file(filename, content.as_bytes())
+            fs.write_file(clean, content.as_bytes())
         });
         match res {
             Some(Ok(bytes)) => {
@@ -1576,22 +1759,24 @@ impl Shell {
     }
 
     fn do_copy(&self, src: &str, dst: &str) {
-        let clean_src = src.trim_start_matches(|c| c == '/' || c == '.');
-        let clean_dst = dst.trim_start_matches(|c| c == '/' || c == '.');
+        let mut src_buf = [0u8; 128];
+        let mut dst_buf = [0u8; 128];
+        let resolved_src = self.resolve_path(src, &mut src_buf);
+        let resolved_dst = self.resolve_path(dst, &mut dst_buf);
+
+        let clean_src = resolved_src.trim_start_matches('/');
+        let clean_dst = resolved_dst.trim_start_matches('/');
         if clean_src.is_empty() || clean_dst.is_empty() {
             serial::println("Usage: copy <source> to <destination>");
             return;
         }
-        if !crate::kernel::storage::is_read_write() {
-            serial::println("Error: Filesystem is mounted read-only.");
-            return;
-        }
 
         // Try VFS cross-copy first if absolute or special mount
-        if src.starts_with('/') || dst.starts_with('/') {
+        if resolved_src.starts_with("/tmp/") || resolved_src.starts_with("/dev/") || resolved_src.starts_with("/proc/")
+            || resolved_dst.starts_with("/tmp/") || resolved_dst.starts_with("/dev/") {
             let mut buf = [0u8; 4096];
-            if let Ok(len) = crate::fs::vfs::read(src, &mut buf) {
-                if let Ok(wlen) = crate::fs::vfs::write(dst, &buf[..len]) {
+            if let Ok(len) = crate::fs::vfs::read(resolved_src, &mut buf) {
+                if let Ok(wlen) = crate::fs::vfs::write(resolved_dst, &buf[..len]) {
                     serial::print("Successfully copied '");
                     serial::print(src);
                     serial::print("' to '");
@@ -1604,13 +1789,18 @@ impl Shell {
             }
         }
 
+        if !crate::kernel::storage::is_read_write() {
+            serial::println("Error: Filesystem is mounted read-only.");
+            return;
+        }
+
         let res = crate::kernel::storage::with_fs(|fs| fs.copy_file(clean_src, clean_dst));
         match res {
             Some(Ok(bytes)) => {
                 serial::print("Successfully copied '");
-                serial::print(clean_src);
+                serial::print(src);
                 serial::print("' to '");
-                serial::print(clean_dst);
+                serial::print(dst);
                 serial::print("' (");
                 serial::print_u64(bytes as u64);
                 serial::println(" bytes).");
@@ -1626,8 +1816,13 @@ impl Shell {
     }
 
     fn do_move(&self, src: &str, dst: &str) {
-        let clean_src = src.trim_start_matches(|c| c == '/' || c == '.');
-        let clean_dst = dst.trim_start_matches(|c| c == '/' || c == '.');
+        let mut src_buf = [0u8; 128];
+        let mut dst_buf = [0u8; 128];
+        let resolved_src = self.resolve_path(src, &mut src_buf);
+        let resolved_dst = self.resolve_path(dst, &mut dst_buf);
+
+        let clean_src = resolved_src.trim_start_matches('/');
+        let clean_dst = resolved_dst.trim_start_matches('/');
         if clean_src.is_empty() || clean_dst.is_empty() {
             serial::println("Usage: move <source> to <destination>");
             return;
@@ -1656,15 +1851,17 @@ impl Shell {
     }
 
     fn do_delete(&self, file: &str) {
-        let clean = file.trim_start_matches(|c| c == '/' || c == '.');
-        if clean.is_empty() {
+        if file.is_empty() {
             serial::println("Usage: delete <filename> (or remove <filename>)");
             return;
         }
 
+        let mut path_buf = [0u8; 128];
+        let resolved = self.resolve_path(file, &mut path_buf);
+
         // Try VFS delete first
-        if file.starts_with('/') {
-            if crate::fs::vfs::delete(file).is_ok() {
+        if resolved.starts_with("/tmp/") {
+            if crate::fs::vfs::delete(resolved).is_ok() {
                 serial::print("Successfully removed '");
                 serial::print(file);
                 serial::println("'.");
@@ -1676,6 +1873,8 @@ impl Shell {
             serial::println("Error: Filesystem is mounted read-only.");
             return;
         }
+
+        let clean = resolved.trim_start_matches('/');
         let res = crate::kernel::storage::with_fs(|fs| fs.delete_file(clean));
         match res {
             Some(Ok(())) => {
