@@ -51,7 +51,7 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     drivers::serial::init();
 
     drivers::serial::println("=================================================");
-    drivers::serial::println("    Aegis64 Kernel (Purple OS) - Pure Rust Edition");
+    drivers::serial::println("Aegis64 Kernel (Purple OS) Initializing (Pure Rust Edition)");
     drivers::serial::println("=================================================");
 
     let kstart = &raw const _kernel_start as usize;
@@ -132,7 +132,6 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     drivers::gpu::init();
     drivers::gpu_accel::init();
     kernel::apdrv::init();
-    kernel::apapp::init();
     kernel::apexec::init();
 
     // 16. Linear Framebuffer Console

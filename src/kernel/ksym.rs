@@ -3,7 +3,7 @@ pub struct Symbol {
     pub addr: u64,
 }
 
-static SYMBOLS: [Symbol; 8] = [
+static SYMBOLS: [Symbol; 10] = [
     Symbol { name: "kprintf", addr: 0x101000 },
     Symbol { name: "serial_write", addr: 0x101010 },
     Symbol { name: "pmm_alloc_frame", addr: 0x101020 },
@@ -12,6 +12,8 @@ static SYMBOLS: [Symbol; 8] = [
     Symbol { name: "task_create", addr: 0x101050 },
     Symbol { name: "task_yield", addr: 0x101060 },
     Symbol { name: "pit_get_ticks", addr: 0x101070 },
+    Symbol { name: "pci_enable_bus_mastering", addr: 0x101080 },
+    Symbol { name: "purplefs_sync", addr: 0x101090 },
 ];
 
 pub fn init() {
@@ -27,4 +29,14 @@ pub fn lookup(name: &str) -> Option<u64> {
         }
     }
     None
+}
+
+pub fn list_symbols() {
+    crate::drivers::serial::println("Aegis64 Kernel Symbol Table:");
+    for sym in &SYMBOLS {
+        crate::drivers::serial::print("  0x");
+        crate::drivers::serial::print_hex(sym.addr);
+        crate::drivers::serial::print("  ");
+        crate::drivers::serial::println(sym.name);
+    }
 }

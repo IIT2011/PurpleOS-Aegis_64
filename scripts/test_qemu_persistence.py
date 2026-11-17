@@ -68,9 +68,8 @@ def main():
             "filesystem status\n"
         ]
         out1 = run_qemu_session(disk_path, session1_commands)
-        print("Session 1 completed. Output preview:")
-        for line in out1.splitlines()[-15:]:
-            print("  ", line)
+        print("Session 1 completed. Full Output:")
+        print(out1)
 
         # Assertions for Session 1
         s1_assertions = [

@@ -32,8 +32,8 @@ def main():
         "video mode 800 600\n",
         "video\n",
         "echo Hello Purple OS Graphical Console!\n",
-        "desktop\n",
-        "desktop preview\n",
+        "gpu3d\n",
+        "mouse\n",
         "clear\n",
         "help\n"
     ]
@@ -63,9 +63,8 @@ def main():
         ("Video Mode Switch", "Video mode switched to 800x600@32bpp"),
         ("Video Framebuffer Active", "Resolution: 800x600@32bpp"),
         ("Echo Rendering Text", "Hello Purple OS Graphical Console!"),
-        ("Desktop Framebuffer Render", "Desktop: Graphical desktop frame rendered to framebuffer (800x600)"),
-        ("Desktop GUI Preview Rendering", "Purple OS / Aegis64 Native Desktop Environment"),
-        ("Desktop Windows Rendered", "Aegis64 System Monitor"),
+        ("GPU 3D Engine Output", "Purple OS 3D Hardware Acceleration Engine"),
+        ("PS/2 Mouse Subsystem", "PS/2 Mouse Subsystem Active"),
         ("Help Command Rendered", "AegisShell / Purple Shell Commands")
     ]
 

@@ -134,6 +134,9 @@ pub extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
         crate::drivers::serial::print("!!! KERNEL PANIC: CPU EXCEPTION ");
         crate::drivers::serial::print(EXCEPTION_MESSAGES[int_no]);
         crate::drivers::serial::println(" !!!");
+        crate::drivers::serial::print("RIP: 0x");
+        crate::drivers::serial::print_hex(frame.rip);
+        crate::drivers::serial::println("");
         crate::drivers::serial::println("=================================================");
         if int_no == 14 {
             let cr2 = crate::arch::x86_64::cpu::read_cr2();

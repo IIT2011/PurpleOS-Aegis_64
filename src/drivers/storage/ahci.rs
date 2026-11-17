@@ -88,6 +88,9 @@ impl AhciPort {
             self.cmd_list = cl_ptr as *mut AhciCmdHeader;
             self.cmd_list_phys = cl_phys;
 
+            // Allocate FIS receive buffer (256 bytes)
+            let (_fb_ptr, fb_phys) = alloc_coherent(256).ok_or("Failed to alloc fb")?;
+
             // Allocate command table (256 bytes)
             let (ct_ptr, ct_phys) = alloc_coherent(256).ok_or("Failed to alloc cmd table")?;
             self.cmd_table = ct_ptr;
@@ -98,17 +101,41 @@ impl AhciPort {
             self.dma_buf = db_ptr;
             self.dma_buf_phys = db_phys;
 
+            // Stop port command engine first: clear ST (bit 0) and FRE (bit 4)
+            (*self.regs).cmd &= !0x01;
+            let mut timeout = 10000;
+            while ((*self.regs).cmd & 0x8000) != 0 && timeout > 0 {
+                core::hint::spin_loop();
+                timeout -= 1;
+            }
+            (*self.regs).cmd &= !0x10;
+            timeout = 10000;
+            while ((*self.regs).cmd & 0x4000) != 0 && timeout > 0 {
+                core::hint::spin_loop();
+                timeout -= 1;
+            }
+
+            // Set command list and FIS buffer bases
             (*self.regs).clb = self.cmd_list_phys as u32;
             (*self.regs).clbu = (self.cmd_list_phys >> 32) as u32;
 
+            (*self.regs).fb = fb_phys as u32;
+            (*self.regs).fbu = (fb_phys >> 32) as u32;
+
+            // Clear errors and interrupts
+            (*self.regs).serr = (*self.regs).serr;
+            (*self.regs).is = (*self.regs).is;
+
+            // Setup slot 0 pointing to command table
             (*self.cmd_list).ctba = self.cmd_table_phys as u32;
             (*self.cmd_list).ctbau = (self.cmd_table_phys >> 32) as u32;
 
             // Start command engine (FRE | ST)
-            (*self.regs).cmd |= 0x10 | 0x01;
+            (*self.regs).cmd |= 0x10;
+            (*self.regs).cmd |= 0x01;
 
             self.is_sata = true;
-            self.total_sectors = 2097152; // Default 1 GiB disk if not yet identified
+            self.total_sectors = 2097152; // Default 1 GiB disk
         }
         Ok(())
     }
@@ -116,7 +143,8 @@ impl AhciPort {
 
 impl BlockDevice for AhciPort {
     fn name(&self) -> &str {
-        core::str::from_utf8(&self.name).unwrap_or("sata")
+        let len = self.name.iter().position(|&c| c == 0).unwrap_or(self.name.len());
+        core::str::from_utf8(&self.name[..len]).unwrap_or("sata0")
     }
 
     fn block_size(&self) -> u32 {
@@ -128,13 +156,16 @@ impl BlockDevice for AhciPort {
     }
 
     fn read_blocks(&mut self, lba: u64, count: u32, buf: &mut [u8]) -> i32 {
+        if count == 0 {
+            return BLOCK_DEV_OK;
+        }
         if lba + count as u64 > self.total_sectors || self.dma_buf.is_null() {
             return BLOCK_DEV_ERR_BOUNDS;
         }
 
         let bytes = (count as usize) * 512;
-        if bytes > 65536 {
-            return BLOCK_DEV_ERR_IO;
+        if bytes > 65536 || buf.len() < bytes {
+            return BLOCK_DEV_ERR_BOUNDS;
         }
 
         unsafe {
@@ -182,13 +213,16 @@ impl BlockDevice for AhciPort {
     }
 
     fn write_blocks(&mut self, lba: u64, count: u32, buf: &[u8]) -> i32 {
+        if count == 0 {
+            return BLOCK_DEV_OK;
+        }
         if lba + count as u64 > self.total_sectors || self.dma_buf.is_null() {
             return BLOCK_DEV_ERR_BOUNDS;
         }
 
         let bytes = (count as usize) * 512;
-        if bytes > 65536 {
-            return BLOCK_DEV_ERR_IO;
+        if bytes > 65536 || buf.len() < bytes {
+            return BLOCK_DEV_ERR_BOUNDS;
         }
 
         unsafe {

@@ -57,6 +57,15 @@ impl GptInfo {
     }
 }
 
+fn check_purplefs_superblock(bdev: &mut dyn BlockDevice, start_lba: u64) -> bool {
+    let mut sb = [0u8; 512];
+    if bdev.read_blocks(start_lba, 1, &mut sb) == 0 {
+        &sb[0..8] == b"PURPLEFS"
+    } else {
+        false
+    }
+}
+
 pub fn parse(bdev: &mut dyn BlockDevice) -> Result<GptInfo, &'static str> {
     if bdev.total_blocks() < 34 {
         return Err("Block device too small for GPT");
@@ -85,15 +94,26 @@ pub fn parse(bdev: &mut dyn BlockDevice) -> Result<GptInfo, &'static str> {
     let num_part_entries = u32::from_le_bytes(gpt_hdr[80..84].try_into().unwrap()) as usize;
     let part_entry_size = u32::from_le_bytes(gpt_hdr[84..88].try_into().unwrap()) as usize;
 
+    if !(128..=512).contains(&part_entry_size) {
+        return Err("Invalid GPT partition entry size");
+    }
+
     let mut info = GptInfo::new();
     info.valid_header = true;
 
     let mut sector_buf = [0u8; 512];
-    let entries_per_sector = 512 / part_entry_size.max(128);
+    let entries_per_sector = 512 / part_entry_size;
+    if entries_per_sector == 0 {
+        return Err("Zero entries per sector in GPT");
+    }
 
     for i in 0..num_part_entries.min(32) {
         let sector_offset = i / entries_per_sector;
         let entry_offset = (i % entries_per_sector) * part_entry_size;
+
+        if entry_offset + part_entry_size > 512 {
+            break;
+        }
 
         if i % entries_per_sector == 0 {
             if bdev.read_blocks(part_entry_lba + sector_offset as u64, 1, &mut sector_buf) != 0 {
@@ -109,25 +129,60 @@ pub fn parse(bdev: &mut dyn BlockDevice) -> Result<GptInfo, &'static str> {
             continue;
         }
 
+        let mut unique_guid = [0u8; 16];
+        unique_guid.copy_from_slice(&entry[16..32]);
+
         let start_lba = u64::from_le_bytes(entry[32..40].try_into().unwrap());
         let end_lba = u64::from_le_bytes(entry[40..48].try_into().unwrap());
-        let is_purplefs = type_guid == PURPLEFS_GUID || true; // Accept formatted partitions
+        let attributes = u64::from_le_bytes(entry[48..56].try_into().unwrap());
+
+        // Extract UTF-16LE partition name
+        let mut name = [0u8; 36];
+        let mut name_idx = 0;
+        for c in 0..35 {
+            let off = 56 + c * 2;
+            if off + 1 < part_entry_size {
+                let ch = entry[off];
+                if ch == 0 {
+                    break;
+                }
+                name[name_idx] = ch;
+                name_idx += 1;
+            }
+        }
+
+        let is_purplefs = type_guid == PURPLEFS_GUID || check_purplefs_superblock(bdev, start_lba);
 
         if info.partition_count < info.partitions.len() {
             let idx = info.partition_count;
             info.partitions[idx] = GptPartition {
                 type_guid,
-                unique_guid: [0; 16],
+                unique_guid,
                 start_lba,
                 end_lba,
-                attributes: 0,
-                name: [0; 36],
+                attributes,
+                name,
                 is_purplefs,
             };
             if is_purplefs && info.purplefs_part_index.is_none() {
                 info.purplefs_part_index = Some(idx);
             }
             info.partition_count += 1;
+
+            crate::drivers::serial::print("  Part ");
+            crate::drivers::serial::print_u64(idx as u64);
+            crate::drivers::serial::print(": '");
+            let name_len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+            let name_str = core::str::from_utf8(&name[..name_len]).unwrap_or("");
+            crate::drivers::serial::print(name_str);
+            crate::drivers::serial::print("' [");
+            crate::drivers::serial::print_u64(start_lba);
+            crate::drivers::serial::print("..");
+            crate::drivers::serial::print_u64(end_lba);
+            crate::drivers::serial::print(", ");
+            crate::drivers::serial::print_u64(end_lba - start_lba + 1);
+            crate::drivers::serial::print(" sectors] PurpleFS=");
+            crate::drivers::serial::println(if is_purplefs { "1" } else { "0" });
         }
     }
 

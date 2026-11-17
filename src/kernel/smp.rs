@@ -9,6 +9,20 @@ pub const LAPIC_IPI_RESCHED: u8 = 0xFD;
 pub const LAPIC_IPI_HALT: u8 = 0xFE;
 
 static ONLINE_CPUS: AtomicU32 = AtomicU32::new(1); // BSP starts online
+static mut APIC_TO_CPU_MAP: [u8; 256] = [0xFF; 256];
+
+#[inline(always)]
+pub fn get_cpu_id() -> usize {
+    let apic_id = (crate::drivers::apic::get_id() & 0xFF) as usize;
+    unsafe {
+        let cpu = APIC_TO_CPU_MAP[apic_id];
+        if cpu != 0xFF {
+            cpu as usize
+        } else {
+            0
+        }
+    }
+}
 
 #[repr(C, packed)]
 struct TrampolineData {
@@ -25,23 +39,52 @@ extern "C" {
     static smp_trampoline_end: u8;
 }
 
+fn print_core_msg(prefix: &str, cpu_id: u32, apic_id: u32, suffix: &str) {
+    let mut buf = [0u8; 96];
+    let mut len = 0;
+    let p_bytes = prefix.as_bytes();
+    buf[len..len + p_bytes.len()].copy_from_slice(p_bytes);
+    len += p_bytes.len();
+    if cpu_id >= 10 {
+        buf[len] = b'0' + ((cpu_id / 10) as u8);
+        len += 1;
+    }
+    buf[len] = b'0' + ((cpu_id % 10) as u8);
+    len += 1;
+    let mid = b" (APIC ID ";
+    buf[len..len + mid.len()].copy_from_slice(mid);
+    len += mid.len();
+    if apic_id >= 10 {
+        buf[len] = b'0' + ((apic_id / 10) as u8);
+        len += 1;
+    }
+    buf[len] = b'0' + ((apic_id % 10) as u8);
+    len += 1;
+    let mid2 = b") ";
+    buf[len..len + mid2.len()].copy_from_slice(mid2);
+    len += mid2.len();
+    let s_bytes = suffix.as_bytes();
+    buf[len..len + s_bytes.len()].copy_from_slice(s_bytes);
+    len += s_bytes.len();
+    if let Ok(s) = core::str::from_utf8(&buf[..len]) {
+        crate::drivers::serial::println(s);
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn smp_ap_entry() -> ! {
     let apic_id = crate::drivers::apic::get_id();
-    let cpu_id = ONLINE_CPUS.fetch_add(1, Ordering::SeqCst);
+    let cpu_id = get_cpu_id();
+    let _ = ONLINE_CPUS.fetch_add(1, Ordering::SeqCst);
 
-    crate::arch::x86_64::gdt::init_ap(cpu_id as usize);
+    crate::arch::x86_64::gdt::init_ap(cpu_id);
     crate::arch::x86_64::idt::load_idt();
-    crate::kernel::syscall::init_ap();
+    crate::kernel::syscall::init_ap(cpu_id);
     crate::drivers::apic::init_ap();
 
-    crate::drivers::serial::print("SMP: AP core #");
-    crate::drivers::serial::print_u64(cpu_id as u64);
-    crate::drivers::serial::print(" (APIC ID ");
-    crate::drivers::serial::print_u64(apic_id as u64);
-    crate::drivers::serial::println(") started and operational");
+    print_core_msg("SMP: AP core #", cpu_id as u32, apic_id, "started and operational");
 
-    crate::kernel::task::init_ap(cpu_id as usize);
+    crate::kernel::task::init_ap(cpu_id);
 
     sti();
 
@@ -53,6 +96,12 @@ pub extern "C" fn smp_ap_entry() -> ! {
 pub fn init() {
     let madt = get_madt_info();
     let total_cpus = madt.cpu_count;
+
+    unsafe {
+        for (idx, &apic) in madt.apic_ids[..total_cpus.min(8)].iter().enumerate() {
+            APIC_TO_CPU_MAP[apic as usize] = idx as u8;
+        }
+    }
 
     if total_cpus <= 1 {
         crate::drivers::serial::println("SMP: Uniprocessor system detected (1 core)");
@@ -113,11 +162,15 @@ pub fn init() {
 
             if (*data).ready != 0 {
                 (*data).bsp_ack = 1;
-                crate::drivers::serial::print("SMP: AP core #");
-                crate::drivers::serial::print_u64(i as u64);
-                crate::drivers::serial::print(" (APIC ID ");
-                crate::drivers::serial::print_u64(apic_id as u64);
-                crate::drivers::serial::println(") successfully brought online");
+                // Wait for AP core to increment ONLINE_CPUS in smp_ap_entry
+                let expected = (i + 1) as u32;
+                let mut ap_wait = 100;
+                while ONLINE_CPUS.load(Ordering::SeqCst) < expected && ap_wait > 0 {
+                    crate::drivers::pit::delay_ms(1);
+                    ap_wait -= 1;
+                }
+
+                print_core_msg("SMP: AP core #", i as u32, apic_id as u32, "successfully brought online");
             } else {
                 crate::drivers::serial::print("SMP: AP core #");
                 crate::drivers::serial::print_u64(i as u64);
@@ -126,11 +179,24 @@ pub fn init() {
         }
     }
 
-    crate::drivers::serial::print("SMP: Multiprocessing operational. ");
-    crate::drivers::serial::print_u64(ONLINE_CPUS.load(Ordering::SeqCst) as u64);
-    crate::drivers::serial::print("/");
-    crate::drivers::serial::print_u64(total_cpus as u64);
-    crate::drivers::serial::println(" CPUs online.");
+    let online = ONLINE_CPUS.load(Ordering::SeqCst) as u64;
+    let total = total_cpus as u64;
+    let mut msg = [0u8; 64];
+    let prefix = b"SMP: Multiprocessing operational. ";
+    msg[..prefix.len()].copy_from_slice(prefix);
+    let mut idx = prefix.len();
+    msg[idx] = b'0' + (online as u8);
+    idx += 1;
+    msg[idx] = b'/';
+    idx += 1;
+    msg[idx] = b'0' + (total as u8);
+    idx += 1;
+    let suffix = b" CPUs online.";
+    msg[idx..idx + suffix.len()].copy_from_slice(suffix);
+    idx += suffix.len();
+    if let Ok(s) = core::str::from_utf8(&msg[..idx]) {
+        crate::drivers::serial::println(s);
+    }
 }
 
 pub fn get_online_count() -> u32 {

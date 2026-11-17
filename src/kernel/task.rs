@@ -82,7 +82,7 @@ pub static SCHED: Spinlock<SchedState> = Spinlock::new(SchedState {
 });
 
 extern "C" {
-    fn switch_context(old_rsp: *mut u64, new_rsp: u64);
+    fn switch_context(old_rsp: *mut u64, new_rsp: u64, lock_to_release: *const core::sync::atomic::AtomicBool);
     fn task_trampoline();
     #[allow(dead_code)]
     fn user_trampoline();
@@ -114,8 +114,18 @@ pub fn init() {
     t.cpu_affinity = 1;
     t.last_cpu = 0;
     s.current[0] = Some(main_idx);
+    drop(s);
 
-    crate::drivers::serial::println("Scheduler: AegisSched_64 Pure Rust Scheduler Initialized");
+    // Spawn idle task (ID 2) with proper stack
+    spawn("idle", idle_task, core::ptr::null_mut(), TaskPriority::Idle);
+
+    crate::drivers::serial::println("Scheduler: AegisSched_64 / PurpleSched Pure Rust Scheduler Initialized");
+}
+
+extern "C" fn idle_task(_arg: *mut u8) {
+    loop {
+        hlt();
+    }
 }
 
 pub fn init_ap(cpu_id: usize) {
@@ -144,7 +154,15 @@ pub fn init_ap(cpu_id: usize) {
 
 fn alloc_task_slot(s: &mut SchedState) -> Option<usize> {
     for i in 0..MAX_TASKS {
-        if s.tasks[i].state == TaskState::Unused || s.tasks[i].state == TaskState::Terminated {
+        if s.tasks[i].state == TaskState::Unused {
+            return Some(i);
+        } else if s.tasks[i].state == TaskState::Terminated {
+            // Safely reclaim terminated task's stack frames now that it has completely stopped running
+            if s.tasks[i].stack_base != 0 {
+                let _ = free_frames(s.tasks[i].stack_base as usize, 4);
+                s.tasks[i].stack_base = 0;
+            }
+            s.tasks[i].state = TaskState::Unused;
             return Some(i);
         }
     }
@@ -187,9 +205,9 @@ pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8
     t.is_user = false;
 
     // Setup initial kernel stack frame for switch_context:
+    // [stack layout for task_trampoline]: entry function pointer, arg pointer
     // [rsp+0]: task_trampoline return address
     // [rsp+8..]: pushed callee-saved registers (r15, r14, r13, r12, rbp, rbx, rflags)
-    // [stack layout for task_trampoline]: entry function pointer, arg pointer
     unsafe {
         let mut sp = stack_top as *mut u64;
 
@@ -228,8 +246,7 @@ pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8
 
 #[inline(always)]
 fn get_current_cpu() -> usize {
-    let id = crate::drivers::apic::get_id() as usize;
-    if id < MAX_CPUS { id } else { 0 }
+    crate::kernel::smp::get_cpu_id()
 }
 
 pub fn yield_now() {
@@ -253,11 +270,7 @@ pub fn exit() -> ! {
     let mut s = SCHED.lock();
     if let Some(cur_idx) = s.current[cpu_id] {
         s.tasks[cur_idx].state = TaskState::Terminated;
-        let stack = s.tasks[cur_idx].stack_base;
-        if stack != 0 {
-            let _ = free_frames(stack as usize, 4);
-            s.tasks[cur_idx].stack_base = 0;
-        }
+        // Do NOT free stack while still executing on it; alloc_task_slot reaps it safely
     }
     drop(s);
     schedule();
@@ -272,13 +285,9 @@ pub fn kill(task_id: u32) -> Result<(), &'static str> {
     }
     let mut s = SCHED.lock();
     for i in 0..MAX_TASKS {
-        if s.tasks[i].id == task_id && s.tasks[i].state != TaskState::Terminated {
+        if s.tasks[i].id == task_id && s.tasks[i].state != TaskState::Terminated && s.tasks[i].state != TaskState::Unused {
             s.tasks[i].state = TaskState::Terminated;
-            let stack = s.tasks[i].stack_base;
-            if stack != 0 {
-                let _ = free_frames(stack as usize, 4);
-                s.tasks[i].stack_base = 0;
-            }
+            // Let alloc_task_slot safely reclaim the stack
             return Ok(());
         }
     }
@@ -296,7 +305,7 @@ fn pick_next(s: &mut SchedState, cpu_id: usize) -> Option<usize> {
     }
 
     // Pick highest priority ready task matching affinity
-    for prio in [TaskPriority::High, TaskPriority::Normal, TaskPriority::Low] {
+    for prio in [TaskPriority::High, TaskPriority::Normal, TaskPriority::Low, TaskPriority::Idle] {
         for i in 0..MAX_TASKS {
             if s.tasks[i].state == TaskState::Ready
                 && s.tasks[i].priority == prio
@@ -348,14 +357,15 @@ pub fn schedule() {
     s.tasks[next_idx].last_cpu = cpu_id as u32;
     s.current[cpu_id] = Some(next_idx);
 
-    drop(s);
+    let raw_lock = SCHED.raw_lock_ptr();
+    core::mem::forget(s);
 
     unsafe {
         if !old_rsp_ptr.is_null() {
-            switch_context(old_rsp_ptr, new_rsp);
+            switch_context(old_rsp_ptr, new_rsp, raw_lock);
         } else {
             let mut dummy: u64 = 0;
-            switch_context(&mut dummy, new_rsp);
+            switch_context(&mut dummy, new_rsp, raw_lock);
         }
     }
 }

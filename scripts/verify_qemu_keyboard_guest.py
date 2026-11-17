@@ -17,8 +17,9 @@ import subprocess
 import time
 import os
 import sys
+import tempfile
 
-QMP_SOCK = "/tmp/qemu_keyboard_test_qmp.sock"
+QMP_SOCK = os.path.join(tempfile.gettempdir(), "qemu_keyboard_test_qmp.sock")
 
 def qmp_command(s, cmd, args=None):
     req = {"execute": cmd}

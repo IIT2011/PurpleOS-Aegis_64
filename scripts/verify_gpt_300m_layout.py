@@ -353,7 +353,7 @@ def verify_with_qemu(image_path: str):
     return failed
 
 def main():
-    test_img = "/tmp/test_300m_gpt_layout.img"
+    test_img = os.path.join(tempfile.gettempdir(), "test_300m_gpt_layout.img")
     try:
         build_300m_gpt_image(test_img)
         failures = verify_with_qemu(test_img)

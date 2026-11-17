@@ -154,9 +154,11 @@ boot_pd_2:
 boot_pd_3:
     .skip 4096
 
-.align 16
+.align 4096
+boot_stack_guard:
+    .skip 4096
 boot_stack_bottom:
-    .skip 16384
+    .skip 131072
 boot_stack_top:
 
 boot_mb_magic:

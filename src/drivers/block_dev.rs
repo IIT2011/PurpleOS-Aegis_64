@@ -29,11 +29,18 @@ pub fn register(dev: &'static mut dyn BlockDevice) {
     let mut reg = REGISTRY.lock();
     if reg.count < reg.devices.len() {
         let idx = reg.count;
-        crate::drivers::serial::print("BlockDev: Registered '");
-        crate::drivers::serial::print(dev.name());
-        crate::drivers::serial::print("', Blocks=");
-        crate::drivers::serial::print_u64(dev.total_blocks());
-        crate::drivers::serial::println("");
+        let dname = dev.name().trim_matches(char::from(0)).trim();
+        if dname == "sata0" {
+            crate::drivers::serial::println("BlockDev: Registered 'sata0' [AHCI/SATA]");
+        } else if dname == "nvme0n1" {
+            crate::drivers::serial::println("BlockDev: Registered 'nvme0n1' [NVMe PCIe]");
+        } else {
+            crate::drivers::serial::print("BlockDev: Registered '");
+            crate::drivers::serial::print(dname);
+            crate::drivers::serial::print("', Blocks=");
+            crate::drivers::serial::print_u64(dev.total_blocks());
+            crate::drivers::serial::println("");
+        }
         reg.devices[idx] = Some(dev);
         reg.count += 1;
     }
@@ -41,4 +48,26 @@ pub fn register(dev: &'static mut dyn BlockDevice) {
 
 pub fn count() -> usize {
     REGISTRY.lock().count
+}
+
+pub fn with_dev<F, R>(idx: usize, f: F) -> Option<R>
+where
+    F: FnOnce(&mut dyn BlockDevice) -> R,
+{
+    let mut reg = REGISTRY.lock();
+    if idx < reg.count {
+        if let Some(ref mut d) = reg.devices[idx] {
+            return Some(f(*d));
+        }
+    }
+    None
+}
+
+pub fn for_each_dev<F: FnMut(usize, &dyn BlockDevice)>(mut f: F) {
+    let reg = REGISTRY.lock();
+    for i in 0..reg.count {
+        if let Some(ref d) = reg.devices[i] {
+            f(i, *d);
+        }
+    }
 }

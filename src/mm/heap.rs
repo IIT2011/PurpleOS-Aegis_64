@@ -1,7 +1,8 @@
 //! Aegis64 Kernel Dynamic Memory Heap Allocator
 //!
-//! Provides a thread-safe, lock-protected Free-List Heap Allocator implementing
-//! `core::alloc::GlobalAlloc`. Unlocks standard dynamic data structures:
+//! Provides a thread-safe, lock-protected Address-Ordered Free-List Heap Allocator
+//! with immediate neighbor coalescing and exact block header accounting,
+//! implementing `core::alloc::GlobalAlloc`. Unlocks standard dynamic data structures:
 //! `Vec`, `String`, `Box`, `BTreeMap`, and heap-allocated driver structures.
 
 use core::alloc::{GlobalAlloc, Layout};
@@ -11,10 +12,16 @@ use crate::sync::Spinlock;
 /// Minimum block allocation size (must fit free list node)
 const MIN_ALLOC_SIZE: usize = 32;
 
-#[repr(C)]
+#[repr(C, align(16))]
 struct FreeListNode {
     size: usize,
     next: *mut FreeListNode,
+}
+
+#[repr(C, align(16))]
+struct AllocHeader {
+    block_start: usize,
+    total_size: usize,
 }
 
 pub struct Heap {
@@ -51,8 +58,9 @@ impl Heap {
     }
 
     pub fn alloc(&mut self, layout: Layout) -> *mut u8 {
-        let align = layout.align().max(core::mem::align_of::<usize>()).max(16);
+        let align = layout.align().max(16);
         let size = layout.size().max(MIN_ALLOC_SIZE);
+        let header_size = core::mem::size_of::<AllocHeader>();
 
         let mut prev: *mut FreeListNode = null_mut();
         let mut curr = self.head;
@@ -60,16 +68,15 @@ impl Heap {
         while !curr.is_null() {
             unsafe {
                 let curr_addr = curr as usize;
-                // Calculate aligned user payload address after block header (size: usize)
-                let header_size = core::mem::size_of::<usize>();
                 let payload_start = (curr_addr + header_size + (align - 1)) & !(align - 1);
                 let needed_size = (payload_start - curr_addr) + size;
 
                 if (*curr).size >= needed_size {
-                    let remaining = (*curr).size - needed_size;
+                    let total_block_size = (*curr).size;
+                    let remaining = total_block_size - needed_size;
 
                     if remaining >= MIN_ALLOC_SIZE + header_size {
-                        // Split block
+                        // Split block: remainder placed at curr_addr + needed_size
                         let next_block = (curr_addr + needed_size) as *mut FreeListNode;
                         (*next_block).size = remaining;
                         (*next_block).next = (*curr).next;
@@ -80,9 +87,11 @@ impl Heap {
                             (*prev).next = next_block;
                         }
 
-                        // Store actual allocated block size right before payload
-                        let size_header = (payload_start - header_size) as *mut usize;
-                        *size_header = needed_size;
+                        let actual_carved = needed_size;
+                        let hdr = (payload_start - header_size) as *mut AllocHeader;
+                        (*hdr).block_start = curr_addr;
+                        (*hdr).total_size = actual_carved;
+                        self.allocated_bytes += actual_carved;
                     } else {
                         // Consume whole block
                         if prev.is_null() {
@@ -90,11 +99,14 @@ impl Heap {
                         } else {
                             (*prev).next = (*curr).next;
                         }
-                        let size_header = (payload_start - header_size) as *mut usize;
-                        *size_header = (*curr).size;
+
+                        let actual_carved = total_block_size;
+                        let hdr = (payload_start - header_size) as *mut AllocHeader;
+                        (*hdr).block_start = curr_addr;
+                        (*hdr).total_size = actual_carved;
+                        self.allocated_bytes += actual_carved;
                     }
 
-                    self.allocated_bytes += size;
                     return payload_start as *mut u8;
                 }
 
@@ -106,23 +118,48 @@ impl Heap {
         null_mut()
     }
 
-    pub fn dealloc(&mut self, ptr: *mut u8, layout: Layout) {
+    pub fn dealloc(&mut self, ptr: *mut u8, _layout: Layout) {
         if ptr.is_null() {
             return;
         }
 
         unsafe {
-            let header_size = core::mem::size_of::<usize>();
-            let size_header = (ptr as usize - header_size) as *const usize;
-            let block_size = *size_header;
-            let block_start = ptr as usize - header_size;
+            let header_size = core::mem::size_of::<AllocHeader>();
+            let hdr = (ptr as usize - header_size) as *const AllocHeader;
+            let block_start = (*hdr).block_start;
+            let block_size = (*hdr).total_size;
+
+            self.allocated_bytes = self.allocated_bytes.saturating_sub(block_size);
 
             let freed_node = block_start as *mut FreeListNode;
             (*freed_node).size = block_size;
-            (*freed_node).next = self.head;
-            self.head = freed_node;
+            (*freed_node).next = null_mut();
 
-            self.allocated_bytes = self.allocated_bytes.saturating_sub(layout.size());
+            // Insert into address-ordered free list
+            if self.head.is_null() || (block_start < self.head as usize) {
+                (*freed_node).next = self.head;
+                self.head = freed_node;
+            } else {
+                let mut curr = self.head;
+                while !(*curr).next.is_null() && (((*curr).next as usize) < block_start) {
+                    curr = (*curr).next;
+                }
+                (*freed_node).next = (*curr).next;
+                (*curr).next = freed_node;
+            }
+
+            // Neighbor coalescing pass: merge contiguous adjacent blocks
+            let mut curr = self.head;
+            while !curr.is_null() && !(*curr).next.is_null() {
+                let curr_end = (curr as usize) + (*curr).size;
+                let next = (*curr).next;
+                if curr_end == (next as usize) {
+                    (*curr).size += (*next).size;
+                    (*curr).next = (*next).next;
+                } else {
+                    curr = (*curr).next;
+                }
+            }
         }
     }
 }
@@ -160,15 +197,15 @@ pub fn init() {
         unsafe {
             GLOBAL_ALLOCATOR.lock().init(heap_phys as usize, heap_size);
         }
-        crate::drivers::serial::print("Heap: Dynamic Kernel Heap Initialized (2 MiB at 0x");
+        crate::drivers::serial::print("Heap: Initialized 2 MiB Kernel Dynamic Heap at 0x");
         crate::drivers::serial::print_hex(heap_phys as u64);
-        crate::drivers::serial::println(", GlobalAlloc Active)");
+        crate::drivers::serial::println(" (Address-Ordered Free-List with Coalescing)");
     } else {
-        crate::drivers::serial::println("Heap: FAILED to allocate frames for kernel heap!");
+        crate::drivers::serial::println("Heap: FAILED to allocate frames for dynamic heap!");
     }
 }
 
-pub fn get_stats() -> (usize, usize, usize) {
+pub fn get_status() -> (usize, usize) {
     let h = GLOBAL_ALLOCATOR.lock();
-    (h.total_bytes, h.allocated_bytes, h.total_bytes.saturating_sub(h.allocated_bytes))
+    (h.allocated_bytes, h.total_bytes)
 }

@@ -186,9 +186,9 @@ impl E1000Device {
             }
         }
 
-        // If MAC is still zero (e.g. QEMU without EEPROM attached), provide standard QEMU default
+        // Verify hardware MAC was successfully acquired from EEPROM or RAL/RAH registers
         if self.mac == [0, 0, 0, 0, 0, 0] {
-            self.mac = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+            return Err("No valid hardware MAC address found in E1000 EEPROM or RAL/RAH registers");
         }
 
         // 2. Allocate DMA memory for RX Ring

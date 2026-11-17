@@ -73,6 +73,11 @@ pub fn write_config_u32(bus: u8, slot: u8, func: u8, offset: u8, val: u32) {
     }
 }
 
+pub fn enable_bus_mastering(bus: u8, slot: u8, func: u8) {
+    let cmd = read_config_u32(bus, slot, func, 0x04);
+    write_config_u32(bus, slot, func, 0x04, cmd | 0x07);
+}
+
 pub fn init() {
     let mut state = PCI_STATE.lock();
     state.count = 0;

@@ -121,7 +121,7 @@ pub fn init(_mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
         MADT_INFO.cpu_count = count;
 
         crate::drivers::serial::print("ACPI MADT: Local APIC Base=0x");
-        crate::drivers::serial::print_hex(lapic);
+        crate::drivers::serial::print_hex_u64(lapic);
         crate::drivers::serial::print(", CPUs=");
         crate::drivers::serial::print_u64(count as u64);
         crate::drivers::serial::println("");

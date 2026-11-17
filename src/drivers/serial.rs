@@ -11,7 +11,7 @@ pub fn init() {
     unsafe {
         outb(COM1 + 1, 0x00); // Disable interrupts
         outb(COM1 + 3, 0x80); // Enable DLAB
-        outb(COM1 + 0, 0x03); // Divisor 3 = 38400 baud (or 1 = 115200)
+        outb(COM1 + 0, 0x03); // Divisor 3 = 38400 baud
         outb(COM1 + 1, 0x00);
         outb(COM1 + 3, 0x03); // 8 bits, no parity, 1 stop bit
         outb(COM1 + 2, 0xC7); // Enable FIFO, 14-byte threshold
@@ -41,22 +41,64 @@ pub fn putchar(c: u8) {
 }
 
 pub fn print(s: &str) {
+    let _guard = SERIAL_LOCK.lock();
     for b in s.bytes() {
         if b == b'\n' {
-            putchar(b'\r');
+            unsafe {
+                while (inb(COM1 + 5) & 0x20) == 0 {
+                    core::hint::spin_loop();
+                }
+                outb(COM1, b'\r');
+            }
         }
-        putchar(b);
+        unsafe {
+            while (inb(COM1 + 5) & 0x20) == 0 {
+                core::hint::spin_loop();
+            }
+            outb(COM1, b);
+        }
     }
 }
 
 pub fn println(s: &str) {
-    print(s);
-    print("\n");
+    let _guard = SERIAL_LOCK.lock();
+    for b in s.bytes() {
+        if b == b'\n' {
+            unsafe {
+                while (inb(COM1 + 5) & 0x20) == 0 {
+                    core::hint::spin_loop();
+                }
+                outb(COM1, b'\r');
+            }
+        }
+        unsafe {
+            while (inb(COM1 + 5) & 0x20) == 0 {
+                core::hint::spin_loop();
+            }
+            outb(COM1, b);
+        }
+    }
+    unsafe {
+        while (inb(COM1 + 5) & 0x20) == 0 {
+            core::hint::spin_loop();
+        }
+        outb(COM1, b'\r');
+        while (inb(COM1 + 5) & 0x20) == 0 {
+            core::hint::spin_loop();
+        }
+        outb(COM1, b'\n');
+    }
 }
 
 pub fn print_u64(mut n: u64) {
+    let _guard = SERIAL_LOCK.lock();
     if n == 0 {
-        print("0");
+        unsafe {
+            while (inb(COM1 + 5) & 0x20) == 0 {
+                core::hint::spin_loop();
+            }
+            outb(COM1, b'0');
+        }
         return;
     }
     let mut buf = [0u8; 20];
@@ -68,13 +110,24 @@ pub fn print_u64(mut n: u64) {
     }
     while i > 0 {
         i -= 1;
-        putchar(buf[i]);
+        unsafe {
+            while (inb(COM1 + 5) & 0x20) == 0 {
+                core::hint::spin_loop();
+            }
+            outb(COM1, buf[i]);
+        }
     }
 }
 
 pub fn print_hex(mut n: u64) {
+    let _guard = SERIAL_LOCK.lock();
     if n == 0 {
-        print("0");
+        unsafe {
+            while (inb(COM1 + 5) & 0x20) == 0 {
+                core::hint::spin_loop();
+            }
+            outb(COM1, b'0');
+        }
         return;
     }
     let mut buf = [0u8; 16];
@@ -87,7 +140,26 @@ pub fn print_hex(mut n: u64) {
     }
     while i > 0 {
         i -= 1;
-        putchar(buf[i]);
+        unsafe {
+            while (inb(COM1 + 5) & 0x20) == 0 {
+                core::hint::spin_loop();
+            }
+            outb(COM1, buf[i]);
+        }
+    }
+}
+
+pub fn print_hex_u64(n: u64) {
+    let _guard = SERIAL_LOCK.lock();
+    let hex_chars = b"0123456789abcdef";
+    for i in (0..16).rev() {
+        let digit = ((n >> (i * 4)) & 0xF) as usize;
+        unsafe {
+            while (inb(COM1 + 5) & 0x20) == 0 {
+                core::hint::spin_loop();
+            }
+            outb(COM1, hex_chars[digit]);
+        }
     }
 }
 
@@ -114,6 +186,11 @@ macro_rules! kprint {
 
 #[macro_export]
 macro_rules! kprintln {
-    () => ($crate::kprint!("\n"));
-    ($($arg:tt)*) => ($crate::kprint!("{}\n", format_args!($($arg)*)));
+    () => {
+        $crate::drivers::serial::print("\n")
+    };
+    ($($arg:tt)*) => {
+        $crate::drivers::serial::_print_fmt(format_args!($($arg)*));
+        $crate::drivers::serial::print("\n");
+    };
 }

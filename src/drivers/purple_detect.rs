@@ -205,10 +205,10 @@ pub fn scan_all() {
 
 pub fn print_table() {
     let reg = REGISTRY.lock();
-    let header = "\n=== PurpleDetect Hardware & Peripheral Inventory ===\n  Discovered Devices: ";
+    let header = "\n=== PurpleDetect Hardware & Removable Device Registry ===\n  Discovered Devices: ";
     serial::print(header);
     serial::print_u64(reg.count as u64);
-    serial::println("\n\n  ID  CATEGORY    STATE       BUS    ADDRESS     IRQ  VENDOR / MODEL");
+    serial::println("\n\n  ID  NAME      CATEGORY    STATE       BUS    ADDRESS     IRQ  VENDOR / MODEL");
     serial::println("  --------------------------------------------------------------------------------");
 
     if video::is_available() {
@@ -221,6 +221,11 @@ pub fn print_table() {
         serial::print("  #");
         serial::print_u64(d.id as u64);
         serial::print("  ");
+        let name_str = core::str::from_utf8(&d.name).unwrap_or("").trim_matches(char::from(0));
+        serial::print(name_str);
+        for _ in name_str.len()..10 {
+            serial::print(" ");
+        }
         serial::print(d.category.as_str());
         serial::print("  ");
         serial::print(d.state.as_str());

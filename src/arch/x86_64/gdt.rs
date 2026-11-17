@@ -177,3 +177,23 @@ unsafe fn load_gdt_and_tr() {
     // Load BSP Task Register (0x28)
     asm!("ltr ax", in("ax") GDT_TSS_BASE, options(nomem, nostack, preserves_flags));
 }
+
+pub fn get_default_stack_top(cpu: usize) -> u64 {
+    let cpu = cpu.min(MAX_GDT_CPUS - 1);
+    unsafe { (&raw const DEFAULT_STACKS[cpu] as u64) + 16384 }
+}
+
+pub fn set_tss_rsp0(cpu: usize, stack_top: u64) {
+    let cpu = cpu.min(MAX_GDT_CPUS - 1);
+    unsafe {
+        TSS_ARRAY[cpu].rsp0 = stack_top;
+    }
+}
+
+pub fn get_tss_rsp0(cpu: usize) -> u64 {
+    let cpu = cpu.min(MAX_GDT_CPUS - 1);
+    unsafe {
+        TSS_ARRAY[cpu].rsp0
+    }
+}
+

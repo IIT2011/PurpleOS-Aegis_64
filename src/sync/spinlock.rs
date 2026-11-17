@@ -24,20 +24,8 @@ impl<T> Spinlock<T> {
         }
     }
 
+    /// Acquires the lock with interrupts safely disabled to prevent IRQ deadlocks.
     pub fn lock(&self) -> SpinlockGuard<'_, T> {
-        while self.lock.swap(true, Ordering::Acquire) {
-            while self.lock.load(Ordering::Relaxed) {
-                core::hint::spin_loop();
-            }
-        }
-        SpinlockGuard {
-            lock: &self.lock,
-            data: unsafe { &mut *self.data.get() },
-            saved_flags: None,
-        }
-    }
-
-    pub fn lock_irqsave(&self) -> SpinlockGuard<'_, T> {
         let flags = crate::arch::x86_64::cpu::read_and_disable_interrupts();
         while self.lock.swap(true, Ordering::Acquire) {
             while self.lock.load(Ordering::Relaxed) {
@@ -51,16 +39,26 @@ impl<T> Spinlock<T> {
         }
     }
 
+    pub fn lock_irqsave(&self) -> SpinlockGuard<'_, T> {
+        self.lock()
+    }
+
     pub fn try_lock(&self) -> Option<SpinlockGuard<'_, T>> {
+        let flags = crate::arch::x86_64::cpu::read_and_disable_interrupts();
         if !self.lock.swap(true, Ordering::Acquire) {
             Some(SpinlockGuard {
                 lock: &self.lock,
                 data: unsafe { &mut *self.data.get() },
-                saved_flags: None,
+                saved_flags: Some(flags),
             })
         } else {
+            crate::arch::x86_64::cpu::restore_interrupts(flags);
             None
         }
+    }
+
+    pub fn raw_lock_ptr(&self) -> *const AtomicBool {
+        &self.lock
     }
 }
 

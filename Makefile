@@ -3,12 +3,12 @@
 TARGET ?= x86_64-unknown-none
 CARGO ?= cargo
 OBJCOPY ?= rust-objcopy
-QEMU ?= "D:\OS Development\Dev Tools\qemu\qemu-system-x86_64.exe"
+QEMU ?= qemu-system-x86_64
 
 KERNEL_BIN = target/$(TARGET)/debug/aegis64
 KERNEL_ELF = target/kernel.elf
 
-.PHONY: all build check run clean
+.PHONY: all build check run clean $(KERNEL_BIN)
 
 all: build
 

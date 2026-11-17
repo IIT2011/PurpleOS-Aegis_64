@@ -26,6 +26,7 @@ static KBD: Spinlock<KbdState> = Spinlock::new(KbdState {
 pub fn init() {
     crate::arch::x86_64::pic::clear_mask(1); // Unmask IRQ 1 (Keyboard)
     crate::arch::x86_64::idt::register_handler(33, on_interrupt);
+    crate::drivers::serial::println("Keyboard: 8042 controller initialized, IRQ 1 unmasked");
     crate::drivers::serial::println("Keyboard: PS/2 Keyboard Initialized (256-Byte Ring Buffer Active)");
 }
 

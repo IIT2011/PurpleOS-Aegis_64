@@ -37,7 +37,14 @@ impl AtaDevice {
 
     unsafe fn wait_not_busy(&self) -> bool {
         for _ in 0..100000 {
-            let status = inb(self.io_base + 7);
+            let status = inb(self.ctrl_base);
+            if (status & 0x80) == 0 {
+                return true;
+            }
+        }
+        for _ in 0..100 {
+            crate::drivers::pit::delay_ms(1);
+            let status = inb(self.ctrl_base);
             if (status & 0x80) == 0 {
                 return true;
             }
@@ -47,12 +54,26 @@ impl AtaDevice {
 
     unsafe fn wait_drq(&self) -> bool {
         for _ in 0..100000 {
-            let status = inb(self.io_base + 7);
-            if (status & 0x08) != 0 {
-                return true;
+            let status = inb(self.ctrl_base);
+            if (status & 0x80) == 0 {
+                if (status & 0x08) != 0 {
+                    return true;
+                }
+                if (status & 0x01) != 0 { // ERR
+                    return false;
+                }
             }
-            if (status & 0x01) != 0 { // ERR
-                return false;
+        }
+        for _ in 0..100 {
+            crate::drivers::pit::delay_ms(1);
+            let status = inb(self.ctrl_base);
+            if (status & 0x80) == 0 {
+                if (status & 0x08) != 0 {
+                    return true;
+                }
+                if (status & 0x01) != 0 { // ERR
+                    return false;
+                }
             }
         }
         false
@@ -148,11 +169,13 @@ impl BlockDevice for AtaDevice {
 
                 // LBA28 command
                 outb(self.io_base + 6, 0xE0 | ((self.is_slave as u8) << 4) | (((cur_lba >> 24) & 0x0F) as u8));
+                for _ in 0..4 { let _ = inb(self.ctrl_base); }
                 outb(self.io_base + 2, 1);
                 outb(self.io_base + 3, (cur_lba & 0xFF) as u8);
                 outb(self.io_base + 4, ((cur_lba >> 8) & 0xFF) as u8);
                 outb(self.io_base + 5, ((cur_lba >> 16) & 0xFF) as u8);
                 outb(self.io_base + 7, 0x20); // READ SECTORS
+                for _ in 0..4 { let _ = inb(self.ctrl_base); }
 
                 if !self.wait_drq() {
                     return BLOCK_DEV_ERR_IO;
@@ -182,11 +205,13 @@ impl BlockDevice for AtaDevice {
                 }
 
                 outb(self.io_base + 6, 0xE0 | ((self.is_slave as u8) << 4) | (((cur_lba >> 24) & 0x0F) as u8));
+                for _ in 0..4 { let _ = inb(self.ctrl_base); }
                 outb(self.io_base + 2, 1);
                 outb(self.io_base + 3, (cur_lba & 0xFF) as u8);
                 outb(self.io_base + 4, ((cur_lba >> 8) & 0xFF) as u8);
                 outb(self.io_base + 5, ((cur_lba >> 16) & 0xFF) as u8);
                 outb(self.io_base + 7, 0x30); // WRITE SECTORS
+                for _ in 0..4 { let _ = inb(self.ctrl_base); }
 
                 if !self.wait_drq() {
                     return BLOCK_DEV_ERR_IO;
@@ -200,10 +225,26 @@ impl BlockDevice for AtaDevice {
                     outw(self.io_base, w);
                 }
 
-                // Cache flush
-                outb(self.io_base + 7, 0xE7);
-                let _ = self.wait_not_busy();
+                // Wait for the drive to complete the sector write
+                for _ in 0..4 { let _ = inb(self.ctrl_base); }
+                if !self.wait_not_busy() {
+                    return BLOCK_DEV_ERR_IO;
+                }
             }
+        }
+        BLOCK_DEV_OK
+    }
+
+    fn flush(&mut self) -> i32 {
+        unsafe {
+            if !self.wait_not_busy() {
+                return BLOCK_DEV_ERR_IO;
+            }
+            outb(self.io_base + 6, 0xE0 | ((self.is_slave as u8) << 4));
+            for _ in 0..4 { let _ = inb(self.ctrl_base); }
+            outb(self.io_base + 7, 0xE7); // CACHE FLUSH
+            for _ in 0..4 { let _ = inb(self.ctrl_base); }
+            let _ = self.wait_not_busy();
         }
         BLOCK_DEV_OK
     }
