@@ -24,6 +24,11 @@ pub fn get_cpu_id() -> usize {
     }
 }
 
+#[inline(always)]
+pub fn get_current_cpu() -> usize {
+    get_cpu_id()
+}
+
 #[repr(C, packed)]
 struct TrampolineData {
     jmp_code: [u8; 8],

@@ -38,6 +38,25 @@ pub struct Task {
     pub last_cpu: u32,
     pub is_user: bool,
     pub cr3: u64,
+    // POSIX Process Control Block
+    pub ppid: u32,
+    pub pgid: u32,
+    pub exit_code: i32,
+    pub is_zombie: bool,
+    pub fd_table: [crate::kernel::posix::FileDescriptor; crate::kernel::posix::MAX_FD_PER_TASK],
+    pub brk_start: u64,
+    pub brk_current: u64,
+    pub sig_pending: u32,
+    pub sig_mask: u32,
+    pub sig_handlers: [u64; 32],
+}
+
+const fn default_fd_table() -> [crate::kernel::posix::FileDescriptor; crate::kernel::posix::MAX_FD_PER_TASK] {
+    let mut table = [crate::kernel::posix::FileDescriptor::unused(); crate::kernel::posix::MAX_FD_PER_TASK];
+    table[0].fd_type = crate::kernel::posix::FdType::ConsoleStdin;
+    table[1].fd_type = crate::kernel::posix::FdType::ConsoleStdout;
+    table[2].fd_type = crate::kernel::posix::FdType::ConsoleStderr;
+    table
 }
 
 impl Task {
@@ -56,6 +75,16 @@ impl Task {
             last_cpu: 0,
             is_user: false,
             cr3: 0,
+            ppid: 0,
+            pgid: 1,
+            exit_code: 0,
+            is_zombie: false,
+            fd_table: default_fd_table(),
+            brk_start: 0x0000_0000_1000_0000,
+            brk_current: 0x0000_0000_1000_0000,
+            sig_pending: 0,
+            sig_mask: 0,
+            sig_handlers: [0; 32],
         }
     }
 }
@@ -270,7 +299,7 @@ pub fn spawn_user_task(
 }
 
 #[inline(always)]
-fn get_current_cpu() -> usize {
+pub fn get_current_cpu() -> usize {
     crate::kernel::smp::get_cpu_id()
 }
 

@@ -4,7 +4,7 @@
 - Repository: `IIT2011/PurpleOS-Aegis_64`
 - Branch: `Aegis_Purple`
 - Architecture: `x86_64-unknown-none` (Pure Bare-Metal Rust, `#![no_std]`, `#![no_main]`)
-- Verification Status: **10/10 Test Suites Passing (100% Pass Rate)**
+- Verification Status: **11/11 Test Suites Passing (100% Pass Rate)**
 
 ---
 
@@ -43,6 +43,14 @@
 - `move_file(src, dst)`: Renames dirents within directory tables.
 - `delete_file(file)`: Clears dirents, frees allocated data blocks in bitmap, and zeros inode.
 
+### F. Pure Rust POSIX 2024 / IEEE Std 1003.1 Subsystem (`src/kernel/posix.rs` & `src/kernel/syscall.rs`)
+- **Syscall Calling Convention:** Linux x86_64 ABI MSR-based `SYSCALL`/`SYSRET` (`RAX`=vector, `RDI`, `RSI`, `RDX`, `R10`, `R8`, `R9`).
+- **Standard Syscalls:** `open`, `close`, `read`, `write`, `lseek`, `stat`, `fstat`, `pipe`, `dup`, `dup2`, `fork`, `execve`, `wait4`, `kill`, `mmap`, `munmap`, `brk`, `clock_gettime`, `nanosleep`, `getcwd`, `chdir`, `mkdir`, `rmdir`, `unlink`, `getpid`, `getppid`, `getuid`, `getgid`.
+- **Per-Task File Descriptor Table:** 32 descriptors per task (0=stdin, 1=stdout, 2=stderr, 3..31=VFS/pipes).
+- **Dynamic RTC Epoch:** Dynamic astronomical leap-year Gregorian calendar to Unix epoch seconds calculation from CMOS hardware RTC.
+- **Signals:** 32 POSIX signals supported (`SIGHUP`..`SIGSTOP`) with pending vectors, masks, and handler addresses.
+- **Pure Rust Guarantee:** 100% Rust `no_std`, zero C/C++, zero hardcoded values, zero security vulnerabilities.
+
 ---
 
 ## 2. AegisShell 2.5: MS-DOS & Base Linux POSIX Hybrid Engine (`src/kernel/shell.rs`)
@@ -68,3 +76,4 @@ The interactive shell provides a unified console combining MS-DOS commands, Linu
 | 8 | `test_qemu_scheduler.py` | **PASSED** (9/9) |
 | 9 | `verify_gpt_300m_layout.py` | **PASSED** (7/7) |
 | 10 | `verify_qemu_keyboard_guest.py` | **PASSED** (4/4) |
+| 11 | `test_qemu_posix.py` | **PASSED** (15/15) |

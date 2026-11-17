@@ -8,4 +8,5 @@ pub mod purple_abi;
 pub mod apdrv;
 pub mod apexec;
 pub mod ipc;
+pub mod posix;
 pub mod shell;

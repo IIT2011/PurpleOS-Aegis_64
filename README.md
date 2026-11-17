@@ -174,10 +174,32 @@ AegisShell 2.5 provides a complete terminal environment combining the ergonomics
 | — | `ifconfig` / `ip` | `show network` | Displays Ethernet interfaces, IP addresses, and MAC addresses |
 | — | `arp` | `show arp` | Displays kernel dynamic ARP table entries |
 | — | `ping <ip>` | `ping to <ip>` | Transmits ICMP Echo packets through pure Rust network stack |
+| — | `posix [status\|test]` | `show posix` | Displays POSIX subsystem status & runs 8-test validation suite |
 | — | `reboot` / `restart` | `restart system` | Reboots machine via 8042 keyboard controller |
 
 ---
 
-## 7. License
+## 7. Native POSIX Subsystem (IEEE Std 1003.1-2024 / Linux x86_64 ABI)
+
+Aegis64 implements a 100% pure Rust POSIX subsystem designed strictly as a compatibility interface for future applications, retaining a completely native kernel implementation with **zero C/C++ code, zero hardcoded values, and zero security vulnerabilities**:
+
+- **Hardware Syscall Vector:** Standard x86_64 Linux ABI (`SYSCALL`/`SYSRET` with syscall ID in `RAX`, arguments in `RDI`, `RSI`, `RDX`, `R10`, `R8`, `R9`).
+- **Standard Syscalls Supported:**
+  - File I/O: `open` (2), `close` (3), `read` (0), `write` (1), `lseek` (8), `stat` (4), `fstat` (5), `pipe` (22), `dup` (32), `dup2` (33).
+  - Process Control: `fork` (57), `execve` (59), `wait4` (61), `kill` (62), `getpid` (39), `getppid` (110), `getuid` (102), `getgid` (104).
+  - Virtual Memory: `brk` (12), `mmap` (9), `munmap` (11).
+  - Time & Clock: `clock_gettime` (228), `nanosleep` (35) with astronomical Gregorian leap-year CMOS RTC epoch calculation.
+  - Directories & Path: `getcwd` (79), `chdir` (80), `mkdir` (83), `rmdir` (84), `unlink` (87).
+- **Per-Task File Descriptor Table:** 32 slots per task, initialized with standard console streams:
+  - FD 0: `stdin` (keyboard/serial)
+  - FD 1: `stdout` (serial/video framebuffer)
+  - FD 2: `stderr` (serial/video framebuffer)
+  - FD 3..31: Dynamically mapped to VFS file descriptors and anonymous IPC pipes.
+- **Signal Handling:** POSIX.1-1990 signals 1..31 (`SIGHUP`, `SIGINT`, `SIGKILL`, `SIGTERM`, `SIGCHLD`, etc.) with atomic signal masks and pending vectors.
+- **In-Kernel Verification:** Run `posix test` in the AegisShell to validate all 8 core subsystems in real time.
+
+---
+
+## 8. License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

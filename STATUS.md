@@ -49,13 +49,14 @@
 | **Dedicated Storage Paths** | Complete | `src/drivers/block_dev.rs` | Type-safe storage device mapping: `/ssd/ssd1..` (NVMe/SATA SSD), `/hdd/hdd1..` (ATA/SATA HDD), `/usb/usb1..` (USB 3.x Flash), `/sdxc/card1` (SDXC), `/sdhc/card1` (SDHC). |
 | **Per-Process Page Tables** | Complete | `src/kernel/task.rs`, `mm/vmm.rs` | Task `cr3` field, `spawn_user_task()` with private 4-level PML4, and dynamic CR3 reloading on context switch. |
 | **Inter-Process Comm (IPC)** | Complete | `src/kernel/ipc.rs` | Thread-safe 4096-byte ring-buffered UNIX-style Pipes (`Pipe`) and message channels. |
+| **POSIX Subsystem (IEEE 1003.1)** | Complete | `src/kernel/posix.rs`, `syscall.rs` | Linux x86_64 ABI syscalls (0..231), 32 per-task FDs (stdin=0, stdout=1, stderr=2), signal vector, astronomical RTC epoch, brk/mmap virtual memory, fork/wait4 process control. 100% pure Rust `no_std`. |
 
 ---
 
 ## 2. Verification Summary
 
 * **Compilation:** `cargo build --target x86_64-unknown-none` succeeds with 0 warnings and 0 errors.
-* **Test Suite Verification:** 10/10 automated test suites passing (100% pass rate):
+* **Test Suite Verification:** 11/11 automated test suites passing (100% pass rate):
   1. `test_qemu_shell.py` -> **PASSED** (9/9)
   2. `test_qemu_smp.py` -> **PASSED** (10/10)
   3. `test_qemu_storage.py` -> **PASSED** (42/42)
@@ -66,3 +67,4 @@
   8. `test_qemu_scheduler.py` -> **PASSED** (9/9)
   9. `verify_gpt_300m_layout.py` -> **PASSED** (7/7)
   10. `verify_qemu_keyboard_guest.py` -> **PASSED** (4/4)
+  11. `test_qemu_posix.py` -> **PASSED** (15/15)
