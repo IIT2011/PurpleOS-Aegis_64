@@ -202,4 +202,4 @@ Aegis64 implements a 100% pure Rust POSIX subsystem designed strictly as a compa
 
 ## 8. License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Aegis64/PurpleOS License (APPL) v3.0 - see the [LICENSE](LICENSE) file for details.

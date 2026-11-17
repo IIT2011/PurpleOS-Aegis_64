@@ -1,134 +1,443 @@
-# Aegis64/PurpleOS License v2.0
+# Aegis64/PurpleOS License (APPL) v3.0
 
-Copyright (c) 2026 Saptanshu Ganguly
+**Copyright (c) 2026 Saptanshu Ganguly**  
+All rights reserved, subject to the permissions expressly granted in this License.
 
-All rights reserved, subject to the permissions expressly granted under this license.
-
-This license applies to Purple OS, Aegis64, and the source code and other materials in this repository that are owned by the copyright holder, except where a file or component states otherwise.
-
-## 1. Definitions
-
-- **Software** means the covered source code, documentation, build scripts, and other materials in this project.
-- **Copyright Holder** means the person or entity legally holding the applicable rights.
-- **Personal Use** means private, non-commercial use by an individual for learning, experimentation, development, and running or modifying the Software on devices under their control.
-- **Commercial Use** means using the Software as part of a commercial activity, product, service, or business, or using it to obtain commercial or monetary benefit.
-- **Redistribution** means publishing, sharing, transferring, sublicensing, selling, or otherwise making the Software or a modified version available to another person or entity, whether in source or compiled form.
-- **Unmodified Version** means a copy of the Software that has not been altered, adapted, or modified. Repackaging or reproducing an unchanged copy for distribution does not, by itself, constitute modification.
-
-## 2. Permission for Personal Use
-
-Subject to the terms of this license, the Copyright Holder grants each recipient a limited, non-exclusive, non-transferable license to:
-
-1. View and study the Software.
-2. Download and copy the Software for Personal Use.
-3. Modify the Software for Personal Use.
-4. Compile and run original or modified versions for Personal Use.
-5. Keep private copies and private modifications.
-6. Share modified versions privately for non-commercial Personal Use, subject to this license and applicable third-party licenses.
-
-These permissions do not grant ownership of the Software or its intellectual property.
-
-## 3. Permission for Unmodified Redistribution and Commercial Use
-
-Subject to the terms of this license, the Copyright Holder permits recipients to:
-
-1. Use unmodified copies of the Software for personal or commercial purposes.
-2. Redistribute, publish, share, transfer, and distribute unmodified copies of the Software.
-3. Distribute unmodified source code, compiled binaries, system images, installers, and other packaged versions.
-4. Sell or commercially distribute unmodified copies of the Software.
-5. Include unmodified copies of the Software in commercial products or distribution packages.
-
-These permissions are granted without requiring separate written permission from the Copyright Holder, provided that:
-
-- The Software remains unmodified.
-- The original copyright notices and this license are retained.
-- The Software is not misrepresented as an independently owned or originally authored product of the redistributor.
-- Applicable third-party licenses and legal requirements are respected.
-
-## 4. Modified Versions
-
-Recipients may modify the Software and use modified versions for Personal Use.
-
-However, commercial use, commercial distribution, sale, sublicensing, or other commercial exploitation of modified versions requires prior written permission from the Copyright Holder.
-
-Without such permission, recipients may not:
-
-1. Sell modified versions of the Software.
-2. Distribute modified versions for commercial benefit.
-3. Incorporate modified versions into commercial products or services.
-4. Offer modified versions as part of a paid product, service, or commercial offering.
-5. Sublicense or commercially license modified versions.
-
-Non-commercial personal modification remains permitted under Section 2.
-
-## 5. Requesting Additional Commercial Permission
-
-The Copyright Holder may grant additional permissions on a case-by-case basis, including permission to:
-
-- Commercially use modified versions.
-- Redistribute modified source code commercially.
-- Distribute modified binaries, images, or installers commercially.
-- Incorporate modified versions into commercial products or services.
-- Sell or commercially license modified versions.
-- Publish modified versions under separately agreed licensing conditions.
-
-Requests for such permission must be sent to:
-
-**Email:** [saptanshuganguly01@gmail.com](mailto\:saptanshuganguly01@gmail.com)
-
-A request does not constitute permission. Commercial permission for modified versions is granted only when confirmed in writing by the Copyright Holder or an authorized representative.
-
-Written permission may specify its own conditions, scope, duration, and fees.
-
-## 6. Third-Party Components
-
-This license applies only to materials for which the Copyright Holder has the necessary rights.
-
-Third-party software, libraries, assets, and other externally owned materials remain subject to their respective licenses and terms. Nothing in this license removes rights granted by those separate licenses.
-
-Where a third-party license grants rights that differ from or exceed the permissions in this license, those third-party rights remain applicable to the relevant component.
-
-## 7. Contributions
-
-Unless a separate written agreement states otherwise, contributors retain the rights they hold in their own contributions. A contribution does not automatically transfer ownership to the Copyright Holder or authorize the Copyright Holder to relicense third-party-owned material.
-
-Before accepting or incorporating contributions, the project may require a separate contributor agreement defining the relevant permissions.
-
-## 8. No Warranty
-
-To the maximum extent permitted by applicable law, the Software is provided "AS IS", without warranties or conditions of any kind, whether express or implied, including warranties of merchantability, fitness for a particular purpose, and non-infringement.
-
-## 9. Limitation of Liability
-
-To the maximum extent permitted by applicable law, the Copyright Holder shall not be liable for claims, damages, or other liabilities arising from the use of or inability to use the Software, including direct, indirect, incidental, or consequential damages.
-
-Nothing in this section excludes liability that cannot legally be excluded or limited.
-
-## 10. Termination
-
-If you materially violate this license, your permissions under it may terminate to the extent permitted by applicable law. Rights and remedies are subject to applicable law, including any legally required notice or opportunity to remedy a violation.
-
-Termination does not remove rights you independently hold under applicable law or a separate valid license.
-
-## 11. Governing Law
-
-This license is subject to applicable law. Any governing-law or jurisdiction provision must be interpreted consistently with mandatory laws that apply to the parties.
-
-## 12. Contact and Additional Permissions
-
-For permission to commercially use, distribute, or otherwise exploit modified versions of Purple OS, contact the Copyright Holder:
-
-**Saptanshu Ganguly**
-**Email:** [saptanshuganguly01@gmail.com](mailto\:saptanshuganguly01@gmail.com)
-
-Project repository:
-
-[https://github.com/IIT2011/PurpleOS-Aegis_64](https://github.com/IIT2011/PurpleOS-Aegis_64)
-
-Unmodified copies may be used and redistributed commercially under Section 3 without requesting additional permission.
+- **License Version:** 3.0
+- **License Type:** Custom Proprietary License with Third-Party Open-Source Component Exceptions
+- **Covered Projects:** Aegis64 Kernel and Purple OS
+- **Project Owner:** Saptanshu Ganguly
 
 ---
 
-**Aegis64/PurpleOS License**
+## 1. Introduction and Purpose
 
-This is a custom source-available license, not an OSI-approved Open Source license.
+The Aegis64/PurpleOS License (hereinafter referred to as the "License") governs the use, reproduction, modification, distribution, and commercial exploitation of the original software and materials developed for the Aegis64 Kernel and Purple OS projects.
+
+Aegis64 and Purple OS are independently developed software projects. Their original components are protected by copyright and are licensed under the terms established in this document.
+
+This License establishes two distinct categories of software:
+- **Native Project Components:** Original software, source code, implementations, and materials owned by the copyright holder. These components are governed by this License.
+- **Third-Party Components:** Software, source code, libraries, drivers, frameworks, utilities, and other materials originating from external authors or projects. These components retain their respective original licenses.
+
+Nothing in this License is intended to eliminate, replace, or override the licensing rights and obligations applicable to third-party components.
+
+The purpose of this License is to permit personal use and commercial redistribution of unmodified releases, protect the commercial rights of the original project, and preserve the independent licensing rights of third-party software.
+
+---
+
+## 2. Definitions
+
+For the purposes of this License, the following definitions apply.
+
+### 2.1. Software
+"Software" refers to Aegis64, Purple OS, and the associated original project materials, including source code, executable binaries, system components, drivers, applications, libraries, configuration files, documentation, and other distributed materials.
+
+### 2.2. Native Project Components
+"Native Project Components" refers exclusively to software and materials originally created by the copyright holder or contributors who have granted the necessary rights for their inclusion under this License.
+
+Examples include:
+- Original Aegis64 kernel implementations.
+- Original Purple OS subsystems.
+- Original native system services.
+- Independently developed drivers.
+- Original system utilities and applications.
+- Original frameworks and system libraries.
+- Original boot, security, storage, scheduling, and filesystem implementations.
+- Original documentation and project-specific assets.
+
+### 2.3. Third-Party Components
+"Third-Party Components" refers to any software, source code, libraries, drivers, modules, frameworks, assets, or other materials created or owned by parties other than the copyright holder.
+
+Third-Party Components include, but are not limited to:
+- Open-source drivers.
+- VirtualBox-related components.
+- VMware open-vm-tools components.
+- External libraries and frameworks.
+- Open-source kernel modules.
+- Third-party utilities.
+- Software obtained under GPL, LGPL, MIT, BSD, Apache, X11, or other licenses.
+
+A component does not become a Native Project Component merely because it is integrated into Purple OS, modified for compatibility, compiled using the project's toolchain, or packaged in a Purple OS distribution.
+
+### 2.4. Unmodified Version
+An "Unmodified Version" means a version of the Native Project Components distributed without alterations to their original software implementation.
+
+The following activities alone do not necessarily constitute modification:
+- Copying or downloading the Software.
+- Compressing or archiving an unchanged distribution.
+- Reproducing an unchanged installation image.
+- Mirroring an unchanged release.
+- Adding external distribution metadata that does not alter the Software.
+- Providing installation instructions separately.
+
+### 2.5. Modified Version
+A "Modified Version" means a version containing alterations, adaptations, translations, extensions, or derivative implementations of Native Project Components.
+
+Examples include:
+- Changing, replacing, adding, or removing native source code.
+- Altering kernel functionality or behavior.
+- Modifying native system calls, APIs, or subsystems.
+- Adding or replacing native drivers.
+- Changing native applications or system services.
+- Modifying original system interfaces or frameworks.
+- Porting native components to another architecture where implementation changes are made.
+- Combining native project code with other code to produce an adapted implementation.
+
+Modifications to Third-Party Components remain subject to their applicable original licenses and are not automatically governed by this definition's restrictions.
+
+### 2.6. Distribution
+"Distribution" means making the Software available to another party through downloads, physical media, repositories, mirrors, installers, system images, or other methods of delivery.
+
+### 2.7. Commercial Use
+"Commercial Use" means using, selling, licensing, sublicensing, distributing, or otherwise exploiting covered Native Project Components primarily for commercial advantage or monetary compensation.
+
+Commercial Use includes selling modified native releases, offering modified native versions as paid products or services, and distributing modified native components as part of a commercial offering.
+
+### 2.8. Copyright Holder
+"Copyright Holder" refers to Saptanshu Ganguly, together with any other respective copyright owners whose contributions are independently owned or licensed.
+
+---
+
+## 3. Ownership and Copyright
+
+All rights, title, and interest in the original Native Project Components remain with their respective copyright holders.
+
+This License does not transfer ownership of the Software, its source code, or any associated intellectual property.
+
+The copyright holder retains all rights not expressly granted under this License.
+
+No individual, organization, distributor, or recipient may claim ownership of original Native Project Components merely because they have obtained, modified, compiled, packaged, or redistributed them.
+
+Third-Party Components remain the property of their respective authors, contributors, and copyright holders.
+
+Nothing in this section transfers ownership of third-party intellectual property to the Aegis64/Purple OS project.
+
+---
+
+## 4. Permissions for Unmodified Versions
+
+Subject to compliance with this License and all applicable third-party licenses, recipients are granted permission to:
+- Download and install unmodified releases of Aegis64 and Purple OS.
+- Use unmodified releases for personal purposes.
+- Use unmodified releases for commercial purposes.
+- Reproduce and redistribute unmodified binaries.
+- Redistribute unchanged system images and installation media.
+- Mirror official releases and provide download access.
+- Distribute unchanged copies through commercial websites, physical media, or other distribution channels.
+- Include unmodified releases in commercial hardware or software distributions, provided the applicable notices and third-party licensing obligations are respected.
+
+Redistribution of unmodified Native Project Components must preserve:
+- Original copyright notices.
+- This License in its entirety or an accompanying accessible copy.
+- Relevant attribution notices.
+- Applicable Third-Party Component notices and license texts.
+- Any additional notices required by third-party licenses.
+
+Redistributors must not falsely represent themselves as the original developers or copyright holders.
+
+No permission is granted to remove or misrepresent the project's ownership or authorship.
+
+---
+
+## 5. Permissions for Modified Versions
+
+Recipients are granted permission to create and use Modified Versions of Native Project Components subject to the following conditions.
+
+### 5.1. Personal Modification
+Individuals may:
+- Modify Native Project Components for personal use.
+- Experiment with the source code.
+- Create private adaptations.
+- Develop custom system configurations.
+- Modify native drivers and subsystems for personal experimentation.
+- Maintain private forks and modified builds.
+
+Such activities are permitted for noncommercial purposes.
+
+### 5.2. Private Noncommercial Sharing
+Modified Native Project Components may be shared privately with other individuals for noncommercial personal use, provided that:
+- This License remains applicable to the covered Native Project Components.
+- Original copyright notices are retained.
+- The modifications are not commercially exploited.
+- Third-party licensing obligations are respected.
+- Recipients are informed of the applicable licensing conditions.
+
+### 5.3. Commercial Restrictions
+Without prior written permission from the copyright holder, recipients may not:
+- Sell Modified Versions of Native Project Components.
+- Commercially distribute modified native system images.
+- Offer modified native releases as paid products.
+- Commercially sublicense modified native implementations.
+- Incorporate modified native components into commercial products or services.
+- Monetize modified native releases through commercial distribution arrangements.
+
+### 5.4. Written Permission
+The copyright holder may independently grant additional permissions for commercial use, redistribution, sublicensing, or other activities.
+
+Such permissions must be granted in writing.
+
+Permission requests may be directed to:  
+**Email:** [saptanshuganguly01@gmail.com](mailto:saptanshuganguly01@gmail.com)
+
+These restrictions apply only to Native Project Components to the extent that the copyright holder owns or controls the relevant rights.
+
+They do not override permissions granted by applicable Third-Party Component licenses.
+
+---
+
+## 6. Third-Party Components and Open-Source Software
+
+This section establishes the licensing treatment of all Third-Party Components included in, distributed with, or integrated into Aegis64 and Purple OS.
+
+### 6.1. Independent Licensing
+Third-Party Components retain their respective original licenses.
+
+Their licensing terms are not replaced by this License merely because they are:
+- Included in Purple OS.
+- Integrated into the Aegis64 kernel environment.
+- Packaged as `.apdrv` driver packages.
+- Distributed in system images.
+- Modified for compatibility.
+- Compiled using project-specific build systems.
+- Loaded or managed by native Aegis64 subsystems.
+
+### 6.2. No Override of Third-Party Rights
+Nothing in this License shall be interpreted as:
+- Removing rights granted by a third-party license.
+- Restricting redistribution expressly permitted by a third-party license.
+- Prohibiting modifications permitted by a third-party license.
+- Requiring third-party source code to become proprietary.
+- Requiring third-party authors to transfer copyright ownership.
+- Imposing this License on third-party code contrary to its applicable license.
+
+Where a third-party license conflicts with a provision of this License concerning that third-party component, the applicable third-party license governs that component to the extent of the conflict.
+
+### 6.3. Copyleft Components
+Third-Party Components distributed under copyleft licenses, including GPL and LGPL licenses, must be distributed in accordance with their respective licensing requirements.
+
+Where applicable, this includes:
+- Providing or offering corresponding source code.
+- Preserving copyright and attribution notices.
+- Including the relevant license text.
+- Providing modification notices where required.
+- Respecting applicable redistribution and relinking requirements.
+- Providing required installation information where applicable.
+- Respecting the rights of recipients under the original license.
+
+The project does not claim exclusive proprietary rights over third-party code merely because it is incorporated into a Purple OS release.
+
+### 6.4. Permissively Licensed Components
+Third-Party Components distributed under permissive licenses, including MIT, BSD, Apache, and X11 licenses, may be incorporated and redistributed according to the conditions of their respective licenses.
+
+Required notices, attributions, license texts, and patent provisions must be preserved where applicable.
+
+### 6.5. License Identification
+The project must make reasonable efforts to identify the original license of each incorporated Third-Party Component.
+
+Where the original license cannot be established with sufficient confidence, the component must not be represented as exclusively proprietary or redistributed under an assumed license.
+
+### 6.6. No Automatic Relicensing
+Third-Party Components do not become subject to the Aegis64/PurpleOS License simply because they are stored within a proprietary directory, compiled into a binary, or included in a distribution.
+
+Their original licenses continue to apply.
+
+---
+
+## 7. Driver Packages and Modular Components
+
+Aegis64 and Purple OS may distribute drivers and other modular software using the `.apdrv` package format.
+
+The `.apdrv` format is a packaging and distribution mechanism. It does not independently determine the copyright ownership or licensing status of the components contained within a package.
+
+### 7.1. Mixed-License Packages
+An `.apdrv` package may contain:
+- Native Aegis64 drivers.
+- Independently developed third-party drivers.
+- Open-source driver implementations.
+- Multiple independently licensed modules.
+- Supporting libraries and external dependencies.
+
+Each component retains its applicable license.
+
+### 7.2. Licensing Metadata
+Where reasonably practicable, `.apdrv` packages should include licensing information identifying:
+- Component names.
+- Original authors or copyright holders.
+- Applicable license identifiers.
+- Relevant copyright notices.
+- Source-code availability information.
+- Modification status.
+- Required attribution information.
+
+### 7.3. Third-Party Driver Modifications
+Modifications to third-party drivers must comply with the original driver's license.
+
+A modified third-party driver does not automatically become proprietary merely because it has been adapted to the Aegis64 driver interface.
+
+### 7.4. Native Driver Components
+Original drivers independently developed by the copyright holder may be licensed under this License.
+
+Their inclusion alongside third-party drivers does not automatically change the licensing status of either category.
+
+### 7.5. Package-Level Licensing
+Where a package contains components under different licenses, the package must not be presented as though every contained component is governed exclusively by this License.
+
+Package-level licensing notices must clearly identify the applicable component-level licensing distinctions.
+
+---
+
+## 8. Contributions and Independently Developed Code
+
+Contributions submitted to Aegis64 or Purple OS do not automatically transfer copyright ownership to the project owner.
+
+Unless a separate written agreement establishes otherwise:
+- Contributors retain copyright ownership of their original contributions.
+- Contributors are responsible for ensuring that they have the right to submit their contributions.
+- Contributors must identify applicable third-party code and licensing restrictions.
+- Contributions may be incorporated only under licensing terms agreed upon by the relevant rights holders.
+
+No contributor is automatically considered to have transferred exclusive ownership of their work.
+
+The copyright holder may establish separate contribution agreements or additional licensing arrangements where necessary.
+
+---
+
+## 9. Trademarks, Branding, and Project Identity
+
+This License does not grant permission to use project trademarks, logos, names, or branding in a manner that implies official endorsement, ownership, or affiliation.
+
+The names:
+- **Aegis64**
+- **Purple OS**
+- **Aegis64 Kernel**
+- **Purple OS project branding**
+
+and associated logos or identifying artwork may be protected by applicable trademark, copyright, or other intellectual property laws.
+
+Redistribution of unmodified Software does not grant ownership of these identifiers.
+
+Recipients may accurately identify the Software when describing or redistributing it, provided that they do not misrepresent their relationship with the original project.
+
+Modified distributions must not falsely present themselves as official releases.
+
+Any separate permission for commercial trademark use must be obtained from the relevant rights holder.
+
+---
+
+## 10. License Compliance and Termination
+
+Permissions granted under this License are conditional upon compliance with its applicable terms.
+
+Where a recipient materially violates the conditions governing Native Project Components, the permissions granted under this License may terminate as permitted by applicable law.
+
+Upon termination, the recipient must cease activities requiring the terminated permissions unless and until those permissions are validly restored.
+
+Rights and permissions independently granted by Third-Party Component licenses are not automatically terminated by a violation of this License.
+
+Third-party license termination and reinstatement provisions remain governed by their respective licenses.
+
+The copyright holder may restore permissions in writing.
+
+Nothing in this section removes rights or remedies that cannot lawfully be excluded.
+
+---
+
+## 11. Disclaimer of Warranty
+
+**TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE NATIVE PROJECT COMPONENTS ARE PROVIDED "AS IS" AND WITHOUT WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY.**
+
+**THIS INCLUDES, WITHOUT LIMITATION, WARRANTIES OF:**
+- **MERCHANTABILITY.**
+- **FITNESS FOR A PARTICULAR PURPOSE.**
+- **NON-INFRINGEMENT.**
+- **SYSTEM RELIABILITY.**
+- **SECURITY.**
+- **PERFORMANCE.**
+- **COMPATIBILITY.**
+- **DATA INTEGRITY.**
+
+**THE COPYRIGHT HOLDER DOES NOT GUARANTEE THAT THE SOFTWARE WILL BE ERROR-FREE, UNINTERRUPTED, SECURE, OR COMPATIBLE WITH EVERY HARDWARE CONFIGURATION.**
+
+**THIRD-PARTY COMPONENTS ARE PROVIDED SUBJECT TO THEIR RESPECTIVE LICENSES AND WARRANTIES, IF ANY.**
+
+Nothing in this section overrides warranty obligations or rights that cannot lawfully be excluded.
+
+---
+
+## 12. Limitation of Liability
+
+**TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE COPYRIGHT HOLDER SHALL NOT BE LIABLE FOR INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING FROM THE USE OR INABILITY TO USE THE NATIVE PROJECT COMPONENTS.**
+
+**THIS INCLUDES, WHERE LEGALLY PERMITTED:**
+- **DATA LOSS.**
+- **HARDWARE DAMAGE.**
+- **SYSTEM FAILURE.**
+- **BUSINESS INTERRUPTION.**
+- **LOSS OF PROFITS.**
+- **LOSS OF SOFTWARE OR CONFIGURATION DATA.**
+- **SECURITY INCIDENTS.**
+- **UNINTENDED SYSTEM BEHAVIOR.**
+
+**THIS LIMITATION APPLIES REGARDLESS OF THE LEGAL THEORY UNDER WHICH A CLAIM IS MADE.**
+
+Nothing in this section excludes or limits liability that cannot lawfully be excluded or limited under applicable law.
+
+---
+
+## 13. Severability and Interpretation
+
+If any provision of this License is found to be invalid, unlawful, or unenforceable, that provision shall be interpreted or limited to the minimum extent necessary to make it enforceable where possible.
+
+The remaining provisions shall continue in effect to the extent permitted by applicable law.
+
+The invalidity of a provision concerning Native Project Components does not automatically invalidate the independent licensing terms of Third-Party Components.
+
+Headings are provided for readability and do not independently determine the legal interpretation of this License.
+
+---
+
+## 14. Entire License and Amendments
+
+This document constitutes the licensing terms governing the Native Project Components covered by this License, subject to applicable third-party licenses and any separate written agreements.
+
+The copyright holder may publish revised versions of this License.
+
+Unless expressly stated otherwise, a revised version does not automatically replace the license applicable to previously distributed releases.
+
+Each release may identify the specific license version governing its Native Project Components.
+
+No amendment to this License shall retroactively remove rights already granted to recipients under applicable third-party licenses.
+
+---
+
+## 15. Contact and Permissions
+
+Requests concerning:
+- Commercial licensing.
+- Additional redistribution permissions.
+- Commercial modification rights.
+- Trademark permissions.
+- Licensing clarification.
+- Written exceptions to this License.
+
+may be directed to:  
+**Copyright Holder:** Saptanshu Ganguly  
+**Project:** Aegis64 / Purple OS  
+**Email:** [saptanshuganguly01@gmail.com](mailto:saptanshuganguly01@gmail.com)
+
+Additional permissions are valid only when granted by a person authorized to grant them.
+
+---
+
+## Final Licensing Statement
+
+Aegis64 and Purple OS are independently developed projects whose original Native Project Components are protected under the Aegis64/PurpleOS License.
+
+The project recognizes and respects the independent copyright ownership and licensing rights of all third-party authors and contributors.
+
+No Third-Party Component shall be represented as exclusively owned by the Aegis64/Purple OS project solely because it is integrated, modified, packaged, compiled, or distributed as part of the Software.
+
+Original Aegis64/Purple OS work remains governed by this License. Third-party work remains governed by its respective license.
+
+**Copyright (c) 2026 Saptanshu Ganguly. All rights reserved, subject to the permissions expressly granted herein.**
