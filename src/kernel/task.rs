@@ -37,6 +37,7 @@ pub struct Task {
     pub cpu_affinity: u64,
     pub last_cpu: u32,
     pub is_user: bool,
+    pub cr3: u64,
 }
 
 impl Task {
@@ -54,6 +55,7 @@ impl Task {
             cpu_affinity: !0,
             last_cpu: 0,
             is_user: false,
+            cr3: 0,
         }
     }
 }
@@ -162,6 +164,10 @@ fn alloc_task_slot(s: &mut SchedState) -> Option<usize> {
                 let _ = free_frames(s.tasks[i].stack_base as usize, 4);
                 s.tasks[i].stack_base = 0;
             }
+            if s.tasks[i].cr3 != 0 {
+                let _ = crate::mm::pmm::free_frame(s.tasks[i].cr3 as usize);
+                s.tasks[i].cr3 = 0;
+            }
             s.tasks[i].state = TaskState::Unused;
             return Some(i);
         }
@@ -241,6 +247,25 @@ pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8
     }
 
     crate::kernel::smp::broadcast_resched();
+    Some(tid)
+}
+
+pub fn spawn_user_task(
+    name_str: &str,
+    entry: extern "C" fn(*mut u8),
+    arg: *mut u8,
+    prio: TaskPriority,
+) -> Option<u32> {
+    let pml4 = crate::mm::vmm::create_pml4()?;
+    let tid = spawn_affined(name_str, entry, arg, prio, !0)?;
+    let mut s = SCHED.lock();
+    for t in s.tasks.iter_mut() {
+        if t.id == tid {
+            t.is_user = true;
+            t.cr3 = pml4 as u64;
+            break;
+        }
+    }
     Some(tid)
 }
 
@@ -356,6 +381,19 @@ pub fn schedule() {
     s.tasks[next_idx].ticks_remaining = s.tasks[next_idx].time_slice_ticks;
     s.tasks[next_idx].last_cpu = cpu_id as u32;
     s.current[cpu_id] = Some(next_idx);
+
+    let new_cr3: u64 = s.tasks[next_idx].cr3;
+    let target_cr3 = if new_cr3 != 0 {
+        new_cr3
+    } else {
+        crate::mm::vmm::get_kernel_pml4() as u64
+    };
+    if target_cr3 != 0 {
+        let cur_cr3 = crate::arch::x86_64::cpu::read_cr3();
+        if cur_cr3 != target_cr3 {
+            crate::arch::x86_64::cpu::write_cr3(target_cr3);
+        }
+    }
 
     let raw_lock = SCHED.raw_lock_ptr();
     core::mem::forget(s);

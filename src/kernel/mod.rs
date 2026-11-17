@@ -7,4 +7,5 @@ pub mod ksym;
 pub mod purple_abi;
 pub mod apdrv;
 pub mod apexec;
+pub mod ipc;
 pub mod shell;

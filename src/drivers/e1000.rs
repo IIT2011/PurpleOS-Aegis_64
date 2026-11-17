@@ -366,3 +366,11 @@ pub fn is_ready() -> bool {
 pub fn get_mac() -> [u8; 6] {
     E1000.lock().mac
 }
+
+pub fn send(packet: &[u8]) -> Result<(), &'static str> {
+    E1000.lock().transmit(packet)
+}
+
+pub fn recv(buf: &mut [u8]) -> usize {
+    E1000.lock().poll_receive(buf)
+}

@@ -118,27 +118,53 @@ qemu-system-x86_64 -kernel target/kernel.elf -serial stdio -m 256M -smp 4
 
 ## 5. Interactive Console (AegisShell 2.0)
 
-AegisShell provides rich kernel inspection and management commands:
+AegisShell provides rich kernel inspection and management commands supporting both **Natural Expressive Phrasing** and classic command shortcuts:
+
+### Natural Expressive Commands
+
+| Natural Command Syntax | Description |
+| :--- | :--- |
+| `copy <source> to <destination>` | Copies a file from source to destination on PurpleFS |
+| `move <source> to <destination>` | Moves/renames a file on PurpleFS |
+| `delete <file>` / `remove <file>` | Removes a file and deallocates its blocks on PurpleFS |
+| `read <file>` / `peek <file>` | Displays file contents from VFS / PurpleFS |
+| `create <file>` / `touch <file>` | Creates a new empty file |
+| `write to <file> <content>` | Writes arbitrary text content into a file |
+| `show <category>` | Displays subsystem status (`disks`, `filesystem`, `memory`, `cpu`, `system`, `uptime`, `tasks`, `devices`, `pci`, `network`, `modules`, `symbols`, `video`, `3d`, `mouse`, `files`) |
+| `load module <name>` | Loads and verifies an APDRV v3 kernel driver module |
+| `remount volume as <ro\|rw>` | Switches filesystem mount state between Read-Only and Read-Write |
+| `sync storage` | Commits journal transactions and flushes hardware block cache |
+| `verify security` | Executes AegisDetect SHA-256 cryptographic baseline authentication |
+| `ping to <ip>` / `ping <ip>` | Transmits ICMP Echo request through pure Rust TCP/IP network stack |
+| `clear screen` | Clears linear framebuffer and terminal window |
+| `restart system` | Reboots hardware via 8042 keyboard controller |
+
+### Command Aliases & Shortcuts
 
 | Command | Category | Description |
 | :--- | :--- | :--- |
-| `sysinfo` | System | Displays OS version, kernel build, and memory architecture |
-| `cpuinfo` | System | CPU vendor, brand string, and feature flags |
-| `mem` | Memory | Physical Memory Manager (PMM) total and free frame statistics |
-| `tasks` | Scheduler | Displays all active threads, states, CPU affinity, and priority ticks |
+| `sysinfo` / `show system` | System | Displays OS version, kernel build, and memory architecture |
+| `cpuinfo` / `show cpu` | System | CPU vendor, brand string, and feature flags |
+| `mem` / `show memory` | Memory | Physical Memory Manager (PMM) total and free frame statistics |
+| `tasks` / `show tasks` | Scheduler | Displays all active threads, states, CPU affinity, and priority ticks |
 | `smp` | Multi-Core | SMP status and operational status of all online CPU cores |
 | `smptest` | Multi-Core | Dispatches concurrent atomic increment workload across all 4 vCPUs |
-| `lspci` | Hardware | Scans and lists all devices on the PCI bus hierarchy |
-| `devices` | Hardware | PurpleDetect peripheral registry (COM1, PS2, ATA, etc.) |
-| `video` | Hardware | Displays VBE resolution, color depth, and linear framebuffer base |
-| `gpu3d` | Hardware | Inspects 3D acceleration engine (Intel/AMD/NVIDIA) and dispatches test draw calls |
-| `mouse` | Input | Reads current PS/2 mouse coordinates and button flags |
-| `lsmod` | Modules | Lists loaded APDRV v3 modules with W^X enforcement status |
-| `insmod` | Modules | Dynamically loads and verifies an APDRV driver module |
-| `aegisdetect`| Security | Displays cryptographic boot integrity baseline verification |
-| `disks` / `df` | Storage | Lists block devices, partitions, and PurpleFS volume statistics |
-| `peek` / `cat` | Filesystem | Reads file contents directly from PurpleFS |
-| `reboot` | Power | Triggers soft reboot via 8042 keyboard controller |
+| `lspci` / `show pci` | Hardware | Scans and lists all devices on the PCI bus hierarchy |
+| `devices` / `show devices` | Hardware | PurpleDetect peripheral registry (COM1, PS2, ATA, etc.) |
+| `video` / `show video` | Hardware | Displays VBE resolution, color depth, and linear framebuffer base |
+| `gpu3d` / `show 3d` | Hardware | Inspects 3D acceleration engine (Intel/AMD/NVIDIA) |
+| `mouse` / `show mouse` | Input | Reads current PS/2 mouse coordinates and button flags |
+| `ifconfig` / `show network` | Network | Network interface configuration, MAC and IP address |
+| `ping <ip>` | Network | Sends ICMP Echo Ping through pure Rust TCP/IP stack |
+| `lsmod` / `show modules` | Modules | Lists loaded APDRV v3 modules with W^X enforcement status |
+| `insmod` / `load module` | Modules | Dynamically loads and verifies an APDRV driver module |
+| `ksym` / `show symbols` | Symbols | Displays kernel export symbol table |
+| `aegisdetect` / `verify` | Security | Displays cryptographic boot integrity baseline verification |
+| `disks` / `show disks` | Storage | Lists block devices, partitions, and GPT partition table |
+| `df` / `show filesystem` | Storage | Displays PurpleFS volume mount state, block counts, and capacity |
+| `list files` / `show files` | Filesystem | Directory listing of `/` root filesystem |
+| `copy` / `move` / `delete` | Filesystem | File operations with expressive grammar |
+| `reboot` / `restart` | Power | Triggers soft reboot via 8042 keyboard controller |
 
 ---
 

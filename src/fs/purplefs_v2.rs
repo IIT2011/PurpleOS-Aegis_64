@@ -282,6 +282,100 @@ impl<'a> PurpleFsV2<'a> {
         Ok(write_len)
     }
 
+    pub fn copy_file(&mut self, src_name: &str, dst_name: &str) -> Result<usize, &'static str> {
+        if self.read_only {
+            return Err("Filesystem is mounted read-only");
+        }
+        let ino = self.lookup(src_name).ok_or("Source file not found")?;
+        let mut buf = [0u8; 4096];
+        let bytes_read = self.read_file(ino, &mut buf);
+        self.write_file(dst_name, &buf[..bytes_read])
+    }
+
+    pub fn move_file(&mut self, src_name: &str, dst_name: &str) -> Result<(), &'static str> {
+        if self.read_only {
+            return Err("Filesystem is mounted read-only");
+        }
+        let ino = self.lookup(src_name).ok_or("Source file not found")?;
+        if self.lookup(dst_name).is_some() {
+            return Err("Destination file already exists");
+        }
+
+        let mut dir_block = [0u8; 4096];
+        self.read_fs_block(10, &mut dir_block)?;
+        let mut off = 0;
+        let mut updated = false;
+        while off + 32 <= 4096 {
+            let d_ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
+            if d_ino == ino {
+                let b = dst_name.as_bytes();
+                let len = b.len().min(24);
+                dir_block[off + 6] = len as u8;
+                dir_block[off + 8..off + 32].fill(0);
+                dir_block[off + 8..off + 8 + len].copy_from_slice(&b[..len]);
+                updated = true;
+                break;
+            }
+            off += 32;
+        }
+
+        if !updated {
+            return Err("Dirent not found in directory block");
+        }
+
+        self.write_fs_block(10, &dir_block)?;
+        Ok(())
+    }
+
+    pub fn delete_file(&mut self, filename: &str) -> Result<(), &'static str> {
+        if self.read_only {
+            return Err("Filesystem is mounted read-only");
+        }
+        let ino = self.lookup(filename).ok_or("File not found")?;
+
+        let blk_idx = 2 + (ino / 32);
+        let ino_off = ((ino % 32) * 128) as usize;
+        let mut inode_block = [0u8; 4096];
+        self.read_fs_block(blk_idx, &mut inode_block)?;
+
+        let mut data_blks = [0u32; 12];
+        for i in 0..12 {
+            let ptr_off = ino_off + 0x2C + i * 4;
+            data_blks[i] = u32::from_le_bytes(inode_block[ptr_off..ptr_off + 4].try_into().unwrap());
+        }
+
+        inode_block[ino_off..ino_off + 128].fill(0);
+        self.write_fs_block(blk_idx, &inode_block)?;
+
+        let mut bitmap = [0u8; 4096];
+        self.read_fs_block(1, &mut bitmap)?;
+        for &blk in data_blks.iter() {
+            if blk >= 11 && blk < self.total_blocks {
+                let byte_idx = (blk / 8) as usize;
+                let bit_idx = (blk % 8) as usize;
+                if byte_idx < 4096 {
+                    bitmap[byte_idx] &= !(1 << bit_idx);
+                }
+            }
+        }
+        self.write_fs_block(1, &bitmap)?;
+
+        let mut dir_block = [0u8; 4096];
+        self.read_fs_block(10, &mut dir_block)?;
+        let mut off = 0;
+        while off + 32 <= 4096 {
+            let d_ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
+            if d_ino == ino {
+                dir_block[off..off + 32].fill(0);
+                break;
+            }
+            off += 32;
+        }
+        self.write_fs_block(10, &dir_block)?;
+
+        Ok(())
+    }
+
     pub fn sync(&mut self) -> Result<(), &'static str> {
         if self.dev.flush() == 0 {
             Ok(())

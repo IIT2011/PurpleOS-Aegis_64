@@ -21,6 +21,7 @@ pub mod fs;
 pub mod crypto;
 pub mod security;
 pub mod kernel;
+pub mod net;
 
 extern "C" {
     static _kernel_start: u8;
@@ -125,6 +126,7 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     // 15. Dynamic Linker, Symbols & Drivers
     kernel::ksym::init();
     drivers::netdev::init();
+    net::init();
     drivers::usb::init();
     drivers::e1000::init();
     drivers::rtl8139::init();
