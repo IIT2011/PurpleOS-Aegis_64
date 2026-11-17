@@ -1,8 +1,8 @@
-# Purple OS Personal Use License (PPL) v1.0
+# Aegis64/PurpleOS License v2.0
 
-Copyright (c) 2026 [Copyright Holder / Project Owner]
+Copyright (c) 2026 Saptanshu Ganguly
 
-All rights reserved.
+All rights reserved, subject to the permissions expressly granted under this license.
 
 This license applies to Purple OS, Aegis64, and the source code and other materials in this repository that are owned by the copyright holder, except where a file or component states otherwise.
 
@@ -13,56 +13,80 @@ This license applies to Purple OS, Aegis64, and the source code and other materi
 - **Personal Use** means private, non-commercial use by an individual for learning, experimentation, development, and running or modifying the Software on devices under their control.
 - **Commercial Use** means using the Software as part of a commercial activity, product, service, or business, or using it to obtain commercial or monetary benefit.
 - **Redistribution** means publishing, sharing, transferring, sublicensing, selling, or otherwise making the Software or a modified version available to another person or entity, whether in source or compiled form.
+- **Unmodified Version** means a copy of the Software that has not been altered, adapted, or modified. Repackaging or reproducing an unchanged copy for distribution does not, by itself, constitute modification.
 
 ## 2. Permission for Personal Use
 
-Subject to the terms of this license, the Copyright Holder grants each recipient a limited, revocable only as permitted by applicable law, non-exclusive, non-transferable license to:
+Subject to the terms of this license, the Copyright Holder grants each recipient a limited, non-exclusive, non-transferable license to:
 
 1. View and study the Software.
 2. Download and copy the Software for Personal Use.
 3. Modify the Software for Personal Use.
 4. Compile and run original or modified versions for Personal Use.
 5. Keep private copies and private modifications.
+6. Share modified versions privately for non-commercial Personal Use, subject to this license and applicable third-party licenses.
 
 These permissions do not grant ownership of the Software or its intellectual property.
 
-## 3. Restrictions
+## 3. Permission for Unmodified Redistribution and Commercial Use
 
-Without the Copyright Holder's prior written permission, you may not:
+Subject to the terms of this license, the Copyright Holder permits recipients to:
 
-1. Redistribute, publish, or share the Software or modified versions outside the limited permissions necessary for hosting and viewing it on the repository platform.
-2. Distribute compiled binaries, system images, installers, or other packaged versions of the Software.
-3. Use, incorporate, or deploy the Software for Commercial Use.
-4. Sell, sublicense, rent, or commercially license the Software or modified versions.
-5. Offer products or services based on the Software for commercial purposes.
-6. Claim authorship or ownership of the original Software.
-7. Remove or misrepresent applicable copyright notices or this license.
+1. Use unmodified copies of the Software for personal or commercial purposes.
+2. Redistribute, publish, share, transfer, and distribute unmodified copies of the Software.
+3. Distribute unmodified source code, compiled binaries, system images, installers, and other packaged versions.
+4. Sell or commercially distribute unmodified copies of the Software.
+5. Include unmodified copies of the Software in commercial products or distribution packages.
 
-A public repository platform may independently permit certain viewing, hosting, or forking activities under its terms of service. This license does not attempt to override those platform terms. Such platform permissions do not grant a general right to redistribute the Software elsewhere.
+These permissions are granted without requiring separate written permission from the Copyright Holder, provided that:
+
+- The Software remains unmodified.
+- The original copyright notices and this license are retained.
+- The Software is not misrepresented as an independently owned or originally authored product of the redistributor.
+- Applicable third-party licenses and legal requirements are respected.
 
 ## 4. Modified Versions
 
-You may modify the Software and keep those modifications private for Personal Use.
+Recipients may modify the Software and use modified versions for Personal Use.
 
-You may not publish or distribute modified source code, patches, derivative works, binaries, or images without prior written permission from the Copyright Holder, except to the extent expressly permitted by applicable law or another applicable license.
+However, commercial use, commercial distribution, sale, sublicensing, or other commercial exploitation of modified versions requires prior written permission from the Copyright Holder.
 
-## 5. Requesting Additional Permission
+Without such permission, recipients may not:
+
+1. Sell modified versions of the Software.
+2. Distribute modified versions for commercial benefit.
+3. Incorporate modified versions into commercial products or services.
+4. Offer modified versions as part of a paid product, service, or commercial offering.
+5. Sublicense or commercially license modified versions.
+
+Non-commercial personal modification remains permitted under Section 2.
+
+## 5. Requesting Additional Commercial Permission
 
 The Copyright Holder may grant additional permissions on a case-by-case basis, including permission to:
 
-- Redistribute original or modified source code.
-- Publish forks or derivative projects.
-- Distribute binaries, images, or installers.
-- Use the Software commercially.
-- Incorporate the Software into commercial products or services.
+- Commercially use modified versions.
+- Redistribute modified source code commercially.
+- Distribute modified binaries, images, or installers commercially.
+- Incorporate modified versions into commercial products or services.
+- Sell or commercially license modified versions.
+- Publish modified versions under separately agreed licensing conditions.
 
-Such permission must be granted in writing by the Copyright Holder or an authorized representative. The written permission may specify its own conditions, scope, duration, and fees.
+Requests for such permission must be sent to:
+
+**Email:** [saptanshuganguly01@gmail.com](mailto\:saptanshuganguly01@gmail.com)
+
+A request does not constitute permission. Commercial permission for modified versions is granted only when confirmed in writing by the Copyright Holder or an authorized representative.
+
+Written permission may specify its own conditions, scope, duration, and fees.
 
 ## 6. Third-Party Components
 
 This license applies only to materials for which the Copyright Holder has the necessary rights.
 
 Third-party software, libraries, assets, and other externally owned materials remain subject to their respective licenses and terms. Nothing in this license removes rights granted by those separate licenses.
+
+Where a third-party license grants rights that differ from or exceed the permissions in this license, those third-party rights remain applicable to the relevant component.
 
 ## 7. Contributions
 
@@ -92,14 +116,19 @@ This license is subject to applicable law. Any governing-law or jurisdiction pro
 
 ## 12. Contact and Additional Permissions
 
-For permission to redistribute, publish modifications, or use the Software commercially, contact the Copyright Holder through the project's official GitHub repository:
+For permission to commercially use, distribute, or otherwise exploit modified versions of Purple OS, contact the Copyright Holder:
 
-https://github.com/IIT2011/PurpleOS-Aegis_64
+**Saptanshu Ganguly**
+**Email:** [saptanshuganguly01@gmail.com](mailto\:saptanshuganguly01@gmail.com)
 
-A request does not constitute permission. Permission is granted only when confirmed in writing by an authorized rights holder.
+Project repository:
+
+[https://github.com/IIT2011/PurpleOS-Aegis_64](https://github.com/IIT2011/PurpleOS-Aegis_64)
+
+Unmodified copies may be used and redistributed commercially under Section 3 without requesting additional permission.
 
 ---
 
-**Purple OS / Aegis64 — Personal Use License v1.0**
+**Aegis64/PurpleOS License**
 
 This is a custom source-available license, not an OSI-approved Open Source license.

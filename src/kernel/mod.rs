@@ -10,3 +10,4 @@ pub mod apexec;
 pub mod ipc;
 pub mod posix;
 pub mod shell;
+pub mod uaccess;

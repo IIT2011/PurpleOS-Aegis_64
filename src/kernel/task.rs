@@ -44,19 +44,19 @@ pub struct Task {
     pub exit_code: i32,
     pub is_zombie: bool,
     pub fd_table: [crate::kernel::posix::FileDescriptor; crate::kernel::posix::MAX_FD_PER_TASK],
+    pub vmas: [crate::kernel::posix::Vma; crate::kernel::posix::MAX_VMAS_PER_TASK],
+    pub cwd: [u8; 64],
+    pub cwd_len: usize,
+    pub umask: u32,
     pub brk_start: u64,
     pub brk_current: u64,
-    pub sig_pending: u32,
-    pub sig_mask: u32,
-    pub sig_handlers: [u64; 32],
+    pub sig_pending: u64,
+    pub sig_mask: u64,
+    pub sig_handlers: [u64; 64],
 }
 
 const fn default_fd_table() -> [crate::kernel::posix::FileDescriptor; crate::kernel::posix::MAX_FD_PER_TASK] {
-    let mut table = [crate::kernel::posix::FileDescriptor::unused(); crate::kernel::posix::MAX_FD_PER_TASK];
-    table[0].fd_type = crate::kernel::posix::FdType::ConsoleStdin;
-    table[1].fd_type = crate::kernel::posix::FdType::ConsoleStdout;
-    table[2].fd_type = crate::kernel::posix::FdType::ConsoleStderr;
-    table
+    crate::kernel::posix::default_fd_table()
 }
 
 impl Task {
@@ -80,11 +80,15 @@ impl Task {
             exit_code: 0,
             is_zombie: false,
             fd_table: default_fd_table(),
+            vmas: [crate::kernel::posix::Vma::empty(); crate::kernel::posix::MAX_VMAS_PER_TASK],
+            cwd: [b'/', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            cwd_len: 1,
+            umask: 0o022,
             brk_start: 0x0000_0000_1000_0000,
             brk_current: 0x0000_0000_1000_0000,
             sig_pending: 0,
             sig_mask: 0,
-            sig_handlers: [0; 32],
+            sig_handlers: [0; 64],
         }
     }
 }

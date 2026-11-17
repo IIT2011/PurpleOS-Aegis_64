@@ -212,7 +212,7 @@ impl Shell {
                 serial::println("    date / time / show time        CMOS Real-Time Clock (RTC)");
                 serial::println("    mem / free / memory            Physical memory & heap status");
                 serial::println("    tasks / ps                     Process table & CPU affinity");
-                serial::println("    posix [status|test]            POSIX subsystem status & 8-test validation suite");
+                serial::println("    posix [status|test]            POSIX subsystem status & 12-test validation suite");
                 serial::println("    whoami / id                    Current user security level");
                 serial::println("    clear / cls                    Clear console display");
                 serial::println("    reboot / restart               Reboot hardware via 8042");
@@ -690,11 +690,11 @@ impl Shell {
                     serial::println("  Syscall Vector:  Linux x86_64 ABI (RAX=Syscall, RDI, RSI, RDX, R10, R8, R9)");
                     serial::println("  Standard FDs:    FD 0 (stdin), FD 1 (stdout), FD 2 (stderr)");
                     serial::println("  VFS / Pipes:     FD 3..31 mapped to VFS file table & ring-buffered IPC pipes");
-                    serial::println("  Signals:         POSIX.1-1990 Signals 1..31 supported");
+                    serial::println("  Signals:         POSIX.1-2024 Signals 1..64 supported");
                     serial::println("  Epoch:           Real-Time Dynamic Gregorian Epoch from CMOS RTC");
                     serial::println("  Memory:          Hardware-enforced ring 3 memory isolation & user brk/mmap");
                     serial::println("  Pure Rust:       100% Rust no_std (Zero C, Zero C++, Zero Hardcoded values)\n");
-                    serial::println("Use 'posix test' to run the in-kernel 8-test validation suite.");
+                    serial::println("Use 'posix test' to run the in-kernel 12-test validation suite.");
                 }
             }
             "ksym" => self.show_symbols(),

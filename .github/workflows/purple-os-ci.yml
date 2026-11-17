@@ -57,7 +57,11 @@ jobs:
             -m 256M \
             -smp 4 > boot.log 2>&1 || true
           cat boot.log
-          grep -q "Aegis64 Kernel (Purple OS) - Pure Rust Edition" boot.log
-          grep -q "Multiprocessing operational. 4/4 CPUs online." boot.log
+          grep -q "Aegis64 Kernel (Purple OS) Initializing (Pure Rust Edition)" boot.log
+          grep -q "SMP: Multiprocessing operational. 4/4 CPUs online." boot.log
           grep -q "aegis64@purple:~$" boot.log
           echo "Kernel Boot & SMP Verification Passed!"
+
+      - name: POSIX.1-2024 Conformance Verification
+        run: |
+          python3 scripts/test_qemu_posix.py

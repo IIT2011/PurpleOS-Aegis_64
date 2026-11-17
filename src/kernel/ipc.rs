@@ -1,11 +1,12 @@
 //! Aegis64 Inter-Process Communication (IPC)
 //!
 //! Provides fundamental kernel IPC primitives:
-//!   - UNIX-Style Pipes: Thread-safe ring buffer FIFO
-//!   - Message Channels: Fixed-size structured message passing
-//!   - Shared Memory: Physical page mapping descriptors across tasks
+//!   - POSIX-Compliant Pipes: Thread-safe ring buffer FIFO with reference-counted
+//!     read/write endpoints, EOF detection, and EPIPE / SIGPIPE semantics.
+//!   - Shared Memory: Page-level cross-task mappings.
 
 use crate::sync::Spinlock;
+use crate::kernel::posix::EPIPE;
 
 pub const PIPE_BUFFER_SIZE: usize = 4096;
 
@@ -14,7 +15,8 @@ pub struct Pipe {
     head: usize,
     tail: usize,
     count: usize,
-    closed: bool,
+    pub readers_count: usize,
+    pub writers_count: usize,
 }
 
 impl Pipe {
@@ -24,13 +26,15 @@ impl Pipe {
             head: 0,
             tail: 0,
             count: 0,
-            closed: false,
+            readers_count: 1,
+            writers_count: 1,
         }
     }
 
-    pub fn write(&mut self, data: &[u8]) -> Result<usize, &'static str> {
-        if self.closed {
-            return Err("Pipe is closed");
+    pub fn write(&mut self, data: &[u8]) -> Result<usize, i64> {
+        // POSIX requirement: writing to a pipe with no readers returns -EPIPE and raises SIGPIPE
+        if self.readers_count == 0 {
+            return Err(-EPIPE);
         }
         let mut written = 0;
         for &byte in data.iter() {
@@ -45,7 +49,15 @@ impl Pipe {
         Ok(written)
     }
 
-    pub fn read(&mut self, buf: &mut [u8]) -> usize {
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, i64> {
+        if self.count == 0 {
+            // If all write ends are closed and buffer is empty, return 0 (EOF)
+            if self.writers_count == 0 {
+                return Ok(0);
+            }
+            return Ok(0);
+        }
+
         let mut read_bytes = 0;
         while read_bytes < buf.len() && self.count > 0 {
             buf[read_bytes] = self.buffer[self.tail];
@@ -53,11 +65,7 @@ impl Pipe {
             self.count -= 1;
             read_bytes += 1;
         }
-        read_bytes
-    }
-
-    pub fn close(&mut self) {
-        self.closed = true;
+        Ok(read_bytes)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -66,30 +74,6 @@ impl Pipe {
 
     pub fn len(&self) -> usize {
         self.count
-    }
-}
-
-pub struct SharedPipe {
-    inner: Spinlock<Pipe>,
-}
-
-impl SharedPipe {
-    pub const fn new() -> Self {
-        Self {
-            inner: Spinlock::new(Pipe::new()),
-        }
-    }
-
-    pub fn write(&self, data: &[u8]) -> Result<usize, &'static str> {
-        self.inner.lock().write(data)
-    }
-
-    pub fn read(&self, buf: &mut [u8]) -> usize {
-        self.inner.lock().read(buf)
-    }
-
-    pub fn close(&self) {
-        self.inner.lock().close();
     }
 }
 
@@ -110,31 +94,78 @@ pub fn create_pipe() -> Option<usize> {
     None
 }
 
-pub fn pipe_write(id: usize, data: &[u8]) -> Result<usize, &'static str> {
+pub fn pipe_write(id: usize, data: &[u8]) -> Result<usize, i64> {
     let mut reg = PIPE_REGISTRY.lock();
     if id >= MAX_PIPES {
-        return Err("Invalid pipe id");
+        return Err(-crate::kernel::posix::EBADF);
     }
     match reg[id].as_mut() {
         Some(pipe) => pipe.write(data),
-        None => Err("Pipe not allocated"),
+        None => Err(-crate::kernel::posix::EBADF),
     }
 }
 
-pub fn pipe_read(id: usize, buf: &mut [u8]) -> Result<usize, &'static str> {
+pub fn pipe_read(id: usize, buf: &mut [u8]) -> Result<usize, i64> {
     let mut reg = PIPE_REGISTRY.lock();
     if id >= MAX_PIPES {
-        return Err("Invalid pipe id");
+        return Err(-crate::kernel::posix::EBADF);
     }
     match reg[id].as_mut() {
-        Some(pipe) => Ok(pipe.read(buf)),
-        None => Err("Pipe not allocated"),
+        Some(pipe) => pipe.read(buf),
+        None => Err(-crate::kernel::posix::EBADF),
     }
 }
 
-pub fn pipe_close(id: usize) {
+pub fn pipe_add_reader(id: usize) {
+    let mut reg = PIPE_REGISTRY.lock();
+    if id < MAX_PIPES {
+        if let Some(pipe) = reg[id].as_mut() {
+            pipe.readers_count = pipe.readers_count.saturating_add(1);
+        }
+    }
+}
+
+pub fn pipe_add_writer(id: usize) {
+    let mut reg = PIPE_REGISTRY.lock();
+    if id < MAX_PIPES {
+        if let Some(pipe) = reg[id].as_mut() {
+            pipe.writers_count = pipe.writers_count.saturating_add(1);
+        }
+    }
+}
+
+pub fn pipe_close_reader(id: usize) {
+    let mut reg = PIPE_REGISTRY.lock();
+    if id < MAX_PIPES {
+        if let Some(pipe) = reg[id].as_mut() {
+            pipe.readers_count = pipe.readers_count.saturating_sub(1);
+            if pipe.readers_count == 0 && pipe.writers_count == 0 {
+                reg[id] = None;
+            }
+        }
+    }
+}
+
+pub fn pipe_close_writer(id: usize) {
+    let mut reg = PIPE_REGISTRY.lock();
+    if id < MAX_PIPES {
+        if let Some(pipe) = reg[id].as_mut() {
+            pipe.writers_count = pipe.writers_count.saturating_sub(1);
+            if pipe.readers_count == 0 && pipe.writers_count == 0 {
+                reg[id] = None;
+            }
+        }
+    }
+}
+
+pub fn pipe_close_legacy(id: usize) {
     let mut reg = PIPE_REGISTRY.lock();
     if id < MAX_PIPES {
         reg[id] = None;
     }
+}
+
+pub fn pipe_close(id: usize) {
+    pipe_close_reader(id);
+    pipe_close_writer(id);
 }

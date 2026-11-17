@@ -319,3 +319,54 @@ pub fn map_mmio_range(paddr: u64, size: usize) -> Result<(), &'static str> {
         Ok(())
     }
 }
+
+/// Clones all user-mapped pages within the virtual address range [start, end)
+/// from src_pml4 into dst_pml4 by allocating fresh physical frames and copying data.
+pub fn clone_user_range(src_pml4: *mut PageTable, dst_pml4: *mut PageTable, start: u64, end: u64) -> Result<(), &'static str> {
+    if src_pml4.is_null() || dst_pml4.is_null() {
+        return Err("Null PML4 pointer in clone_user_range");
+    }
+    let page_start = start & !0xFFF;
+    let page_end = (end.saturating_add(0xFFF)) & !0xFFF;
+    let mut curr = page_start;
+
+    while curr < page_end {
+        if let Some((paddr, flags)) = get_mapping(src_pml4, curr) {
+            if (flags & PAGE_PRESENT) != 0 && (flags & PAGE_USER) != 0 {
+                let frame = alloc_frame().ok_or("Out of memory cloning user frame")?;
+                unsafe {
+                    core::ptr::copy_nonoverlapping(paddr as *const u8, frame as *mut u8, PAGE_SIZE);
+                }
+                map_page(dst_pml4, curr, frame as u64, flags)?;
+            }
+        }
+        curr = match curr.checked_add(PAGE_SIZE as u64) {
+            Some(next) => next,
+            None => break,
+        };
+    }
+    Ok(())
+}
+
+/// Unmaps and frees physical frames for all user pages in [start, end).
+pub fn free_user_range(pml4: *mut PageTable, start: u64, end: u64) {
+    if pml4.is_null() {
+        return;
+    }
+    let page_start = start & !0xFFF;
+    let page_end = (end.saturating_add(0xFFF)) & !0xFFF;
+    let mut curr = page_start;
+
+    while curr < page_end {
+        if let Some((paddr, flags)) = get_mapping(pml4, curr) {
+            if (flags & PAGE_PRESENT) != 0 && (flags & PAGE_USER) != 0 {
+                let _ = unmap_page(pml4, curr);
+                let _ = super::pmm::free_frame(paddr as usize);
+            }
+        }
+        curr = match curr.checked_add(PAGE_SIZE as u64) {
+            Some(next) => next,
+            None => break,
+        };
+    }
+}

@@ -1,5 +1,6 @@
 use crate::arch::x86_64::cpu::{rdmsr, wrmsr};
-use crate::kernel::posix::{self, PosixStat, Timespec};
+use crate::kernel::posix::{self, LinuxDirent64, PosixStat, SigAction, Timespec};
+use crate::kernel::uaccess;
 
 const MSR_EFER: u32 = 0xC0000080;
 const MSR_STAR: u32 = 0xC0000081;
@@ -8,7 +9,7 @@ const MSR_SFMASK: u32 = 0xC0000084;
 const MSR_KERNEL_GS_BASE: u32 = 0xC0000102;
 const EFER_SCE: u64 = 0x00000001;
 
-// Standard Linux / POSIX x86_64 Syscall Numbers
+// Standard Linux / POSIX.1-2024 x86_64 Syscall Numbers
 pub const SYS_READ: u64            = 0;
 pub const SYS_WRITE: u64           = 1;
 pub const SYS_OPEN: u64            = 2;
@@ -23,6 +24,7 @@ pub const SYS_BRK: u64             = 12;
 pub const SYS_RT_SIGACTION: u64    = 13;
 pub const SYS_RT_SIGPROCMASK: u64  = 14;
 pub const SYS_IOCTL: u64           = 16;
+pub const SYS_ACCESS: u64          = 21;
 pub const SYS_PIPE: u64            = 22;
 pub const SYS_SCHED_YIELD: u64     = 24;
 pub const SYS_DUP: u64             = 32;
@@ -41,11 +43,13 @@ pub const SYS_CHDIR: u64           = 80;
 pub const SYS_MKDIR: u64           = 83;
 pub const SYS_RMDIR: u64           = 84;
 pub const SYS_UNLINK: u64          = 87;
+pub const SYS_UMASK: u64           = 95;
 pub const SYS_GETUID: u64          = 102;
 pub const SYS_GETGID: u64          = 104;
 pub const SYS_GETEUID: u64         = 107;
 pub const SYS_GETEGID: u64         = 108;
 pub const SYS_GETPPID: u64         = 110;
+pub const SYS_GETDENTS64: u64      = 217;
 pub const SYS_CLOCK_GETTIME: u64   = 228;
 pub const SYS_CLOCK_NANOSLEEP: u64 = 230;
 pub const SYS_EXIT_GROUP: u64      = 231;
@@ -118,64 +122,7 @@ pub fn init_ap(cpu_id: usize) {
 }
 
 pub fn validate_user_ptr(ptr: *const u8, len: usize) -> bool {
-    if ptr.is_null() || len == 0 {
-        return false;
-    }
-    let start = ptr as u64;
-    let end = match start.checked_add(len as u64) {
-        Some(e) => e,
-        None => return false,
-    };
-    // User canonical range 0x00400000 .. 0x00007FFFFFFFF000
-    if start < 0x00400000 || end > 0x0000_7FFF_FFFF_F000 {
-        return false;
-    }
-
-    let pml4 = crate::mm::vmm::get_kernel_pml4();
-    if pml4.is_null() {
-        return false;
-    }
-
-    let page_start = start & !0xFFF;
-    let page_end = (end + 0xFFF) & !0xFFF;
-    let mut curr_page = page_start;
-
-    while curr_page < page_end {
-        match crate::mm::vmm::get_mapping(pml4, curr_page) {
-            Some((_paddr, flags)) => {
-                if (flags & crate::mm::vmm::PAGE_PRESENT) == 0
-                    || (flags & crate::mm::vmm::PAGE_USER) == 0
-                {
-                    return false;
-                }
-            }
-            None => return false,
-        }
-        curr_page = match curr_page.checked_add(crate::mm::pmm::PAGE_SIZE as u64) {
-            Some(next) => next,
-            None => return false,
-        };
-    }
-
-    true
-}
-
-fn read_user_string(ptr: *const u8, max_len: usize) -> Option<&'static str> {
-    if ptr.is_null() {
-        return None;
-    }
-    let mut len = 0;
-    unsafe {
-        while len < max_len {
-            let b = *ptr.add(len);
-            if b == 0 {
-                break;
-            }
-            len += 1;
-        }
-        let slice = core::slice::from_raw_parts(ptr, len);
-        core::str::from_utf8(slice).ok()
-    }
+    uaccess::validate_user_range(ptr as u64, len, false).is_ok()
 }
 
 #[unsafe(no_mangle)]
@@ -192,12 +139,25 @@ pub extern "C" fn syscall_dispatch(
         // POSIX 0: sys_read(fd, buf, count)
         SYS_READ => {
             let fd = a1 as usize;
-            let ptr = a2 as *mut u8;
+            let user_buf = a2;
             let count = a3 as usize;
-            if ptr.is_null() { return -posix::EFAULT; }
-            let slice = unsafe { core::slice::from_raw_parts_mut(ptr, count) };
-            match posix::posix_read(fd, slice) {
-                Ok(n) => n as i64,
+            if count == 0 {
+                return 0;
+            }
+            if let Err(e) = uaccess::validate_user_range(user_buf, count, true) {
+                return e;
+            }
+            let mut kbuf = [0u8; 4096];
+            let to_read = count.min(kbuf.len());
+            match posix::posix_read(fd, &mut kbuf[..to_read]) {
+                Ok(n) => {
+                    if n > 0 {
+                        if let Err(e) = uaccess::copy_to_user(&kbuf[..n], user_buf) {
+                            return e;
+                        }
+                    }
+                    n as i64
+                }
                 Err(e) => e,
             }
         }
@@ -205,11 +165,17 @@ pub extern "C" fn syscall_dispatch(
         // POSIX 1: sys_write(fd, buf, count)
         SYS_WRITE => {
             let fd = a1 as usize;
-            let ptr = a2 as *const u8;
+            let user_buf = a2;
             let count = a3 as usize;
-            if ptr.is_null() { return -posix::EFAULT; }
-            let slice = unsafe { core::slice::from_raw_parts(ptr, count) };
-            match posix::posix_write(fd, slice) {
+            if count == 0 {
+                return 0;
+            }
+            let mut kbuf = [0u8; 4096];
+            let to_write = count.min(kbuf.len());
+            if let Err(e) = uaccess::copy_from_user(user_buf, &mut kbuf[..to_write]) {
+                return e;
+            }
+            match posix::posix_write(fd, &kbuf[..to_write]) {
                 Ok(n) => n as i64,
                 Err(e) => e,
             }
@@ -217,16 +183,22 @@ pub extern "C" fn syscall_dispatch(
 
         // POSIX 2: sys_open(filename, flags, mode)
         SYS_OPEN => {
-            let path_ptr = a1 as *const u8;
+            let path_ptr = a1;
             let flags = a2 as u32;
             let mode = a3 as u32;
-            if let Some(path) = read_user_string(path_ptr, 128) {
-                match posix::posix_open(path, flags, mode) {
-                    Ok(fd) => fd as i64,
-                    Err(e) => e,
+            let mut path_buf = [0u8; 128];
+            match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
+                Ok(len) => {
+                    if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
+                        match posix::posix_open(path, flags, mode) {
+                            Ok(fd) => fd as i64,
+                            Err(e) => e,
+                        }
+                    } else {
+                        -posix::EINVAL
+                    }
                 }
-            } else {
-                -posix::EFAULT
+                Err(e) => e,
             }
         }
 
@@ -240,28 +212,48 @@ pub extern "C" fn syscall_dispatch(
 
         // POSIX 4: sys_stat(path, statbuf)
         SYS_STAT => {
-            let path_ptr = a1 as *const u8;
-            let stat_ptr = a2 as *mut PosixStat;
-            if stat_ptr.is_null() { return -posix::EFAULT; }
-            if let Some(path) = read_user_string(path_ptr, 128) {
-                let statbuf = unsafe { &mut *stat_ptr };
-                match posix::posix_stat(path, statbuf) {
-                    Ok(()) => 0,
-                    Err(e) => e,
+            let path_ptr = a1;
+            let stat_ptr = a2;
+            let mut path_buf = [0u8; 128];
+            match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
+                Ok(len) => {
+                    if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
+                        let mut statbuf = PosixStat::default();
+                        match posix::posix_stat(path, &mut statbuf) {
+                            Ok(()) => {
+                                let slice = unsafe {
+                                    core::slice::from_raw_parts(&statbuf as *const PosixStat as *const u8, core::mem::size_of::<PosixStat>())
+                                };
+                                match uaccess::copy_to_user(slice, stat_ptr) {
+                                    Ok(()) => 0,
+                                    Err(e) => e,
+                                }
+                            }
+                            Err(e) => e,
+                        }
+                    } else {
+                        -posix::EINVAL
+                    }
                 }
-            } else {
-                -posix::EFAULT
+                Err(e) => e,
             }
         }
 
         // POSIX 5: sys_fstat(fd, statbuf)
         SYS_FSTAT => {
             let fd = a1 as usize;
-            let stat_ptr = a2 as *mut PosixStat;
-            if stat_ptr.is_null() { return -posix::EFAULT; }
-            let statbuf = unsafe { &mut *stat_ptr };
-            match posix::posix_fstat(fd, statbuf) {
-                Ok(()) => 0,
+            let stat_ptr = a2;
+            let mut statbuf = PosixStat::default();
+            match posix::posix_fstat(fd, &mut statbuf) {
+                Ok(()) => {
+                    let slice = unsafe {
+                        core::slice::from_raw_parts(&statbuf as *const PosixStat as *const u8, core::mem::size_of::<PosixStat>())
+                    };
+                    match uaccess::copy_to_user(slice, stat_ptr) {
+                        Ok(()) => 0,
+                        Err(e) => e,
+                    }
+                }
                 Err(e) => e,
             }
         }
@@ -286,7 +278,12 @@ pub extern "C" fn syscall_dispatch(
         }
 
         // POSIX 10: sys_mprotect(addr, len, prot)
-        SYS_MPROTECT => 0,
+        SYS_MPROTECT => {
+            match posix::posix_mprotect(a1, a2 as usize, a3 as i32) {
+                Ok(()) => 0,
+                Err(e) => e,
+            }
+        }
 
         // POSIX 11: sys_munmap(addr, len)
         SYS_MUNMAP => {
@@ -304,22 +301,135 @@ pub extern "C" fn syscall_dispatch(
             }
         }
 
-        // POSIX 13: sys_rt_sigaction
-        SYS_RT_SIGACTION => 0,
+        // POSIX 13: sys_rt_sigaction(signum, act, oldact, sigsetsize)
+        SYS_RT_SIGACTION => {
+            let signum = a1 as i32;
+            let act_ptr = a2;
+            let oldact_ptr = a3;
 
-        // POSIX 14: sys_rt_sigprocmask
-        SYS_RT_SIGPROCMASK => 0,
+            let mut act_val = SigAction::default();
+            let act = if act_ptr != 0 {
+                let slice = unsafe {
+                    core::slice::from_raw_parts_mut(&mut act_val as *mut SigAction as *mut u8, core::mem::size_of::<SigAction>())
+                };
+                if let Err(e) = uaccess::copy_from_user(act_ptr, slice) {
+                    return e;
+                }
+                Some(&act_val)
+            } else {
+                None
+            };
 
-        // POSIX 16: sys_ioctl
-        SYS_IOCTL => 0,
+            let mut oldact_val = SigAction::default();
+            let oldact = if oldact_ptr != 0 {
+                Some(&mut oldact_val)
+            } else {
+                None
+            };
+
+            match posix::posix_rt_sigaction(signum, act, oldact) {
+                Ok(()) => {
+                    if oldact_ptr != 0 {
+                        let slice = unsafe {
+                            core::slice::from_raw_parts(&oldact_val as *const SigAction as *const u8, core::mem::size_of::<SigAction>())
+                        };
+                        if let Err(e) = uaccess::copy_to_user(slice, oldact_ptr) {
+                            return e;
+                        }
+                    }
+                    0
+                }
+                Err(e) => e,
+            }
+        }
+
+        // POSIX 14: sys_rt_sigprocmask(how, set, oldset, sigsetsize)
+        SYS_RT_SIGPROCMASK => {
+            let how = a1 as i32;
+            let set_ptr = a2;
+            let oldset_ptr = a3;
+
+            let mut set_val = 0u64;
+            let set = if set_ptr != 0 {
+                let slice = unsafe {
+                    core::slice::from_raw_parts_mut(&mut set_val as *mut u64 as *mut u8, 8)
+                };
+                if let Err(e) = uaccess::copy_from_user(set_ptr, slice) {
+                    return e;
+                }
+                Some(set_val)
+            } else {
+                None
+            };
+
+            let mut oldset_val = 0u64;
+            let oldset = if oldset_ptr != 0 {
+                Some(&mut oldset_val)
+            } else {
+                None
+            };
+
+            match posix::posix_rt_sigprocmask(how, set, oldset) {
+                Ok(()) => {
+                    if oldset_ptr != 0 {
+                        let slice = unsafe {
+                            core::slice::from_raw_parts(&oldset_val as *const u64 as *const u8, 8)
+                        };
+                        if let Err(e) = uaccess::copy_to_user(slice, oldset_ptr) {
+                            return e;
+                        }
+                    }
+                    0
+                }
+                Err(e) => e,
+            }
+        }
+
+        // POSIX 16: sys_ioctl(fd, req, arg)
+        SYS_IOCTL => {
+            let fd = a1 as usize;
+            let req = a2;
+            let arg = a3;
+            match posix::posix_ioctl(fd, req, arg) {
+                Ok(res) => res,
+                Err(e) => e,
+            }
+        }
+
+        // POSIX 21: sys_access(path, mode)
+        SYS_ACCESS => {
+            let path_ptr = a1;
+            let mode = a2 as i32;
+            let mut path_buf = [0u8; 128];
+            match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
+                Ok(len) => {
+                    if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
+                        match posix::posix_access(path, mode) {
+                            Ok(()) => 0,
+                            Err(e) => e,
+                        }
+                    } else {
+                        -posix::EINVAL
+                    }
+                }
+                Err(e) => e,
+            }
+        }
 
         // POSIX 22: sys_pipe(pipefd[2])
         SYS_PIPE => {
-            let pipe_ptr = a1 as *mut [i32; 2];
-            if pipe_ptr.is_null() { return -posix::EFAULT; }
-            let pipe_slice = unsafe { &mut *pipe_ptr };
-            match posix::posix_pipe(pipe_slice) {
-                Ok(()) => 0,
+            let pipe_ptr = a1;
+            let mut pipe_fds = [0i32; 2];
+            match posix::posix_pipe(&mut pipe_fds) {
+                Ok(()) => {
+                    let slice = unsafe {
+                        core::slice::from_raw_parts(&pipe_fds as *const [i32; 2] as *const u8, 8)
+                    };
+                    match uaccess::copy_to_user(slice, pipe_ptr) {
+                        Ok(()) => 0,
+                        Err(e) => e,
+                    }
+                }
                 Err(e) => e,
             }
         }
@@ -354,10 +464,15 @@ pub extern "C" fn syscall_dispatch(
 
         // POSIX 35: sys_nanosleep(req, rem)
         SYS_NANOSLEEP => {
-            let req_ptr = a1 as *const Timespec;
-            if req_ptr.is_null() { return -posix::EFAULT; }
-            let req = unsafe { &*req_ptr };
-            match posix::posix_nanosleep(req, None) {
+            let req_ptr = a1;
+            let mut req = Timespec::default();
+            let slice = unsafe {
+                core::slice::from_raw_parts_mut(&mut req as *mut Timespec as *mut u8, core::mem::size_of::<Timespec>())
+            };
+            if let Err(e) = uaccess::copy_from_user(req_ptr, slice) {
+                return e;
+            }
+            match posix::posix_nanosleep(&req, None) {
                 Ok(()) => 0,
                 Err(e) => e,
             }
@@ -374,8 +489,24 @@ pub extern "C" fn syscall_dispatch(
             }
         }
 
-        // POSIX 59: sys_execve
-        SYS_EXECVE => 0,
+        // POSIX 59: sys_execve(filename, argv, envp)
+        SYS_EXECVE => {
+            let path_ptr = a1;
+            let mut path_buf = [0u8; 128];
+            match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
+                Ok(len) => {
+                    if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
+                        match posix::posix_execve(path, &[], &[]) {
+                            Ok(()) => 0,
+                            Err(e) => e,
+                        }
+                    } else {
+                        -posix::EINVAL
+                    }
+                }
+                Err(e) => e,
+            }
+        }
 
         // POSIX 60: sys_exit(status)
         SYS_EXIT => {
@@ -403,72 +534,116 @@ pub extern "C" fn syscall_dispatch(
             }
         }
 
-        // POSIX 72: sys_fcntl
-        SYS_FCNTL => 0,
+        // POSIX 72: sys_fcntl(fd, cmd, arg)
+        SYS_FCNTL => {
+            let fd = a1 as usize;
+            let cmd = a2 as i32;
+            let arg = a3;
+            match posix::posix_fcntl(fd, cmd, arg) {
+                Ok(res) => res,
+                Err(e) => e,
+            }
+        }
 
         // POSIX 79: sys_getcwd(buf, size)
         SYS_GETCWD => {
-            let ptr = a1 as *mut u8;
+            let buf_ptr = a1;
             let size = a2 as usize;
-            if ptr.is_null() { return -posix::EFAULT; }
-            let slice = unsafe { core::slice::from_raw_parts_mut(ptr, size) };
-            match posix::posix_getcwd(slice) {
-                Ok(len) => len as i64,
+            if size == 0 {
+                return -posix::EINVAL;
+            }
+            let mut kbuf = [0u8; 128];
+            match posix::posix_getcwd(&mut kbuf[..size.min(128)]) {
+                Ok(len) => {
+                    if let Err(e) = uaccess::copy_to_user(&kbuf[..len + 1], buf_ptr) {
+                        return e;
+                    }
+                    len as i64
+                }
                 Err(e) => e,
             }
         }
 
         // POSIX 80: sys_chdir(path)
         SYS_CHDIR => {
-            let ptr = a1 as *const u8;
-            if let Some(path) = read_user_string(ptr, 128) {
-                match posix::posix_chdir(path) {
-                    Ok(()) => 0,
-                    Err(e) => e,
+            let path_ptr = a1;
+            let mut path_buf = [0u8; 128];
+            match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
+                Ok(len) => {
+                    if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
+                        match posix::posix_chdir(path) {
+                            Ok(()) => 0,
+                            Err(e) => e,
+                        }
+                    } else {
+                        -posix::EINVAL
+                    }
                 }
-            } else {
-                -posix::EFAULT
+                Err(e) => e,
             }
         }
 
         // POSIX 83: sys_mkdir(path, mode)
         SYS_MKDIR => {
-            let ptr = a1 as *const u8;
+            let path_ptr = a1;
             let mode = a2 as u32;
-            if let Some(path) = read_user_string(ptr, 128) {
-                match posix::posix_mkdir(path, mode) {
-                    Ok(()) => 0,
-                    Err(e) => e,
+            let mut path_buf = [0u8; 128];
+            match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
+                Ok(len) => {
+                    if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
+                        match posix::posix_mkdir(path, mode) {
+                            Ok(()) => 0,
+                            Err(e) => e,
+                        }
+                    } else {
+                        -posix::EINVAL
+                    }
                 }
-            } else {
-                -posix::EFAULT
+                Err(e) => e,
             }
         }
 
         // POSIX 84: sys_rmdir(path)
         SYS_RMDIR => {
-            let ptr = a1 as *const u8;
-            if let Some(path) = read_user_string(ptr, 128) {
-                match posix::posix_rmdir(path) {
-                    Ok(()) => 0,
-                    Err(e) => e,
+            let path_ptr = a1;
+            let mut path_buf = [0u8; 128];
+            match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
+                Ok(len) => {
+                    if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
+                        match posix::posix_rmdir(path) {
+                            Ok(()) => 0,
+                            Err(e) => e,
+                        }
+                    } else {
+                        -posix::EINVAL
+                    }
                 }
-            } else {
-                -posix::EFAULT
+                Err(e) => e,
             }
         }
 
         // POSIX 87: sys_unlink(path)
         SYS_UNLINK => {
-            let ptr = a1 as *const u8;
-            if let Some(path) = read_user_string(ptr, 128) {
-                match posix::posix_unlink(path) {
-                    Ok(()) => 0,
-                    Err(e) => e,
+            let path_ptr = a1;
+            let mut path_buf = [0u8; 128];
+            match uaccess::copy_str_from_user(path_ptr, &mut path_buf) {
+                Ok(len) => {
+                    if let Ok(path) = core::str::from_utf8(&path_buf[..len]) {
+                        match posix::posix_unlink(path) {
+                            Ok(()) => 0,
+                            Err(e) => e,
+                        }
+                    } else {
+                        -posix::EINVAL
+                    }
                 }
-            } else {
-                -posix::EFAULT
+                Err(e) => e,
             }
+        }
+
+        // POSIX 95: sys_umask(mask)
+        SYS_UMASK => {
+            posix::posix_umask(a1 as u32) as i64
         }
 
         // POSIX 102, 104, 107, 108: User & Group IDs
@@ -478,24 +653,47 @@ pub extern "C" fn syscall_dispatch(
         SYS_GETEGID => posix::posix_getegid(),
         SYS_GETPPID => posix::posix_getppid(),
 
+        // POSIX 217: sys_getdents64(fd, dirp, count)
+        SYS_GETDENTS64 => {
+            let fd = a1 as usize;
+            let dirp = a2 as *mut LinuxDirent64;
+            let count = a3 as usize;
+            match posix::posix_getdents64(fd, dirp, count) {
+                Ok(n) => n,
+                Err(e) => e,
+            }
+        }
+
         // POSIX 228: sys_clock_gettime(clock_id, tp)
         SYS_CLOCK_GETTIME => {
             let clock_id = a1 as i32;
-            let tp_ptr = a2 as *mut Timespec;
-            if tp_ptr.is_null() { return -posix::EFAULT; }
-            let tp = unsafe { &mut *tp_ptr };
-            match posix::posix_clock_gettime(clock_id, tp) {
-                Ok(()) => 0,
+            let tp_ptr = a2;
+            let mut tp = Timespec::default();
+            match posix::posix_clock_gettime(clock_id, &mut tp) {
+                Ok(()) => {
+                    let slice = unsafe {
+                        core::slice::from_raw_parts(&tp as *const Timespec as *const u8, core::mem::size_of::<Timespec>())
+                    };
+                    match uaccess::copy_to_user(slice, tp_ptr) {
+                        Ok(()) => 0,
+                        Err(e) => e,
+                    }
+                }
                 Err(e) => e,
             }
         }
 
         // POSIX 230: sys_clock_nanosleep(clock_id, flags, req, rem)
         SYS_CLOCK_NANOSLEEP => {
-            let req_ptr = a3 as *const Timespec;
-            if req_ptr.is_null() { return -posix::EFAULT; }
-            let req = unsafe { &*req_ptr };
-            match posix::posix_nanosleep(req, None) {
+            let req_ptr = a3;
+            let mut req = Timespec::default();
+            let slice = unsafe {
+                core::slice::from_raw_parts_mut(&mut req as *mut Timespec as *mut u8, core::mem::size_of::<Timespec>())
+            };
+            if let Err(e) = uaccess::copy_from_user(req_ptr, slice) {
+                return e;
+            }
+            match posix::posix_nanosleep(&req, None) {
                 Ok(()) => 0,
                 Err(e) => e,
             }
@@ -508,19 +706,23 @@ pub extern "C" fn syscall_dispatch(
 
         // Backward compatibility: Print message
         SYS_PRINT => {
-            let ptr = a1 as *const u8;
+            let ptr = a1;
             let len = (a2 as usize).min(1024);
-            if validate_user_ptr(ptr, len) {
-                let slice = unsafe { core::slice::from_raw_parts(ptr, len) };
-                if let Ok(s) = core::str::from_utf8(slice) {
-                    crate::drivers::serial::print("[USER APP] ");
-                    crate::drivers::serial::println(s);
-                    len as i64
-                } else {
-                    -posix::EINVAL
+            let mut kbuf = [0u8; 1024];
+            if len == 0 {
+                return 0;
+            }
+            match uaccess::copy_from_user(ptr, &mut kbuf[..len]) {
+                Ok(()) => {
+                    if let Ok(s) = core::str::from_utf8(&kbuf[..len]) {
+                        crate::drivers::serial::print("[USER APP] ");
+                        crate::drivers::serial::println(s);
+                        len as i64
+                    } else {
+                        -posix::EINVAL
+                    }
                 }
-            } else {
-                -posix::EFAULT
+                Err(e) => e,
             }
         }
 
