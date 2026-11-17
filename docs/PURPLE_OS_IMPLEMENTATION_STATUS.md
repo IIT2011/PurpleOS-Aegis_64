@@ -18,9 +18,13 @@
 - **UDP (`src/net/udp.rs`) & TCP (`src/net/tcp.rs`):** Transport layer packet parsing and framing.
 - **NIC Hardware DMA Integration:** Connected to Intel 82540EM (`src/drivers/e1000.rs`) with coherent DMA descriptor rings.
 
-### B. Virtual File System (VFS) (`src/fs/vfs.rs`)
+### B. Dedicated Storage Hierarchy & Virtual File System (VFS) (`src/fs/vfs.rs` & `src/drivers/block_dev.rs`)
 - **Root Filesystem (`/`):** Backed by PurpleFS v2 persistent journaled storage.
-- **Device Filesystem (`/dev`):** Nodes for `null`, `zero`, `console`, and `storage`.
+- **Dedicated Solid State Drives (`/ssd`):** Nodes for `/ssd/ssd1`, `/ssd/ssd2` (NVMe PCIe & AHCI SATA SSD).
+- **Dedicated Hard Disk Drives (`/hdd`):** Nodes for `/hdd/hdd1`, `/hdd/hdd2` (ATA/IDE & SATA rotational HDDs).
+- **Dedicated USB Mass Storage (`/usb`):** Nodes for `/usb/usb1`, `/usb/usb2` (USB 3.x Flash pendrives).
+- **Dedicated Flash Cards (`/sdxc`, `/sdhc`):** Nodes for `/sdxc/card1` and `/sdhc/card1`.
+- **Character Device Filesystem (`/dev`):** Nodes for `null`, `zero`, and `console` (strictly non-storage devices).
 - **Process Information Filesystem (`/proc`):** Live kernel telemetry nodes (`version`, `meminfo`, `uptime`, `cpuinfo`, `tasks`).
 - **Temporary Filesystem (`/tmp`):** In-memory ephemeral volatile RAM disk.
 
@@ -41,14 +45,12 @@
 
 ---
 
-## 2. Natural Expressive Command Grammar (`src/kernel/shell.rs`)
+## 2. AegisShell 2.5: MS-DOS & Base Linux POSIX Hybrid Engine (`src/kernel/shell.rs`)
 
-The interactive shell supports natural English phrasing with 100% backward compatibility:
-- `copy <source> to <destination>` / `move <source> to <destination>` / `delete <file>`
-- `read <file>` / `create <file>` / `write to <file> <content>`
-- `show <disks|filesystem|memory|cpu|system|uptime|tasks|devices|pci|network|modules|files>`
-- `load module <name>` / `remount volume as <ro|rw>` / `sync storage`
-- `verify security` / `ping to <ip>` / `clear screen` / `restart system`
+The interactive shell provides a unified console combining MS-DOS commands, Linux POSIX tools, and Natural English phrasing:
+- **MS-DOS Ergonomics:** `dir`, `cd`, `type`, `copy`, `ren`, `del`, `md`, `rd`, `tree`, `cls`, `ver`, `date`, `time`, `mem`.
+- **Linux POSIX Tools:** `ls [-l]`, `pwd`, `cat`, `head [-n]`, `tail [-n]`, `cp`, `mv`, `rm`, `touch`, `mkdir`, `rmdir`, `stat`, `grep`, `wc`, `dump/hexdump/xxd`, `free`, `ps`, `df`, `whoami`, `echo [> | >>]`.
+- **Natural English Phrasing:** `copy <src> to <dst>`, `move <src> to <dst>`, `delete <file>`, `read <file>`, `show <cat>`, `ping to <ip>`, `remount volume as <mode>`.
 
 ---
 

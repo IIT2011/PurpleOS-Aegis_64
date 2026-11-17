@@ -1,5 +1,5 @@
 use crate::arch::x86_64::io::{inb, inw, outb, outw};
-use crate::drivers::block_dev::{BlockDevice, BLOCK_DEV_ERR_BOUNDS, BLOCK_DEV_ERR_IO, BLOCK_DEV_OK};
+use crate::drivers::block_dev::{BlockDevice, StorageCategory, BLOCK_DEV_ERR_BOUNDS, BLOCK_DEV_ERR_IO, BLOCK_DEV_OK};
 
 pub const ATA_PRIMARY_IO: u16 = 0x1F0;
 pub const ATA_PRIMARY_CTRL: u16 = 0x3F6;
@@ -153,6 +153,10 @@ impl BlockDevice for AtaDevice {
 
     fn total_blocks(&self) -> u64 {
         self.total_sectors
+    }
+
+    fn category(&self) -> StorageCategory {
+        StorageCategory::Hdd
     }
 
     fn read_blocks(&mut self, lba: u64, count: u32, buf: &mut [u8]) -> i32 {

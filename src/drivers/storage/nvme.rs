@@ -1,4 +1,4 @@
-use crate::drivers::block_dev::{BlockDevice, BLOCK_DEV_ERR_BOUNDS, BLOCK_DEV_ERR_IO, BLOCK_DEV_OK};
+use crate::drivers::block_dev::{BlockDevice, StorageCategory, BLOCK_DEV_ERR_BOUNDS, BLOCK_DEV_ERR_IO, BLOCK_DEV_OK};
 use crate::drivers::dma::alloc_coherent;
 
 #[repr(C, packed)]
@@ -124,6 +124,10 @@ impl BlockDevice for NvmeController {
 
     fn total_blocks(&self) -> u64 {
         self.total_blocks
+    }
+
+    fn category(&self) -> StorageCategory {
+        StorageCategory::Ssd
     }
 
     fn read_blocks(&mut self, lba: u64, count: u32, buf: &mut [u8]) -> i32 {

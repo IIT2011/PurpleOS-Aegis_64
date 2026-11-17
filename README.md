@@ -116,58 +116,68 @@ qemu-system-x86_64 -kernel target/kernel.elf -serial stdio -m 256M -smp 4
 
 ---
 
-## 5. Interactive Console (AegisShell 2.0)
+## 5. Dedicated Storage Hierarchy & VFS Namespace
 
-AegisShell provides rich kernel inspection and management commands supporting both **Natural Expressive Phrasing** and classic command shortcuts:
+Storage devices in Aegis64 are decoupled from generic `/dev` character devices and categorized into dedicated, type-safe hardware paths:
 
-### Natural Expressive Commands
-
-| Natural Command Syntax | Description |
-| :--- | :--- |
-| `copy <source> to <destination>` | Copies a file from source to destination on PurpleFS |
-| `move <source> to <destination>` | Moves/renames a file on PurpleFS |
-| `delete <file>` / `remove <file>` | Removes a file and deallocates its blocks on PurpleFS |
-| `read <file>` / `peek <file>` | Displays file contents from VFS / PurpleFS |
-| `create <file>` / `touch <file>` | Creates a new empty file |
-| `write to <file> <content>` | Writes arbitrary text content into a file |
-| `show <category>` | Displays subsystem status (`disks`, `filesystem`, `memory`, `cpu`, `system`, `uptime`, `tasks`, `devices`, `pci`, `network`, `modules`, `symbols`, `video`, `3d`, `mouse`, `files`) |
-| `load module <name>` | Loads and verifies an APDRV v3 kernel driver module |
-| `remount volume as <ro\|rw>` | Switches filesystem mount state between Read-Only and Read-Write |
-| `sync storage` | Commits journal transactions and flushes hardware block cache |
-| `verify security` | Executes AegisDetect SHA-256 cryptographic baseline authentication |
-| `ping to <ip>` / `ping <ip>` | Transmits ICMP Echo request through pure Rust TCP/IP network stack |
-| `clear screen` | Clears linear framebuffer and terminal window |
-| `restart system` | Reboots hardware via 8042 keyboard controller |
-
-### Command Aliases & Shortcuts
-
-| Command | Category | Description |
+| Storage Mount Path | Hardware Category | Supported Controllers & Protocols |
 | :--- | :--- | :--- |
-| `sysinfo` / `show system` | System | Displays OS version, kernel build, and memory architecture |
-| `cpuinfo` / `show cpu` | System | CPU vendor, brand string, and feature flags |
-| `mem` / `show memory` | Memory | Physical Memory Manager (PMM) total and free frame statistics |
-| `tasks` / `show tasks` | Scheduler | Displays all active threads, states, CPU affinity, and priority ticks |
-| `smp` | Multi-Core | SMP status and operational status of all online CPU cores |
-| `smptest` | Multi-Core | Dispatches concurrent atomic increment workload across all 4 vCPUs |
-| `lspci` / `show pci` | Hardware | Scans and lists all devices on the PCI bus hierarchy |
-| `devices` / `show devices` | Hardware | PurpleDetect peripheral registry (COM1, PS2, ATA, etc.) |
-| `video` / `show video` | Hardware | Displays VBE resolution, color depth, and linear framebuffer base |
-| `gpu3d` / `show 3d` | Hardware | Inspects 3D acceleration engine (Intel/AMD/NVIDIA) |
-| `mouse` / `show mouse` | Input | Reads current PS/2 mouse coordinates and button flags |
-| `ifconfig` / `show network` | Network | Network interface configuration, MAC and IP address |
-| `ping <ip>` | Network | Sends ICMP Echo Ping through pure Rust TCP/IP stack |
-| `lsmod` / `show modules` | Modules | Lists loaded APDRV v3 modules with W^X enforcement status |
-| `insmod` / `load module` | Modules | Dynamically loads and verifies an APDRV driver module |
-| `ksym` / `show symbols` | Symbols | Displays kernel export symbol table |
-| `aegisdetect` / `verify` | Security | Displays cryptographic boot integrity baseline verification |
-| `disks` / `show disks` | Storage | Lists block devices, partitions, and GPT partition table |
-| `df` / `show filesystem` | Storage | Displays PurpleFS volume mount state, block counts, and capacity |
-| `list files` / `show files` | Filesystem | Directory listing of `/` root filesystem |
-| `copy` / `move` / `delete` | Filesystem | File operations with expressive grammar |
-| `reboot` / `restart` | Power | Triggers soft reboot via 8042 keyboard controller |
+| `/ssd/ssd1`, `/ssd/ssd2`, ... | Solid State Drives | NVMe PCIe Gen3/4, AHCI SATA SSD |
+| `/hdd/hdd1`, `/hdd/hdd2`, ... | Hard Disk Drives | ATA / IDE PIO, SATA Rotational HDD |
+| `/usb/usb1`, `/usb/usb2`, ... | USB Mass Storage | USB 3.x xHCI Controller & MSC / BOT protocol |
+| `/sdxc/card1`, ... | SDXC Cards | High-Capacity SD Card Controllers |
+| `/sdhc/card1`, ... | SDHC Cards | Standard-Capacity SD Card Controllers |
+| `/dev` | Non-Storage Devices | Character & pseudo devices (`null`, `zero`, `console`) |
+| `/proc` | Introspection | Virtual procfs (`version`, `meminfo`, `uptime`, `cpuinfo`, `tasks`) |
+| `/tmp` | Volatile Storage | In-memory RAM disk (TmpFS) |
+| `/` | Root Storage | Mounted PurpleFS v2 volume from GPT partition |
+
+Direct block I/O and sector inspection (`hexdump`, `dump`) can be performed directly on storage paths (e.g., `dump /ssd/ssd1` or `cat /proc/version`).
 
 ---
 
-## 6. License
+## 6. Interactive Console: AegisShell 2.5 (MS-DOS & Linux POSIX Hybrid)
+
+AegisShell 2.5 provides a complete terminal environment combining the ergonomics of **MS-DOS**, the utility of **Base Linux CLI**, and **Natural Expressive English Phrasing**:
+
+### Command Matrix
+
+| MS-DOS Command | Linux POSIX Command | Natural English Syntax | Description |
+| :--- | :--- | :--- | :--- |
+| `cd <path>` / `chdir` | `cd <path>` | `go to <path>` | Changes current working directory (`cd /proc`, `cd /ssd`, `cd ..`) |
+| `cd` | `pwd` | `show current folder` | Displays current working directory |
+| `dir [path]` | `ls [-l] [path]` | `show files [in path]` | Lists directory entries with file size, directory flag, and dates |
+| `tree` | `tree` | `show tree` | Visual ASCII hierarchy of root, virtual mounts, and storage nodes |
+| `type <file>` | `cat <file>` | `read <file>` / `peek` | Reads and outputs file contents via unified VFS |
+| — | `head [-n lines] <file>`| `show first lines` | Displays the first N lines of a file (default 10) |
+| — | `tail [-n lines] <file>`| `show last lines` | Displays the last N lines of a file (default 10) |
+| `copy <src> <dst>` | `cp <src> <dst>` | `copy <src> to <dst>` | Copies files across filesystems (PurpleFS, TmpFS, ProcFS) |
+| `ren` / `move` | `mv <src> <dst>` | `move <src> to <dst>` | Moves or renames files |
+| `del <file>` / `erase` | `rm <file>` | `delete <file>` | Deletes a file from storage |
+| — | `touch <file>` | `create <file>` | Creates an empty file |
+| — | `echo <text> > <file>` | `write [to] <file> <text>` | Overwrites file with specified text content |
+| — | `echo <text> >> <file>`| `append [to] <file> <text>`| Appends text content to file |
+| `md <dir>` / `mkdir` | `mkdir <dir>` | `create folder <dir>` | Creates a new directory |
+| `rd <dir>` / `rmdir` | `rmdir <dir>` | `delete folder <dir>` | Removes a directory |
+| `find <str> <file>` | `grep <pattern> <file>` | `search <str> in <file>` | Filters and outputs matching lines in text file |
+| — | `wc <file>` | `count lines in <file>` | Counts lines, words, and byte size of a file |
+| `debug / dump` | `hexdump` / `xxd` / `hex` | `dump <file\|device>` | 16-byte hex + ASCII memory dump of files or storage nodes |
+| `ver` | `uname -a` | `show version` | Displays kernel version, edition, and compiler architecture |
+| `date` / `time` | `date` | `show time` / `show date` | Reads real CMOS Real-Time Clock (RTC) chip timestamp |
+| `mem` | `free` | `show memory` | Displays total, used, and free physical memory and frame counts |
+| — | `whoami` / `id` | `show user` | Displays current security context (`root` Ring 0 Supervisor) |
+| — | `ps` / `tasks` | `show tasks` | Lists active threads, scheduling states, and CPU affinities |
+| `cls` | `clear` | `clear screen` | Clears video framebuffer and serial console |
+| `mount` | `mount` | `show mounts` | Lists active VFS mountpoints and backing block devices |
+| — | `sync` | `sync storage` | Flushes dirty block buffers and commits journal transactions |
+| — | `remount <ro\|rw>` | `remount volume as` | Toggles volume between Read-Only and Read-Write mode |
+| — | `ifconfig` / `ip` | `show network` | Displays Ethernet interfaces, IP addresses, and MAC addresses |
+| — | `arp` | `show arp` | Displays kernel dynamic ARP table entries |
+| — | `ping <ip>` | `ping to <ip>` | Transmits ICMP Echo packets through pure Rust network stack |
+| — | `reboot` / `restart` | `restart system` | Reboots machine via 8042 keyboard controller |
+
+---
+
+## 7. License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

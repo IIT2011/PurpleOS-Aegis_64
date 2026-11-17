@@ -43,9 +43,10 @@
 | **Bochs / QEMU DRM Video** | Complete | `src/drivers/gpu.rs`, `video.rs` | VBE Dispi 1024x768 @ 32bpp, PCI BAR0 16 MiB VRAM binding, hardware page-flipping, 2D blit, framebuffer fallback. |
 | **3D Hardware Acceleration** | Complete | `src/drivers/gpu_accel.rs` | Intel Gen9/Gen11 RCS ring buffer, AMD GCN/RDNA PM4 packets, NVIDIA Nouveau pushbuffer FIFO methods. |
 | **APDRV v3 Native Modules** | Complete | `scripts/build_apdrv.py`, `kernel/apdrv.rs` | 17 production `.apdrv` modules generated with real x86-64 machine code, relocations, and W^X memory enforcement. |
-| **Interactive Terminal Shell** | Complete | `src/kernel/shell.rs` | AegisShell 2.0 console with natural expressive command phrasing (`copy <src> to <dst>`, `move <src> to <dst>`, `delete <file>`, `show <cat>`, `ping to <ip>`, `remount volume as <mode>`, etc.) and backward-compatible shortcuts. |
-| **Pure Rust TCP/IP Stack** | Complete | `src/net/` | Full L2/L3/L4 protocol stack (Ethernet II, ARP, IPv4, ICMP echo ping, UDP, TCP) wired to NIC DMA rings. |
-| **Virtual File System (VFS)** | Complete | `src/fs/vfs.rs` | Unified namespace over `/` (PurpleFS), `/dev` (null, zero, console, storage), `/proc` (version, meminfo, uptime, cpuinfo, tasks), and `/tmp` (volatile RAM disk). |
+| **Interactive Terminal Shell** | Complete | `src/kernel/shell.rs` | AegisShell 2.5 hybrid console supporting MS-DOS commands (`dir`, `cd`, `type`, `copy`, `ren`, `del`, `md`, `rd`, `cls`, `ver`, `date`, `time`), Linux POSIX commands (`ls`, `pwd`, `cat`, `head`, `tail`, `grep`, `wc`, `dump`, `hexdump`, `clear`, `free`, `ps`, `df`, `stat`, `whoami`), and Natural Expressive Phrasing (`copy <src> to <dst>`, `ping to <ip>`, etc.). |
+| **Pure Rust TCP/IP Stack** | Complete | `src/net/` | Full L2/L3/L4 protocol stack (Ethernet II, dynamic ARP, IPv4, ICMP echo ping, UDP, TCP) wired to NIC DMA rings. |
+| **Virtual File System (VFS)** | Complete | `src/fs/vfs.rs` | Unified namespace over `/` (PurpleFS), `/dev` (null, zero, console), `/proc` (version, meminfo, uptime, cpuinfo, tasks), `/tmp` (volatile RAM disk), and dedicated storage paths (`/ssd`, `/hdd`, `/usb`, `/sdxc`, `/sdhc`). |
+| **Dedicated Storage Paths** | Complete | `src/drivers/block_dev.rs` | Type-safe storage device mapping: `/ssd/ssd1..` (NVMe/SATA SSD), `/hdd/hdd1..` (ATA/SATA HDD), `/usb/usb1..` (USB 3.x Flash), `/sdxc/card1` (SDXC), `/sdhc/card1` (SDHC). |
 | **Per-Process Page Tables** | Complete | `src/kernel/task.rs`, `mm/vmm.rs` | Task `cr3` field, `spawn_user_task()` with private 4-level PML4, and dynamic CR3 reloading on context switch. |
 | **Inter-Process Comm (IPC)** | Complete | `src/kernel/ipc.rs` | Thread-safe 4096-byte ring-buffered UNIX-style Pipes (`Pipe`) and message channels. |
 

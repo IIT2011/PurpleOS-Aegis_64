@@ -1,6 +1,8 @@
 use crate::drivers::storage::ata_pio::{AtaDevice, ATA_PRIMARY_CTRL, ATA_PRIMARY_IO, ATA_SECONDARY_CTRL, ATA_SECONDARY_IO};
 use crate::drivers::storage::ahci::AhciPort;
 use crate::drivers::storage::nvme::NvmeController;
+use crate::drivers::storage::usb::UsbMassStorageDevice;
+use crate::drivers::storage::sd::SdCardDevice;
 use crate::fs::purplefs_v2::PurpleFsV2;
 use crate::sync::Spinlock;
 
@@ -13,6 +15,9 @@ static mut ATA_DEVICES: [AtaDevice; 4] = [
 
 static mut AHCI0: AhciPort = AhciPort::new(0);
 static mut NVME0: NvmeController = NvmeController::new();
+static mut USB0: UsbMassStorageDevice = UsbMassStorageDevice::new("usb0", 131072);
+static mut SDXC0: SdCardDevice = SdCardDevice::new("card1", true, 131072);
+static mut SDHC0: SdCardDevice = SdCardDevice::new("card1", false, 65536);
 
 pub struct StorageState {
     pub fs_mounted: bool,
@@ -89,6 +94,20 @@ pub fn init() {
                 }
             }
         });
+
+        // USB 3.x Mass Storage Registration (/usb/usb1, ...)
+        let usb_ref = &mut *core::ptr::addr_of_mut!(USB0);
+        if crate::drivers::usb::is_ready() || crate::drivers::usb::XHCI.lock().active_ports > 0 {
+            usb_ref.set_connected(true);
+        }
+        crate::drivers::block_dev::register(usb_ref);
+
+        // SDXC & SDHC Card Slot Registration (/sdxc/card1, /sdhc/card1, ...)
+        let sdxc_ref = &mut *core::ptr::addr_of_mut!(SDXC0);
+        crate::drivers::block_dev::register(sdxc_ref);
+
+        let sdhc_ref = &mut *core::ptr::addr_of_mut!(SDHC0);
+        crate::drivers::block_dev::register(sdhc_ref);
     }
 
     // Dynamic GPT Scan & PurpleFS Auto-Mount across registered block devices

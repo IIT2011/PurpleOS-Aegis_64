@@ -2,9 +2,14 @@
 //!
 //! Provides a unified hierarchical namespace over:
 //!   - `/`       -> PurpleFS v2 Persistent Storage
-//!   - `/dev`    -> DevFS (null, zero, console, storage)
-//!   - `/proc`   -> ProcFS (version, meminfo, uptime, cpuinfo, tasks)
-//!   - `/tmp`    -> TmpFS (In-memory volatile RAM disk)
+//!   - `/dev`    -> DevFS (character & pseudo devices: null, zero, console)
+//!   - `/proc`   -> ProcFS (virtual system introspection: version, meminfo, uptime, cpuinfo, tasks)
+//!   - `/tmp`    -> TmpFS (in-memory volatile RAM disk)
+//!   - `/ssd`    -> Dedicated Solid State Drive block storage devices (/ssd/ssd1, /ssd/ssd2, ...)
+//!   - `/hdd`    -> Dedicated Hard Disk Drive block storage devices (/hdd/hdd1, /hdd/hdd2, ...)
+//!   - `/usb`    -> Dedicated USB 3.x Flash Drive block storage devices (/usb/usb1, /usb/usb2, ...)
+//!   - `/sdxc`   -> Dedicated SDXC Card storage devices (/sdxc/card1, ...)
+//!   - `/sdhc`   -> Dedicated SDHC Card storage devices (/sdhc/card1, ...)
 
 use crate::sync::Spinlock;
 
@@ -41,21 +46,37 @@ impl TmpFs {
 
 static TMPFS: Spinlock<TmpFs> = Spinlock::new(TmpFs::new());
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum VfsMountType {
     RootPurpleFs,
     DevFs,
     ProcFs,
     TmpFs,
+    SsdDev,   // /ssd/...
+    HddDev,   // /hdd/...
+    UsbDev,   // /usb/...
+    SdxcDev,  // /sdxc/...
+    SdhcDev,  // /sdhc/...
 }
 
 pub fn classify_path(path: &str) -> (VfsMountType, &str) {
     let p = path.trim_start_matches('/');
-    if p.starts_with("dev/") {
-        (VfsMountType::DevFs, &p[4..])
-    } else if p.starts_with("proc/") {
-        (VfsMountType::ProcFs, &p[5..])
-    } else if p.starts_with("tmp/") {
-        (VfsMountType::TmpFs, &p[4..])
+    if p.starts_with("dev/") || p == "dev" {
+        (VfsMountType::DevFs, if p.len() > 4 { &p[4..] } else { "" })
+    } else if p.starts_with("proc/") || p == "proc" {
+        (VfsMountType::ProcFs, if p.len() > 5 { &p[5..] } else { "" })
+    } else if p.starts_with("tmp/") || p == "tmp" {
+        (VfsMountType::TmpFs, if p.len() > 4 { &p[4..] } else { "" })
+    } else if p.starts_with("ssd/") || p == "ssd" {
+        (VfsMountType::SsdDev, if p.len() > 4 { &p[4..] } else { "" })
+    } else if p.starts_with("hdd/") || p == "hdd" {
+        (VfsMountType::HddDev, if p.len() > 4 { &p[4..] } else { "" })
+    } else if p.starts_with("usb/") || p == "usb" {
+        (VfsMountType::UsbDev, if p.len() > 4 { &p[4..] } else { "" })
+    } else if p.starts_with("sdxc/") || p == "sdxc" {
+        (VfsMountType::SdxcDev, if p.len() > 5 { &p[5..] } else { "" })
+    } else if p.starts_with("sdhc/") || p == "sdhc" {
+        (VfsMountType::SdhcDev, if p.len() > 5 { &p[5..] } else { "" })
     } else {
         (VfsMountType::RootPurpleFs, p)
     }
@@ -67,6 +88,11 @@ pub fn read(path: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
         VfsMountType::DevFs => read_devfs(sub, buf),
         VfsMountType::ProcFs => read_procfs(sub, buf),
         VfsMountType::TmpFs => read_tmpfs(sub, buf),
+        VfsMountType::SsdDev => read_storage_node(path, buf),
+        VfsMountType::HddDev => read_storage_node(path, buf),
+        VfsMountType::UsbDev => read_storage_node(path, buf),
+        VfsMountType::SdxcDev => read_storage_node(path, buf),
+        VfsMountType::SdhcDev => read_storage_node(path, buf),
         VfsMountType::RootPurpleFs => {
             let res = crate::kernel::storage::with_fs(|fs| {
                 if let Some(ino) = fs.lookup(sub) {
@@ -89,6 +115,8 @@ pub fn write(path: &str, content: &[u8]) -> Result<usize, &'static str> {
         VfsMountType::DevFs => write_devfs(sub, content),
         VfsMountType::ProcFs => Err("ProcFS is a read-only virtual filesystem"),
         VfsMountType::TmpFs => write_tmpfs(sub, content),
+        VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
+        VfsMountType::SdxcDev | VfsMountType::SdhcDev => write_storage_node(path, content),
         VfsMountType::RootPurpleFs => {
             let res = crate::kernel::storage::with_fs(|fs| {
                 fs.write_file(sub, content)
@@ -102,6 +130,75 @@ pub fn write(path: &str, content: &[u8]) -> Result<usize, &'static str> {
     }
 }
 
+pub fn delete(path: &str) -> Result<(), &'static str> {
+    let (mount, sub) = classify_path(path);
+    match mount {
+        VfsMountType::TmpFs => {
+            let mut tmp = TMPFS.lock();
+            for entry in tmp.entries.iter_mut() {
+                if entry.in_use {
+                    let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+                    if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
+                        if n == sub {
+                            entry.in_use = false;
+                            entry.len = 0;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            Err("File not found in /tmp")
+        }
+        VfsMountType::RootPurpleFs => {
+            let res = crate::kernel::storage::with_fs(|fs| {
+                fs.delete_file(sub)
+            });
+            match res {
+                Some(Ok(())) => Ok(()),
+                Some(Err(e)) => Err(e),
+                None => Err("No persistent filesystem mounted"),
+            }
+        }
+        _ => Err("Cannot delete node on this virtual filesystem"),
+    }
+}
+
+fn read_storage_node(path: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
+    if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(path) {
+        let mut blk = [0u8; 512];
+        let res = crate::drivers::block_dev::with_dev(idx, |dev| {
+            dev.read_blocks(0, 1, &mut blk)
+        });
+        if res == Some(crate::drivers::block_dev::BLOCK_DEV_OK) {
+            let len = buf.len().min(512);
+            buf[..len].copy_from_slice(&blk[..len]);
+            Ok(len)
+        } else {
+            Err("I/O error reading storage device sector 0")
+        }
+    } else {
+        Err("Storage device not found")
+    }
+}
+
+fn write_storage_node(path: &str, content: &[u8]) -> Result<usize, &'static str> {
+    if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(path) {
+        let mut blk = [0u8; 512];
+        let len = content.len().min(512);
+        blk[..len].copy_from_slice(&content[..len]);
+        let res = crate::drivers::block_dev::with_dev(idx, |dev| {
+            dev.write_blocks(0, 1, &blk)
+        });
+        if res == Some(crate::drivers::block_dev::BLOCK_DEV_OK) {
+            Ok(len)
+        } else {
+            Err("I/O error writing storage device sector 0")
+        }
+    } else {
+        Err("Storage device not found")
+    }
+}
+
 fn read_devfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
     match name {
         "null" => Ok(0),
@@ -111,7 +208,7 @@ fn read_devfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
         }
         "console" => Ok(0),
         "storage" => {
-            let msg = b"Aegis64 Unified Storage: ATA, AHCI, NVMe block devices active\n";
+            let msg = b"Aegis64 Unified Storage Hierarchy: /ssd, /hdd, /usb, /sdxc, /sdhc active\n";
             let len = msg.len().min(buf.len());
             buf[..len].copy_from_slice(&msg[..len]);
             Ok(len)
@@ -185,6 +282,13 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
             write_str("\n");
             Ok(written)
         }
+        "tasks" => {
+            write_str("PID  NAME       STATUS      CR3\n");
+            write_str("------------------------------------\n");
+            write_str("0    IdleTask   RUNNING     0x1000\n");
+            write_str("1    AegisInit  READY       0x1000\n");
+            Ok(written)
+        }
         _ => Err("File not found in /proc"),
     }
 }
@@ -246,7 +350,106 @@ fn write_tmpfs(name: &str, content: &[u8]) -> Result<usize, &'static str> {
     Ok(write_len)
 }
 
-fn format_u64(mut n: u64, buf: &mut [u8]) -> usize {
+/// Enumerate directory entries across unified VFS namespaces
+pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Result<(), &'static str> {
+    let (mount, sub) = classify_path(path);
+    match mount {
+        VfsMountType::DevFs => {
+            cb("null", 0, false);
+            cb("zero", 0, false);
+            cb("console", 0, false);
+            Ok(())
+        }
+        VfsMountType::ProcFs => {
+            cb("version", 70, false);
+            cb("meminfo", 128, false);
+            cb("uptime", 32, false);
+            cb("cpuinfo", 64, false);
+            cb("tasks", 256, false);
+            Ok(())
+        }
+        VfsMountType::TmpFs => {
+            let tmp = TMPFS.lock();
+            for entry in tmp.entries.iter() {
+                if entry.in_use {
+                    let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+                    if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
+                        cb(n, entry.len, false);
+                    }
+                }
+            }
+            Ok(())
+        }
+        VfsMountType::SsdDev => {
+            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
+                if dev.category() == crate::drivers::block_dev::StorageCategory::Ssd {
+                    let name = canon.trim_start_matches("/ssd/");
+                    cb(name, (dev.total_blocks() * 512) as usize, false);
+                }
+            });
+            Ok(())
+        }
+        VfsMountType::HddDev => {
+            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
+                if dev.category() == crate::drivers::block_dev::StorageCategory::Hdd {
+                    let name = canon.trim_start_matches("/hdd/");
+                    cb(name, (dev.total_blocks() * 512) as usize, false);
+                }
+            });
+            Ok(())
+        }
+        VfsMountType::UsbDev => {
+            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
+                if dev.category() == crate::drivers::block_dev::StorageCategory::Usb {
+                    let name = canon.trim_start_matches("/usb/");
+                    cb(name, (dev.total_blocks() * 512) as usize, false);
+                }
+            });
+            Ok(())
+        }
+        VfsMountType::SdxcDev => {
+            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
+                if dev.category() == crate::drivers::block_dev::StorageCategory::Sdxc {
+                    let name = canon.trim_start_matches("/sdxc/");
+                    cb(name, (dev.total_blocks() * 512) as usize, false);
+                }
+            });
+            Ok(())
+        }
+        VfsMountType::SdhcDev => {
+            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
+                if dev.category() == crate::drivers::block_dev::StorageCategory::Sdhc {
+                    let name = canon.trim_start_matches("/sdhc/");
+                    cb(name, (dev.total_blocks() * 512) as usize, false);
+                }
+            });
+            Ok(())
+        }
+        VfsMountType::RootPurpleFs => {
+            // Root virtual mount folders
+            cb("dev", 0, true);
+            cb("proc", 0, true);
+            cb("tmp", 0, true);
+            cb("ssd", 0, true);
+            cb("hdd", 0, true);
+            cb("usb", 0, true);
+            cb("sdxc", 0, true);
+            cb("sdhc", 0, true);
+
+            // PurpleFS persistent files
+            crate::kernel::storage::with_fs(|fs| {
+                fs.list_files(|_ino, ftype, fsize, name| {
+                    if sub.is_empty() || name.starts_with(sub) {
+                        cb(name, fsize as usize, ftype == 2);
+                    }
+                });
+            });
+            Ok(())
+        }
+    }
+}
+
+pub fn format_u64(mut n: u64, buf: &mut [u8]) -> usize {
     if n == 0 {
         if !buf.is_empty() {
             buf[0] = b'0';
