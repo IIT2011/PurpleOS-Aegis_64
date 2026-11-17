@@ -14,6 +14,7 @@ def main():
         "-no-reboot"
     ]
 
+    import threading
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -23,27 +24,37 @@ def main():
         bufsize=0
     )
 
+    captured_chunks = []
+    def read_stdout():
+        for line in iter(proc.stdout.readline, ''):
+            captured_chunks.append(line)
+    t = threading.Thread(target=read_stdout, daemon=True)
+    t.start()
+
     # Allow kernel to initialize and print prompt
-    time.sleep(1.0)
+    time.sleep(2.5)
 
     commands = [
-        "posix status\n",
-        "posix test\n",
-        "echo POSIX-SUITE-COMPLETED\n"
+        ("posix status\n", 0.6),
+        ("posix test\n", 2.0),
+        ("echo POSIX-SUITE-COMPLETED\n", 0.8)
     ]
 
-    for c in commands:
-        proc.stdin.write(c)
-        proc.stdin.flush()
-        time.sleep(0.4)
+    for c, delay in commands:
+        for ch in c:
+            proc.stdin.write(ch)
+            proc.stdin.flush()
+            time.sleep(0.01)
+        time.sleep(delay)
 
-    time.sleep(1.5)
+    time.sleep(1.0)
     proc.terminate()
     try:
-        stdout, stderr = proc.communicate(timeout=2)
+        proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
         proc.kill()
-        stdout, stderr = proc.communicate()
+
+    stdout = "".join(captured_chunks)
 
     print("=== Captured Kernel & Shell POSIX Output ===")
     print(stdout)
