@@ -1,7 +1,6 @@
 .set MB_ALIGN,     1 << 0
 .set MB_MEMINFO,   1 << 1
-.set MB_VIDMODE,   1 << 2
-.set MB_FLAGS,     MB_ALIGN | MB_MEMINFO | MB_VIDMODE
+.set MB_FLAGS,     MB_ALIGN | MB_MEMINFO
 .set MB_MAGIC,     0x1BADB002
 .set MB_CHECKSUM,  -(MB_MAGIC + MB_FLAGS)
 
@@ -18,11 +17,6 @@ _start:
     .long MB_MAGIC
     .long MB_FLAGS
     .long MB_CHECKSUM
-    .long 0, 0, 0, 0, 0
-    .long 0
-    .long 1280
-    .long 800
-    .long 32
 
 multiboot_entry:
     cli
