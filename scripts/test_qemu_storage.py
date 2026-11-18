@@ -102,7 +102,7 @@ def main():
             ("Peek Path Normalization Leading Dot-Slash", "=== File: welcome.txt"),
             ("Peek Path Normalization Leading Slash", "=== File: welcome.txt"),
             ("Peek Reject Root Slash", "Error: Invalid or unsupported file path '/'."),
-            ("Peek Reject Nested Path", "Error: Invalid or unsupported file path '/dir/file.txt'."),
+            ("Peek Missing Nested Path", "Error: File '/dir/file.txt' not found."),
             ("Peek Content Version", "Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)"),
             ("AegisDetect Boot Baseline", "AegisDetect: Loaded and authenticated trusted baseline"),
             ("AegisDetect File Verify", "AegisDetect: Verification summary: 3/3 components verified (3 trusted, 0 tampered/missing)"),

@@ -14,11 +14,13 @@ pub mod blend;
 pub mod cursor;
 pub mod pipeline;
 pub mod surface;
+pub mod wallpaper;
 pub mod window;
 
 pub use cursor::Cursor;
 pub use pipeline::CompositorPipeline;
 pub use surface::{DamageTracker, Rect, Surface};
+pub use wallpaper::Wallpaper;
 pub use window::{Window, WindowHitArea, MAX_WINDOWS};
 
 use crate::drivers::gpu::GPU;
@@ -81,13 +83,23 @@ impl CompositorEngine {
 
     /// Initialize the compositor engine and display resolution
     pub fn init(&mut self) {
-        let (w, h, pitch) = {
+        let display = {
             let v = VIDEO.lock();
             if v.available && v.width > 0 && v.height > 0 {
-                (v.width, v.height, v.pitch)
+                Some((v.width, v.height, v.pitch))
             } else {
-                (800, 600, 800)
+                None
             }
+        };
+
+        let Some((w, h, pitch)) = display else {
+            self.width = 0;
+            self.height = 0;
+            self.stride = 0;
+            crate::drivers::serial::println(
+                "Compositor: No active framebuffer dimensions; initialization deferred",
+            );
+            return;
         };
 
         self.width = w;
@@ -117,6 +129,13 @@ impl CompositorEngine {
     /// Start the compositor, initialize demo windows, and render initial desktop scene
     pub fn start(&mut self) {
         if self.running {
+            return;
+        }
+
+        if self.width == 0 || self.height == 0 {
+            crate::drivers::serial::println(
+                "Compositor: Cannot start without an active display mode",
+            );
             return;
         }
 

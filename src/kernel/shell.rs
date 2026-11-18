@@ -4145,22 +4145,22 @@ impl Shell {
     }
 
     fn do_peek(&self, file: &str) {
-        let clean = file.trim_start_matches(|c| c == '/' || c == '.');
-        if clean.is_empty() || clean.contains('/') || clean.ends_with('/') {
+        let file = file.trim();
+        let mut path_buf = [0u8; 128];
+        let resolved = self.resolve_path(file, &mut path_buf);
+        if file.is_empty() || resolved == "/" || file.ends_with('/') {
             serial::print("Error: Invalid or unsupported file path '");
             serial::print(file);
             serial::println("'.");
             return;
         }
 
-        let mut found = false;
         let mut buf = [0u8; 4096];
-
-        crate::kernel::storage::with_fs(|fs| {
-            if let Some(ino) = fs.lookup(clean) {
-                let len = fs.read_file(ino, &mut buf);
+        match crate::fs::vfs::read(resolved, &mut buf) {
+            Ok(len) => {
+                let display_name = resolved.rsplit('/').next().unwrap_or(resolved);
                 serial::print("=== File: ");
-                serial::print(clean);
+                serial::print(display_name);
                 serial::println(" ===");
                 if let Ok(text) = core::str::from_utf8(&buf[..len]) {
                     serial::print(text);
@@ -4170,14 +4170,12 @@ impl Shell {
                 } else {
                     serial::println("[Binary File Content]");
                 }
-                found = true;
             }
-        });
-
-        if !found {
-            serial::print("Error: File '");
-            serial::print(file);
-            serial::println("' not found.");
+            Err(_) => {
+                serial::print("Error: File '");
+                serial::print(file);
+                serial::println("' not found.");
+            }
         }
     }
 

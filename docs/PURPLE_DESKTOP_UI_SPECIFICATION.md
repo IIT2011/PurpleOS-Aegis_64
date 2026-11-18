@@ -3,7 +3,7 @@
 **Version:** 1.0.0  
 **Target:** PurpleOS / Aegis64 Pure Bare-Metal Rust Kernel (`x86_64-unknown-none`)  
 **Design Baseline:** Project Looking Glass (`lg3d-core`) Modernization  
-**Reference Mockup:** `assets/purple_desktop_ui_final.jpg`  
+**Reference Mockup:** `assets/references/purple_desktop_ui_final.jpg`
 
 ---
 

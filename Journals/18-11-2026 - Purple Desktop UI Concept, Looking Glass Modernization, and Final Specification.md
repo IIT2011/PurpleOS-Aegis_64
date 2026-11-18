@@ -13,7 +13,7 @@ Following user directives to develop a native desktop interface for **PurpleOS /
 2. **Modernization**: Reimagined the early-2000s skeuomorphic, textured aesthetic (bulky bevels, brushed metal, Java 3D primitives) into a 2026 high-performance frosted glassmorphism UI ("Liquid Glassmorphism").
 3. **Clean-Room Licensing**: Maintained 100% clean-room isolation. Zero source code was copied from Looking Glass (GPLv2 Classpath); all logic and future rendering pipelines are designed from scratch in pure `#![no_std]` Rust.
 4. **Interactive Design Iteration**: Generated an initial high-fidelity concept mockup, reviewed user annotations marking elements for removal (top-left text menus and top-right telemetry pill buttons), and produced the final approved concept image.
-5. **Asset & Documentation Staging**: Committed the approved visual asset (`assets/purple_desktop_ui_final.jpg`) and technical architecture specification (`docs/PURPLE_DESKTOP_UI_SPECIFICATION.md`) to the repository, preparing the codebase for GUI testing on desktop workstations.
+5. **Asset & Documentation Staging**: Committed the approved visual asset (`assets/references/purple_desktop_ui_final.jpg`) and technical architecture specification (`docs/PURPLE_DESKTOP_UI_SPECIFICATION.md`) to the repository, preparing the codebase for GUI testing on desktop workstations.
 
 ---
 
@@ -42,6 +42,6 @@ The design iteration directly incorporated the user's marked feedback:
 
 ## 3. Staged Artifacts & Specifications
 
-1. **Design Mockup Asset**: Staged at [`assets/purple_desktop_ui_final.jpg`](file:///data/data/com.termux/files/home/OS%20Development/OS/assets/purple_desktop_ui_final.jpg).
+1. **Design Mockup Asset**: Staged at [`assets/references/purple_desktop_ui_final.jpg`](file:///data/data/com.termux/files/home/OS%20Development/OS/assets/references/purple_desktop_ui_final.jpg).
 2. **Technical Specification**: Authored [`docs/PURPLE_DESKTOP_UI_SPECIFICATION.md`](file:///data/data/com.termux/files/home/OS%20Development/OS/docs/PURPLE_DESKTOP_UI_SPECIFICATION.md) defining geometry, color tokens, compositor rendering passes, and client application targets.
 3. **Repository State**: Working tree ready for seamless continuation and GUI test harness deployment on desktop development environments.

@@ -26,8 +26,8 @@ impl CompositorPipeline {
             return;
         }
 
-        // Pass 1: Clean solid root compositor canvas
-        target.clear(COLOR_ROOT_CANVAS);
+        // Pass 1: Background-only wallpaper fitted to the active display surface
+        super::wallpaper::Wallpaper::render_to_surface(target);
 
         // Pass 2: Render Windows in Z-Order (ascending: lowest Z first, highest on top)
         Self::render_windows(target, windows);
