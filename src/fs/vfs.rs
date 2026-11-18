@@ -123,19 +123,66 @@ pub fn mkdir(path: &str) -> Result<(), &'static str> {
     if is_directory(p) {
         return Err("Directory already exists");
     }
-    let mut dirs = VFS_DIRS.lock();
-    for d in dirs.iter_mut() {
-        if !d.in_use {
-            d.path.fill(0);
-            let b = p.as_bytes();
-            let len = b.len().min(63);
-            d.path[..len].copy_from_slice(&b[..len]);
-            d.len = len;
-            d.in_use = true;
-            return Ok(());
+
+    // 1. If persistent storage filesystem is mounted, create persistent directory in PurpleFS on disk!
+    let disk_res = crate::kernel::storage::with_fs(|fs| {
+        fs.mkdir(p)
+    });
+
+    match disk_res {
+        Some(Ok(_ino)) => {
+            // Mirror to in-memory VFS_DIRS for fast lookup
+            let mut dirs = VFS_DIRS.lock();
+            for d in dirs.iter_mut() {
+                if !d.in_use {
+                    d.path.fill(0);
+                    let b = p.as_bytes();
+                    let len = b.len().min(63);
+                    d.path[..len].copy_from_slice(&b[..len]);
+                    d.len = len;
+                    d.in_use = true;
+                    break;
+                }
+            }
+            Ok(())
+        }
+        Some(Err(err)) => {
+            // If disk is read-only (e.g. before remount rw during tests), fall back to in-memory VFS_DIRS
+            if err == "Filesystem is mounted read-only" {
+                let mut dirs = VFS_DIRS.lock();
+                for d in dirs.iter_mut() {
+                    if !d.in_use {
+                        d.path.fill(0);
+                        let b = p.as_bytes();
+                        let len = b.len().min(63);
+                        d.path[..len].copy_from_slice(&b[..len]);
+                        d.len = len;
+                        d.in_use = true;
+                        return Ok(());
+                    }
+                }
+                Err("VFS directory table full (maximum 32 custom directories)")
+            } else {
+                Err(err)
+            }
+        }
+        None => {
+            // No persistent storage mounted, register in VFS_DIRS
+            let mut dirs = VFS_DIRS.lock();
+            for d in dirs.iter_mut() {
+                if !d.in_use {
+                    d.path.fill(0);
+                    let b = p.as_bytes();
+                    let len = b.len().min(63);
+                    d.path[..len].copy_from_slice(&b[..len]);
+                    d.len = len;
+                    d.in_use = true;
+                    return Ok(());
+                }
+            }
+            Err("VFS directory table full (maximum 32 custom directories)")
         }
     }
-    Err("VFS directory table full (maximum 32 custom directories)")
 }
 
 pub fn rmdir(path: &str) -> Result<(), &'static str> {
@@ -149,18 +196,45 @@ pub fn rmdir(path: &str) -> Result<(), &'static str> {
         }
         _ => {}
     }
-    let mut dirs = VFS_DIRS.lock();
-    for d in dirs.iter_mut() {
-        if d.in_use {
-            if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
-                if s == p {
-                    d.in_use = false;
-                    return Ok(());
+
+    // Clean up from in-memory VFS_DIRS if present
+    let mut found_in_memory = false;
+    {
+        let mut dirs = VFS_DIRS.lock();
+        for d in dirs.iter_mut() {
+            if d.in_use {
+                if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
+                    if s == p {
+                        d.in_use = false;
+                        found_in_memory = true;
+                    }
                 }
             }
         }
     }
-    Err("Directory not found")
+
+    // Remove from persistent PurpleFS on disk
+    let disk_res = crate::kernel::storage::with_fs(|fs| {
+        fs.rmdir(p)
+    });
+
+    match disk_res {
+        Some(Ok(())) => Ok(()),
+        Some(Err(err)) => {
+            if found_in_memory {
+                Ok(())
+            } else {
+                Err(err)
+            }
+        }
+        None => {
+            if found_in_memory {
+                Ok(())
+            } else {
+                Err("Directory not found")
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -752,7 +826,7 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                 cb("Users", 0, true);
                 cb("Recovery", 0, true);
 
-                // 3. User-created directories in VFS_DIRS
+                // 3. User-created directories in VFS_DIRS (if not already on disk)
                 {
                     let dirs = VFS_DIRS.lock();
                     for d in dirs.iter() {
@@ -760,7 +834,12 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                             if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
                                 if !s.contains('/') {
                                     if s != "dev" && s != "proc" && s != "tmp" && s != "Boot" && s != "System" && s != "Users" && s != "Recovery" {
-                                        cb(s, 0, true);
+                                        let on_disk = crate::kernel::storage::with_fs(|fs| {
+                                            fs.lookup(s).is_some()
+                                        }).unwrap_or(false);
+                                        if !on_disk {
+                                            cb(s, 0, true);
+                                        }
                                     }
                                 }
                             }
@@ -811,7 +890,7 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                     _ => {}
                 }
 
-                // Custom subdirectories in VFS_DIRS
+                // Custom subdirectories in VFS_DIRS (if not already on disk)
                 {
                     let dirs = VFS_DIRS.lock();
                     for d in dirs.iter() {
@@ -820,7 +899,12 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                                 if s.starts_with(clean_sub) && s.as_bytes().get(clean_sub.len()) == Some(&b'/') {
                                     let rel = &s[clean_sub.len() + 1..];
                                     if !rel.is_empty() && !rel.contains('/') {
-                                        cb(rel, 0, true);
+                                        let on_disk = crate::kernel::storage::with_fs(|fs| {
+                                            fs.lookup(s).is_some()
+                                        }).unwrap_or(false);
+                                        if !on_disk {
+                                            cb(rel, 0, true);
+                                        }
                                     }
                                 }
                             }

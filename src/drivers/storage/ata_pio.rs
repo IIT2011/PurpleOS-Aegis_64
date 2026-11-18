@@ -205,6 +205,7 @@ impl BlockDevice for AtaDevice {
                     buf[offset + i * 2] = (w & 0xFF) as u8;
                     buf[offset + i * 2 + 1] = (w >> 8) as u8;
                 }
+                let _ = inb(self.io_base + 7);
             }
         }
         BLOCK_DEV_OK
@@ -262,6 +263,7 @@ impl BlockDevice for AtaDevice {
                 if !self.wait_not_busy() {
                     return BLOCK_DEV_ERR_IO;
                 }
+                let _ = inb(self.io_base + 7);
             }
         }
         BLOCK_DEV_OK
@@ -277,6 +279,7 @@ impl BlockDevice for AtaDevice {
             outb(self.io_base + 7, 0xE7); // CACHE FLUSH
             for _ in 0..4 { let _ = inb(self.ctrl_base); }
             let _ = self.wait_not_busy();
+            let _ = inb(self.io_base + 7);
         }
         BLOCK_DEV_OK
     }

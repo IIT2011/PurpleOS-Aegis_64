@@ -289,32 +289,24 @@ impl<'a> PurpleFsV2<'a> {
 
         let mut off = 0;
         let mut slot_found = false;
-        while off + 32 <= 4096 {
+        let b = filename.as_bytes();
+        let name_len = b.len().min(55);
+        let rec_len = if name_len > 23 { 64u16 } else { 32u16 };
+
+        while off + (rec_len as usize) <= 4096 {
             let ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
-            let rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
-            if ino == 0 {
-                let b = filename.as_bytes();
-                let len = b.len().min(24);
+            let cur_rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
+            if ino == 0 || cur_rec_len == 0 {
                 dir_block[off..off + 4].copy_from_slice(&new_ino.to_le_bytes());
-                dir_block[off + 4..off + 6].copy_from_slice(&32u16.to_le_bytes());
-                dir_block[off + 6] = len as u8;
+                dir_block[off + 4..off + 6].copy_from_slice(&rec_len.to_le_bytes());
+                dir_block[off + 6] = name_len as u8;
                 dir_block[off + 7] = 1; // regular file
-                dir_block[off + 8..off + 8 + len].copy_from_slice(&b[..len]);
+                dir_block[off + 8..off + (rec_len as usize)].fill(0);
+                dir_block[off + 8..off + 8 + name_len].copy_from_slice(&b[..name_len]);
                 slot_found = true;
                 break;
             }
-            if rec_len == 0 {
-                let b = filename.as_bytes();
-                let len = b.len().min(24);
-                dir_block[off..off + 4].copy_from_slice(&new_ino.to_le_bytes());
-                dir_block[off + 4..off + 6].copy_from_slice(&32u16.to_le_bytes());
-                dir_block[off + 6] = len as u8;
-                dir_block[off + 7] = 1; // regular file
-                dir_block[off + 8..off + 8 + len].copy_from_slice(&b[..len]);
-                slot_found = true;
-                break;
-            }
-            off += rec_len.max(32);
+            off += cur_rec_len.max(32);
         }
 
         if !slot_found {
@@ -323,6 +315,138 @@ impl<'a> PurpleFsV2<'a> {
 
         self.write_fs_block(10, &dir_block)?;
         Ok(new_ino)
+    }
+
+    pub fn mkdir(&mut self, dirname: &str) -> Result<u32, &'static str> {
+        if self.read_only {
+            return Err("Filesystem is mounted read-only");
+        }
+        let clean = dirname.trim_start_matches('/').trim_end_matches('/');
+        if clean.is_empty() {
+            return Err("Cannot create directory with empty name");
+        }
+        if self.lookup(clean).is_some() {
+            return Err("Directory already exists");
+        }
+
+        // Find free inode (scan inodes 2..256)
+        let mut free_ino = None;
+        let mut target_blk = 0;
+        let mut target_ino_off = 0;
+        let mut inode_block = [0u8; 4096];
+
+        for ino in 2..256 {
+            let blk = 2 + (ino / 32);
+            let off = ((ino % 32) * 128) as usize;
+            if self.read_fs_block(blk, &mut inode_block).is_ok() {
+                let mode = u16::from_le_bytes(inode_block[off..off + 2].try_into().unwrap());
+                if mode == 0 {
+                    free_ino = Some(ino);
+                    target_blk = blk;
+                    target_ino_off = off;
+                    break;
+                }
+            }
+        }
+
+        let new_ino = free_ino.ok_or("No free inodes available")?;
+
+        // Initialize new directory inode (Directory, 0755, size 4096, links 2)
+        inode_block[target_ino_off..target_ino_off + 2].copy_from_slice(&0x41EDu16.to_le_bytes());
+        inode_block[target_ino_off + 2..target_ino_off + 4].copy_from_slice(&0u16.to_le_bytes()); // uid=0
+        inode_block[target_ino_off + 4..target_ino_off + 6].copy_from_slice(&0u16.to_le_bytes()); // gid=0
+        inode_block[target_ino_off + 6..target_ino_off + 8].copy_from_slice(&2u16.to_le_bytes()); // links=2
+        inode_block[target_ino_off + 8..target_ino_off + 16].copy_from_slice(&4096u64.to_le_bytes()); // size=4096
+        self.write_fs_block(target_blk, &inode_block)?;
+
+        // Add dirent into root dir block (block 10)
+        let mut dir_block = [0u8; 4096];
+        self.read_fs_block(10, &mut dir_block)?;
+
+        let mut off = 0;
+        let mut slot_found = false;
+        let b = clean.as_bytes();
+        let name_len = b.len().min(55);
+        let rec_len = if name_len > 23 { 64u16 } else { 32u16 };
+
+        while off + (rec_len as usize) <= 4096 {
+            let ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
+            let cur_rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
+            if ino == 0 || cur_rec_len == 0 {
+                dir_block[off..off + 4].copy_from_slice(&new_ino.to_le_bytes());
+                dir_block[off + 4..off + 6].copy_from_slice(&rec_len.to_le_bytes());
+                dir_block[off + 6] = name_len as u8;
+                dir_block[off + 7] = 2; // Directory file type
+                dir_block[off + 8..off + (rec_len as usize)].fill(0);
+                dir_block[off + 8..off + 8 + name_len].copy_from_slice(&b[..name_len]);
+                slot_found = true;
+                break;
+            }
+            off += cur_rec_len.max(32);
+        }
+
+        if !slot_found {
+            return Err("Root directory full");
+        }
+
+        self.write_fs_block(10, &dir_block)?;
+        Ok(new_ino)
+    }
+
+    pub fn rmdir(&mut self, dirname: &str) -> Result<(), &'static str> {
+        if self.read_only {
+            return Err("Filesystem is mounted read-only");
+        }
+        let clean = dirname.trim_start_matches('/').trim_end_matches('/');
+        let ino = self.lookup(clean).ok_or("Directory not found")?;
+
+        // Read inode to verify it is a directory
+        let blk_idx = 2 + (ino / 32);
+        let ino_off = ((ino % 32) * 128) as usize;
+        let mut inode_block = [0u8; 4096];
+        self.read_fs_block(blk_idx, &mut inode_block)?;
+
+        let mode = u16::from_le_bytes(inode_block[ino_off..ino_off + 2].try_into().unwrap());
+        if (mode & 0xF000) != 0x4000 {
+            return Err("Not a directory");
+        }
+
+        // Check if directory has any children in the filesystem
+        let mut has_children = false;
+        self.list_files(|_child_ino, _ftype, _fsize, name| {
+            if name.starts_with(clean) && name.as_bytes().get(clean.len()) == Some(&b'/') {
+                has_children = true;
+            }
+        });
+        if has_children {
+            return Err("Directory not empty");
+        }
+
+        // Clear inode
+        inode_block[ino_off..ino_off + 128].fill(0);
+        self.write_fs_block(blk_idx, &inode_block)?;
+
+        // Remove dirent from root dir block (block 10)
+        let mut dir_block = [0u8; 4096];
+        self.read_fs_block(10, &mut dir_block)?;
+
+        let mut off = 0;
+        while off + 32 <= 4096 {
+            let d_ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
+            let rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
+            if d_ino == ino {
+                let clear_len = rec_len.max(32).min(4096 - off);
+                dir_block[off..off + clear_len].fill(0);
+                break;
+            }
+            if rec_len == 0 {
+                break;
+            }
+            off += rec_len.max(32);
+        }
+
+        self.write_fs_block(10, &dir_block)?;
+        Ok(())
     }
 
     pub fn write_file(&mut self, filename: &str, content: &[u8]) -> Result<usize, &'static str> {
