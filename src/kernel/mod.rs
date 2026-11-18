@@ -12,3 +12,4 @@ pub mod posix;
 pub mod shell;
 pub mod uaccess;
 pub mod ring3;
+pub mod cmddb;

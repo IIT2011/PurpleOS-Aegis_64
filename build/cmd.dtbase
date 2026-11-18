@@ -1,0 +1,718 @@
+# PURPLEOS COMMAND DATABASE
+# SHA256: 1e577c200b099ef6544a677fd8bda679f2226044da80010e63523f24e06fb0eb
+# CANONICAL PATH: /System/CLI/cmd.dtbase
+# COMMAND COUNT: 119
+
+[cmd:cd]
+cat=Navigation
+target=ring0:cd
+desc=Change current working directory
+usage=cd <path>
+
+[cmd:chdir]
+cat=Navigation
+target=ring0:cd
+desc=Change current working directory
+usage=chdir <path>
+
+[cmd:pwd]
+cat=Navigation
+target=ring0:pwd
+desc=Print current working directory
+usage=pwd
+
+[cmd:dir]
+cat=Navigation
+target=ring0:dir
+desc=MS-DOS formatted directory listing
+usage=dir [path]
+
+[cmd:ls]
+cat=Navigation
+target=ring0:ls
+desc=Linux formatted directory listing
+usage=ls [-l] [path]
+
+[cmd:tree]
+cat=Navigation
+target=ring0:tree
+desc=Display visual directory hierarchy
+usage=tree
+
+[cmd:stat]
+cat=Navigation
+target=ring0:stat
+desc=Display file status and metadata
+usage=stat <file>
+
+[cmd:cat]
+cat=FileOps
+target=ring0:cat
+desc=Display file contents
+usage=cat <file>
+
+[cmd:type]
+cat=FileOps
+target=ring0:cat
+desc=Display file contents (MS-DOS)
+usage=type <file>
+
+[cmd:read]
+cat=FileOps
+target=ring0:cat
+desc=Read and display file contents
+usage=read <file>
+
+[cmd:peek]
+cat=FileOps
+target=ring0:peek
+desc=Peek at beginning of file
+usage=peek <file>
+
+[cmd:head]
+cat=FileOps
+target=ring0:head
+desc=Display first lines of file
+usage=head [n] <file>
+
+[cmd:tail]
+cat=FileOps
+target=ring0:tail
+desc=Display last lines of file
+usage=tail [n] <file>
+
+[cmd:grep]
+cat=FileOps
+target=ring0:grep
+desc=Search for pattern in file or stream
+usage=grep <pattern> [file]
+
+[cmd:find]
+cat=FileOps
+target=ring0:grep
+desc=Find pattern in file or stream
+usage=find <pattern> [file]
+
+[cmd:wc]
+cat=FileOps
+target=ring0:wc
+desc=Count lines words and bytes in file
+usage=wc <file>
+
+[cmd:dump]
+cat=FileOps
+target=ring0:dump
+desc=16-byte hexadecimal memory or file dump
+usage=dump <file|device>
+
+[cmd:hex]
+cat=FileOps
+target=ring0:dump
+desc=Hexadecimal file dump
+usage=hex <file>
+
+[cmd:xxd]
+cat=FileOps
+target=ring0:dump
+desc=XXD compatible hex dump
+usage=xxd <file>
+
+[cmd:touch]
+cat=FileOps
+target=ring0:touch
+desc=Create empty file or update timestamp
+usage=touch <file>
+
+[cmd:create]
+cat=FileOps
+target=ring0:touch
+desc=Create new empty file
+usage=create <file>
+
+[cmd:write]
+cat=FileOps
+target=ring0:write
+desc=Write text to file (overwrite)
+usage=write <file> <text>
+
+[cmd:append]
+cat=FileOps
+target=ring0:append
+desc=Append text to file
+usage=append <file> <text>
+
+[cmd:echo]
+cat=FileOps
+target=ring0:echo
+desc=Display line of text or variable
+usage=echo [text]
+
+[cmd:copy]
+cat=FileOps
+target=ring0:copy
+desc=Copy file to destination
+usage=copy <src> <dst>
+
+[cmd:cp]
+cat=FileOps
+target=ring0:copy
+desc=Copy file (POSIX cp)
+usage=cp <src> <dst>
+
+[cmd:move]
+cat=FileOps
+target=ring0:move
+desc=Move or rename file
+usage=move <src> <dst>
+
+[cmd:mv]
+cat=FileOps
+target=ring0:move
+desc=Move or rename file (POSIX mv)
+usage=mv <src> <dst>
+
+[cmd:del]
+cat=FileOps
+target=ring0:del
+desc=Delete file from filesystem
+usage=del <file>
+
+[cmd:rm]
+cat=FileOps
+target=ring0:del
+desc=Remove file (POSIX rm)
+usage=rm <file>
+
+[cmd:delete]
+cat=FileOps
+target=ring0:del
+desc=Delete file
+usage=delete <file>
+
+[cmd:mkdir]
+cat=FileOps
+target=ring0:mkdir
+desc=Create new directory
+usage=mkdir <dir>
+
+[cmd:md]
+cat=FileOps
+target=ring0:mkdir
+desc=Make directory (MS-DOS md)
+usage=md <dir>
+
+[cmd:rmdir]
+cat=FileOps
+target=ring0:rmdir
+desc=Remove empty directory
+usage=rmdir <dir>
+
+[cmd:rd]
+cat=FileOps
+target=ring0:rmdir
+desc=Remove directory (MS-DOS rd)
+usage=rd <dir>
+
+[cmd:disks]
+cat=Storage
+target=ring0:disks
+desc=List physical storage block devices
+usage=disks
+
+[cmd:df]
+cat=Storage
+target=ring0:df
+desc=Display filesystem disk space usage
+usage=df
+
+[cmd:filesystem]
+cat=Storage
+target=ring0:df
+desc=Filesystem status and superblock
+usage=filesystem
+
+[cmd:mount]
+cat=Storage
+target=ring0:mount
+desc=Display active VFS mountpoints
+usage=mount
+
+[cmd:sync]
+cat=Storage
+target=ring0:sync
+desc=Synchronize cached disk writes to storage
+usage=sync
+
+[cmd:remount]
+cat=Storage
+target=ring0:remount
+desc=Remount filesystem read-only or read-write
+usage=remount <ro|rw>
+
+[cmd:devices]
+cat=Storage
+target=ring0:devices
+desc=List enumerated hardware peripherals
+usage=devices
+
+[cmd:hwinfo]
+cat=Storage
+target=ring0:devices
+desc=Hardware peripheral inventory
+usage=hwinfo
+
+[cmd:pci]
+cat=Storage
+target=ring0:pci
+desc=Scan and list PCI bus devices
+usage=pci
+
+[cmd:lspci]
+cat=Storage
+target=ring0:pci
+desc=List PCI devices (POSIX lspci)
+usage=lspci
+
+[cmd:mouse]
+cat=Storage
+target=ring0:mouse
+desc=PS/2 mouse controller status
+usage=mouse
+
+[cmd:video]
+cat=Storage
+target=ring0:video
+desc=GPU framebuffer video mode status
+usage=video
+
+[cmd:gpu3d]
+cat=Storage
+target=ring0:gpu3d
+desc=Hardware 3D command processor status
+usage=gpu3d
+
+[cmd:3d]
+cat=Storage
+target=ring0:gpu3d
+desc=3D command processor info
+usage=3d
+
+[cmd:ifconfig]
+cat=Network
+target=ring0:ifconfig
+desc=Network interface configuration and stats
+usage=ifconfig
+
+[cmd:ping]
+cat=Network
+target=ring0:ping
+desc=Send ICMP ECHO_REQUEST to network hosts
+usage=ping <ip>
+
+[cmd:arp]
+cat=Network
+target=ring0:arp
+desc=Display Address Resolution Protocol cache
+usage=arp
+
+[cmd:modules]
+cat=System
+target=ring0:modules
+desc=List loaded APDRV kernel driver modules
+usage=modules
+
+[cmd:lsmod]
+cat=System
+target=ring0:modules
+desc=List kernel modules (POSIX lsmod)
+usage=lsmod
+
+[cmd:insmod]
+cat=System
+target=ring0:insmod
+desc=Load APDRV kernel driver module
+usage=insmod <module>
+
+[cmd:ksym]
+cat=System
+target=ring0:ksym
+desc=Display kernel symbol table exports
+usage=ksym
+
+[cmd:smp]
+cat=System
+target=ring0:smp
+desc=Symmetric multiprocessing core status
+usage=smp
+
+[cmd:smptest]
+cat=System
+target=ring0:smptest
+desc=Multi-core inter-processor interrupt test
+usage=smptest
+
+[cmd:tasks]
+cat=System
+target=ring0:tasks
+desc=Process and thread task manager
+usage=tasks
+
+[cmd:ps]
+cat=System
+target=ring0:tasks
+desc=List active tasks and CPU affinity
+usage=ps
+
+[cmd:posix]
+cat=System
+target=ring0:posix
+desc=POSIX subsystem status and test suite
+usage=posix [status|test]
+
+[cmd:native]
+cat=System
+target=ring0:native
+desc=Native PurpleOS 68-syscall catalog and test
+usage=native [status|test|list]
+
+[cmd:mem]
+cat=System
+target=ring0:mem
+desc=Physical memory frame allocator and heap status
+usage=mem
+
+[cmd:memory]
+cat=System
+target=ring0:mem
+desc=System memory statistics
+usage=memory
+
+[cmd:free]
+cat=System
+target=ring0:mem
+desc=Free physical and heap memory
+usage=free
+
+[cmd:cpuinfo]
+cat=System
+target=ring0:cpuinfo
+desc=CPU features and topology
+usage=cpuinfo
+
+[cmd:sysinfo]
+cat=System
+target=ring0:sysinfo
+desc=System hardware and kernel architecture summary
+usage=sysinfo
+
+[cmd:uptime]
+cat=System
+target=ring0:uptime
+desc=System running time and PIT counter
+usage=uptime
+
+[cmd:date]
+cat=System
+target=ring0:date
+desc=Current date from CMOS RTC
+usage=date
+
+[cmd:time]
+cat=System
+target=ring0:time
+desc=Current time from CMOS RTC
+usage=time
+
+[cmd:ver]
+cat=System
+target=ring0:ver
+desc=Operating system kernel version
+usage=ver
+
+[cmd:version]
+cat=System
+target=ring0:ver
+desc=Kernel version details
+usage=version
+
+[cmd:uname]
+cat=System
+target=ring0:uname
+desc=Print operating system name and architecture
+usage=uname [-a]
+
+[cmd:whoami]
+cat=System
+target=ring0:whoami
+desc=Print active user identity
+usage=whoami
+
+[cmd:id]
+cat=System
+target=ring0:whoami
+desc=Print user and group identity
+usage=id
+
+[cmd:clear]
+cat=System
+target=ring0:clear
+desc=Clear console display buffer
+usage=clear
+
+[cmd:cls]
+cat=System
+target=ring0:clear
+desc=Clear console screen (MS-DOS cls)
+usage=cls
+
+[cmd:reboot]
+cat=System
+target=ring0:reboot
+desc=Reboot computer via 8042 keyboard controller
+usage=reboot
+
+[cmd:restart]
+cat=System
+target=ring0:reboot
+desc=Restart system
+usage=restart
+
+[cmd:exit]
+cat=System
+target=ring0:exit
+desc=Exit current shell session
+usage=exit
+
+[cmd:panic]
+cat=System
+target=ring0:panic
+desc=Trigger diagnostic kernel panic
+usage=panic
+
+[cmd:aegisdetect]
+cat=Security
+target=ring0:aegisdetect
+desc=Verify system components against SHA-256 baseline
+usage=aegisdetect
+
+[cmd:verify]
+cat=Security
+target=ring0:aegisdetect
+desc=Cryptographic integrity verification
+usage=verify security
+
+[cmd:verify security]
+cat=Security
+target=ring0:aegisdetect
+desc=Full SHA-256 baseline integrity verification
+usage=verify security
+
+[cmd:ring3]
+cat=Userland
+target=ring3:control
+desc=Ring 3 user mode control and diagnostics
+usage=ring3 [info|test|fault]
+
+[cmd:userland]
+cat=Userland
+target=ring3:control
+desc=Userland subsystem control
+usage=userland [info|test|fault]
+
+[cmd:help]
+cat=CLI
+target=ring0:help
+desc=Display categorized commands and command usage manual
+usage=help [command]
+
+[cmd:cmd]
+cat=CLI
+target=ring0:cmd
+desc=Command database manager from /System/CLI/cmd.dtbase
+usage=cmd [reload|verify|info]
+
+[cmd:history]
+cat=CLI
+target=ring0:history
+desc=Display command execution history
+usage=history
+
+[cmd:alias]
+cat=CLI
+target=ring0:alias
+desc=Define or display command aliases
+usage=alias [name=command]
+
+[cmd:unalias]
+cat=CLI
+target=ring0:unalias
+desc=Remove defined command alias
+usage=unalias <name>
+
+[cmd:export]
+cat=CLI
+target=ring0:export
+desc=Set or display shell environment variables
+usage=export [VAR=val]
+
+[cmd:set]
+cat=CLI
+target=ring0:export
+desc=Set environment variable
+usage=set [VAR=val]
+
+[cmd:env]
+cat=CLI
+target=ring0:env
+desc=Print all exported environment variables
+usage=env
+
+[cmd:calc]
+cat=CLI
+target=ring0:calc
+desc=Mathematical and bitwise hexadecimal calculator
+usage=calc <expression>
+
+[cmd:expr]
+cat=CLI
+target=ring0:calc
+desc=Evaluate arithmetic expression
+usage=expr <expression>
+
+[cmd:which]
+cat=CLI
+target=ring0:which
+desc=Locate command in /System/CLI/cmd.dtbase
+usage=which <command>
+
+[cmd:edit]
+cat=CLI
+target=ring0:edit
+desc=In-terminal visual multi-line text editor
+usage=edit <file>
+
+[cmd:nano]
+cat=CLI
+target=ring0:edit
+desc=Text editor (nano alias)
+usage=nano <file>
+
+[cmd:source]
+cat=CLI
+target=ring0:source
+desc=Execute commands from batch script file
+usage=source <script.sh>
+
+[cmd:run]
+cat=CLI
+target=ring0:source
+desc=Run script batch file
+usage=run <script.sh>
+
+[cmd:batch]
+cat=CLI
+target=ring0:source
+desc=Batch file runner
+usage=batch <script.bat>
+
+[cmd:sleep]
+cat=CLI
+target=ring0:sleep
+desc=Delay execution for specified seconds
+usage=sleep <seconds>
+
+[cmd:seq]
+cat=CLI
+target=ring0:seq
+desc=Print sequence of numbers
+usage=seq <first> [incr] <last>
+
+[cmd:fortune]
+cat=CLI
+target=ring0:fortune
+desc=Display random operating system wisdom or tip
+usage=fortune
+
+[cmd:tip]
+cat=CLI
+target=ring0:fortune
+desc=Display productivity tip
+usage=tip
+
+[cmd:theme]
+cat=CLI
+target=ring0:theme
+desc=Display or switch visual console color theme
+usage=theme [name]
+
+[cmd:color]
+cat=CLI
+target=ring0:color
+desc=Change console text color
+usage=color <hex>
+
+[cmd:title]
+cat=CLI
+target=ring0:title
+desc=Set terminal window title
+usage=title <text>
+
+[cmd:jobs]
+cat=CLI
+target=ring0:jobs
+desc=List active background jobs and tasks
+usage=jobs
+
+[cmd:start]
+cat=CLI
+target=ring0:start
+desc=Launch command or task in background
+usage=start <command>
+
+[cmd:kill]
+cat=CLI
+target=ring0:kill
+desc=Terminate running task by TID
+usage=kill <tid>
+
+[cmd:top]
+cat=CLI
+target=ring0:top
+desc=Display real-time task manager and CPU load
+usage=top
+
+[cmd:monitor]
+cat=CLI
+target=ring0:top
+desc=System performance monitor
+usage=monitor
+
+[cmd:bench]
+cat=CLI
+target=ring0:bench
+desc=Run CPU and memory performance benchmark
+usage=bench
+
+[cmd:sysbench]
+cat=CLI
+target=ring0:bench
+desc=Run full system benchmark suite
+usage=sysbench
+
+[cmd:view]
+cat=CLI
+target=ring0:view
+desc=View file with scroll pager
+usage=view <file>
+
+[cmd:pager]
+cat=CLI
+target=ring0:view
+desc=Terminal pager for text viewing
+usage=pager <file>
+
+[cmd:prompt]
+cat=CLI
+target=ring0:prompt
+desc=Customize interactive shell prompt format
+usage=prompt [format]

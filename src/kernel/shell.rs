@@ -228,24 +228,9 @@ pub const MAX_ENV_VARS: usize = 16;
 pub const MAX_EDITOR_LINES: usize = 64;
 pub const MAX_JOBS: usize = 8;
 
-pub const COMMAND_LIST: &[&str] = &[
-    "help", "ver", "version", "uname", "whoami", "id", "date", "time",
-    "sysinfo", "cpuinfo", "mem", "memory", "free", "uptime", "pwd",
-    "dir", "ls", "tree", "stat", "cat", "type", "read", "peek",
-    "head", "tail", "grep", "find", "wc", "dump", "hex", "xxd",
-    "touch", "write", "append", "echo", "copy", "cp", "move", "mv",
-    "del", "rm", "delete", "mkdir", "rmdir", "remount", "disks",
-    "df", "filesystem", "mount", "sync", "devices", "hwinfo", "pci",
-    "lspci", "mouse", "video", "gpu3d", "3d", "ifconfig", "ping",
-    "arp", "modules", "lsmod", "insmod", "ksym", "aegisdetect",
-    "verify security", "smp", "smptest", "tasks", "ps", "posix",
-    "native", "clear", "cls", "history", "alias", "unalias", "export",
-    "set", "env", "calc", "expr", "which", "edit", "nano", "source",
-    "run", "batch", "sleep", "seq", "fortune", "tip", "reboot",
-    "restart", "exit", "theme", "color", "title", "jobs", "start",
-    "kill", "top", "monitor", "bench", "sysbench", "view", "pager", "prompt",
-    "ring3", "userland"
-];
+// All commands are defined dynamically in and loaded from /System/CLI/cmd.dtbase
+// Hardcoded command lists have been eliminated from kernel space.
+pub use crate::kernel::cmddb::CMD_DATABASE_PATH;
 
 #[derive(Copy, Clone)]
 pub struct ShellJob {
@@ -612,11 +597,17 @@ impl Shell {
         let mut matches: [&str; 32] = [""; 32];
         let mut match_count = 0usize;
 
+        let mut match_names: [[u8; crate::kernel::cmddb::MAX_NAME_LEN]; 32] = [[0; crate::kernel::cmddb::MAX_NAME_LEN]; 32];
+        let mut match_lens: [usize; 32] = [0; 32];
+
         if start == 0 {
-            for &cmd in COMMAND_LIST {
-                if cmd.starts_with(prefix) && match_count < matches.len() {
-                    matches[match_count] = cmd;
-                    match_count += 1;
+            let n = crate::kernel::cmddb::find_completions(prefix, &mut match_names, &mut match_lens);
+            for i in 0..n {
+                if match_count < matches.len() {
+                    if let Ok(s) = core::str::from_utf8(&match_names[i][..match_lens[i]]) {
+                        matches[match_count] = s;
+                        match_count += 1;
+                    }
                 }
             }
             for i in 0..self.alias_count {
@@ -1333,72 +1324,16 @@ impl Shell {
 
         match cmd {
             "help" | "?" => {
-                serial::println("\nAegisShell / Purple Shell Commands (MS-DOS & Linux POSIX Hybrid Engine):");
-                serial::println("  Directory & Navigation:");
-                serial::println("    cd <path> / chdir <path>       Change working directory");
-                serial::println("    pwd                            Print current working directory");
-                serial::println("    dir [path]                     MS-DOS formatted directory listing");
-                serial::println("    ls [-l] [path] / list files    Linux formatted directory listing");
-                serial::println("    tree                           Display visual directory hierarchy");
-                serial::println("    stat <file>                    Display detailed file metadata");
-                serial::println("\n  File Operations:");
-                serial::println("    cat <file> / type <file>       Display file contents via VFS");
-                serial::println("    head [n] <file> / tail [n]     Show first or last lines of file");
-                serial::println("    copy <src> [to] <dst> / cp     Copy file across VFS mountpoints");
-                serial::println("    move <src> [to] <dst> / mv/ren Move/rename file");
-                serial::println("    del <file> / rm <file> / erase Delete file from filesystem");
-                serial::println("    touch <file> / create <file>   Create new empty file");
-                serial::println("    write [to] <file> <text>       Write text into file");
-                serial::println("    append [to] <file> <text>      Append text into file");
-                serial::println("    md <dir> / mkdir <dir>         Create directory");
-                serial::println("    rd <dir> / rmdir <dir>         Remove directory");
-                serial::println("    dump <file|device> / hex / xxd 16-byte hex + ASCII memory dump");
-                serial::println("    grep <pattern> <file> / find   Search for text patterns");
-                serial::println("    wc <file>                      Count lines, words, and bytes");
-                serial::println("\n  Storage & Hardware:");
-                serial::println("    disks / show disks             Display /ssd, /hdd, /usb, /sdxc, /sdhc");
-                serial::println("    df / filesystem status         Display filesystem free/used capacity");
-                serial::println("    mount                          List active VFS mountpoints");
-                serial::println("    sync                           Commit filesystem transactions");
-                serial::println("    remount <ro|rw>                Toggle read-only / read-write mode");
-                serial::println("    pci / lspci, devices           Hardware device inventory");
-                serial::println("    ifconfig / ip / show network   Network interface status");
-                serial::println("    arp / show arp                 Display ARP translation cache");
-                serial::println("    ping <ip> / ping to <ip>       ICMP network echo ping");
-                serial::println("\n  System & Status:");
-                serial::println("    ver / version / uname -a       Operating system version");
-                serial::println("    date / time / show time        CMOS Real-Time Clock (RTC)");
-                serial::println("    mem / free / memory            Physical memory & heap status");
-                serial::println("    tasks / ps                     Process table & CPU affinity");
-                serial::println("    posix [status|test]            POSIX subsystem status & 12-test validation suite");
-                serial::println("    native [status|test|list]      Native PurpleOS 68-syscall engine & 10-test suite");
-                serial::println("    whoami / id                    Current user security level");
-                serial::println("    clear / cls                    Clear console display");
-                serial::println("    reboot / restart               Reboot hardware via 8042");
-                serial::println("    verify security / aegisdetect  SHA-256 baseline verification");
-                serial::println("\n  CLI Enhancements & Quality of Life:");
-                serial::println("    history                        View command history ring (use Up/Down arrows)");
-                serial::println("    alias [name=cmd] / unalias     Create, view, or remove command shortcuts");
-                serial::println("    export [KEY=val] / env / set   Manage environment variables ($VAR expansion)");
-                serial::println("    calc <expr> / expr <expr>      Mathematical & bitwise hexadecimal calculator");
-                serial::println("    which <cmd>                    Inspect if command is builtin, alias, or file");
-                serial::println("    edit <file>                    PurpleOS visual text editor (Ctrl+S save, Ctrl+Q exit)");
-                serial::println("    view <file> / pager <file>     Display paginated file with line numbers");
-                serial::println("    theme [name]                   Switch console theme (purple, matrix, amber, classic, cyan)");
-                serial::println("    color <fg> [bg]                Customize console text and background colors");
-                serial::println("    title <text>                   Set custom console status bar title");
-                serial::println("    jobs                           List active background tasks");
-                serial::println("    start <cmd> (or <cmd> &)       Spawn asynchronous task in background");
-                serial::println("    kill <id> / stop <id>          Terminate background task by job/task ID");
-                serial::println("    top / monitor                  Real-time system dashboard (CPU, PMM, Heap, Tasks)");
-                serial::println("    bench / sysbench               Native bare-metal performance benchmark");
-                serial::println("    prompt <fmt>                   Customize shell prompt (or 'prompt default')");
-                serial::println("    source <file> / run <file>     Execute shell script batch file (.sh/.bat)");
-                serial::println("    sleep <seconds>                Delay execution for specified seconds");
-                serial::println("    seq <start> [step] <end>       Generate sequence of numbers");
-                serial::println("    fortune / tip                  Display system tips & kernel facts");
-                serial::println("    cmd1 | cmd2                    Pipe stdout of cmd1 to cmd2 (grep, wc, head, tail)");
-                serial::println("    cmd > file / cmd >> file       Redirect command output to file\n");
+                let target = parts.next().unwrap_or("");
+                if target.is_empty() {
+                    crate::kernel::cmddb::print_categorized_help();
+                } else {
+                    if !crate::kernel::cmddb::print_command_help(target) {
+                        serial::print("No manual entry for '");
+                        serial::print(target);
+                        serial::println("' in /System/CLI/cmd.dtbase.");
+                    }
+                }
             }
 
             // Navigation: cd / chdir
@@ -1962,6 +1897,61 @@ impl Shell {
                     }
                 }
             }
+            "cmd" => {
+                let sub = parts.next().unwrap_or("info");
+                match sub {
+                    "reload" => {
+                        match crate::kernel::cmddb::reload() {
+                            Ok(count) => {
+                                serial::print("[CMDDB] Successfully reloaded ");
+                                serial::print_u64(count as u64);
+                                serial::println(" commands from /System/CLI/cmd.dtbase.");
+                            }
+                            Err(e) => {
+                                serial::print("[CMDDB] Reload error: ");
+                                serial::println(e);
+                            }
+                        }
+                    }
+                    "verify" => {
+                        if crate::kernel::cmddb::verify_integrity() {
+                            serial::println("[CMDDB] /System/CLI/cmd.dtbase SHA-256 Integrity: 100% VERIFIED.");
+                        } else {
+                            serial::println("[CMDDB] /System/CLI/cmd.dtbase SHA-256 Integrity: COMPROMISED / MISMATCH.");
+                        }
+                    }
+                    "info" => {
+                        let target = parts.next().unwrap_or("");
+                        if target.is_empty() {
+                            serial::println("=======================================================================");
+                            serial::println("  PurpleOS Command Database Subsystem (/System/CLI/cmd.dtbase)");
+                            serial::println("=======================================================================");
+                            serial::print("  Database Path:     ");
+                            serial::println(crate::kernel::cmddb::CMD_DATABASE_PATH);
+                            serial::print("  Loaded Commands:   ");
+                            serial::print_u64(crate::kernel::cmddb::count() as u64);
+                            serial::println("");
+                            serial::print("  SHA-256 Verified:  ");
+                            if crate::kernel::cmddb::is_verified() {
+                                serial::println("YES (Cryptographically Authenticated)");
+                            } else {
+                                serial::println("NO (Integrity check failed)");
+                            }
+                            serial::println("  Subcommands:       cmd reload, cmd verify, cmd info [command]");
+                            serial::println("=======================================================================");
+                        } else {
+                            if !crate::kernel::cmddb::print_command_help(target) {
+                                serial::print("Command '");
+                                serial::print(target);
+                                serial::println("' not found in /System/CLI/cmd.dtbase.");
+                            }
+                        }
+                    }
+                    _ => {
+                        serial::println("Usage: cmd [reload|verify|info [command]]");
+                    }
+                }
+            }
             "ksym" => self.show_symbols(),
 
             // Console & System Control
@@ -2195,12 +2185,14 @@ impl Shell {
             serial::println("Usage: which <command>");
             return;
         }
-        for &c in COMMAND_LIST {
-            if c == cmd {
-                serial::print(cmd);
-                serial::println(": shell builtin command");
-                return;
+        if let Some(entry) = crate::kernel::cmddb::lookup(cmd) {
+            serial::print(cmd);
+            if entry.is_ring3() {
+                serial::println(": Ring 3 user mode application (defined in /System/CLI/cmd.dtbase)");
+            } else {
+                serial::println(": shell builtin command (defined in /System/CLI/cmd.dtbase)");
             }
+            return;
         }
         if let Some(target) = self.lookup_alias(cmd) {
             serial::print(cmd);

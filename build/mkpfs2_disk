@@ -134,11 +134,22 @@ def build_gpt_disk(disk_path, total_disk_sectors=2097152): # 1024 MiB
         e1000_path = "build/e1000.apdrv"
     e1000_data = open(e1000_path, "rb").read() if os.path.exists(e1000_path) else b"APDRV100"
 
+    cmd_dtbase_path = "build/cmd.dtbase"
+    if not os.path.exists(cmd_dtbase_path):
+        cmd_dtbase_path = os.path.join(os.path.dirname(__file__), "cmd.dtbase")
+    if not os.path.exists(cmd_dtbase_path):
+        import subprocess
+        script_path = os.path.join(os.path.dirname(__file__), "../scripts/generate_cmd_dtbase.py")
+        subprocess.check_call([sys.executable, script_path, cmd_dtbase_path])
+    cmd_dtbase_data = open(cmd_dtbase_path, "rb").read() if os.path.exists(cmd_dtbase_path) else b""
+
     files = {
         "welcome.txt": b"Welcome to Purple OS / Aegis64 Native Filesystem!\n",
         "version.txt": b"Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)\n",
         "motd": b"Message of the Day: Aegis64 Pure Rust Operational.\n",
         "e1000.apdrv": e1000_data,
+        "System/CLI/cmd.dtbase": cmd_dtbase_data,
+        "cmd.dtbase": cmd_dtbase_data,
     }
 
     # Seed unified category modules
