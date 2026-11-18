@@ -277,3 +277,41 @@ pub fn get_device(index: usize) -> Option<PurpleDevice> {
         None
     }
 }
+
+/// Check if any registered device belongs to the specified DeviceCategory
+pub fn has_category(cat: DeviceCategory) -> bool {
+    let reg = REGISTRY.lock();
+    for i in 0..reg.count {
+        if reg.devices[i].category == cat {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if any discovered PCI device matches the given vendor and device ID
+pub fn has_pci_device(vendor_id: u16, device_id: u16) -> bool {
+    let mut found = false;
+    crate::drivers::pci::for_each_device(|pdev| {
+        if pdev.vendor_id == vendor_id && (device_id == 0xFFFF || pdev.device_id == device_id) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Check if any discovered PCI device matches a given class code
+pub fn has_pci_class(class_id: u8) -> bool {
+    let mut found = false;
+    crate::drivers::pci::for_each_device(|pdev| {
+        if pdev.class_id == class_id {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Orchestrate dynamic loading of matching drivers from the APDRV bundle
+pub fn load_matching_drivers() -> (usize, usize) {
+    crate::kernel::apdrv::load_matching_drivers()
+}

@@ -1816,7 +1816,16 @@ impl Shell {
             "aegisdetect" => self.do_aegisdetect(),
 
             // Hardware & Peripherals
-            "devices" | "hwinfo" => crate::drivers::purple_detect::print_table(),
+            "devices" | "hwinfo" => {
+                let sub = parts.next().unwrap_or("");
+                if sub == "scan" || sub == "rescan" {
+                    serial::println("\nPurpleDetect: Rescanning hardware and updating driver bindings...");
+                    crate::drivers::purple_detect::scan_all();
+                    crate::drivers::purple_detect::load_matching_drivers();
+                } else {
+                    crate::drivers::purple_detect::print_table();
+                }
+            }
             "lspci" | "pci" => self.show_pci(),
             "mouse" => self.show_mouse(),
             "video" => {

@@ -155,24 +155,138 @@ static USB_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/usb.apdrv");
 static INPUT_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/input.apdrv");
 static FILESYSTEMS_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/filesystems.apdrv");
 
-pub fn init() {
-    crate::drivers::serial::println("APDRV: Subsystem v3 initialized (Max Modules: 32, W^X Enforced)");
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum DriverCondition {
+    Core,
+    Category(crate::drivers::purple_detect::DeviceCategory),
+    PciDevice(u16, u16),
+}
 
-    // System-wide automated loading of core native hardware drivers (Unified Categories)
-    let _ = load_binary(CPU_APDRV);
-    let _ = load_binary(RAM_APDRV);
-    let _ = load_binary(GPU_APDRV);
-    let _ = load_binary(STORAGE_APDRV);
-    let _ = load_binary(NETWORK_APDRV);
-    let _ = load_binary(AUDIO_APDRV);
-    let _ = load_binary(USB_APDRV);
-    let _ = load_binary(INPUT_APDRV);
-    let _ = load_binary(FILESYSTEMS_APDRV);
+pub struct ApdrvBundleDriver {
+    pub name: &'static str,
+    pub filename: &'static str,
+    pub binary: &'static [u8],
+    pub condition: DriverCondition,
+    pub description: &'static str,
+}
+
+pub static APDRV_BUNDLE: &[ApdrvBundleDriver] = &[
+    ApdrvBundleDriver {
+        name: "cpu",
+        filename: "cpu.apdrv",
+        binary: CPU_APDRV,
+        condition: DriverCondition::Core,
+        description: "Unified CPU, SMP Multi-Core & APIC Subsystem",
+    },
+    ApdrvBundleDriver {
+        name: "ram",
+        filename: "ram.apdrv",
+        binary: RAM_APDRV,
+        condition: DriverCondition::Core,
+        description: "Unified Memory Management (PMM, VMM, Dynamic Heap)",
+    },
+    ApdrvBundleDriver {
+        name: "filesystems",
+        filename: "filesystems.apdrv",
+        binary: FILESYSTEMS_APDRV,
+        condition: DriverCondition::Core,
+        description: "Unified Filesystem Subsystem (PurpleFS, FAT, Ext4, ISO9660, RAMFS)",
+    },
+    ApdrvBundleDriver {
+        name: "storage",
+        filename: "storage.apdrv",
+        binary: STORAGE_APDRV,
+        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Storage),
+        description: "Unified Block Storage Driver (AHCI SATA, NVMe, ATA, SDXC)",
+    },
+    ApdrvBundleDriver {
+        name: "input",
+        filename: "input.apdrv",
+        binary: INPUT_APDRV,
+        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Input),
+        description: "Unified Human Interface Device Driver (PS/2 & USB HID)",
+    },
+    ApdrvBundleDriver {
+        name: "gpu",
+        filename: "gpu.apdrv",
+        binary: GPU_APDRV,
+        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Display),
+        description: "Unified GPU Driver Stack (Bochs VBE 2D, igd, radeongd, nvgd 3D)",
+    },
+    ApdrvBundleDriver {
+        name: "network",
+        filename: "network.apdrv",
+        binary: NETWORK_APDRV,
+        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Network),
+        description: "Unified Network Driver (Intel E1000, RTL8139, TCP/IP L2)",
+    },
+    ApdrvBundleDriver {
+        name: "audio",
+        filename: "audio.apdrv",
+        binary: AUDIO_APDRV,
+        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Audio),
+        description: "Unified HD Audio Driver and PCM Streaming Pipeline",
+    },
+    ApdrvBundleDriver {
+        name: "usb",
+        filename: "usb.apdrv",
+        binary: USB_APDRV,
+        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Bus),
+        description: "Unified USB 3.0 / 2.0 Host Controller Subsystem",
+    },
+];
+
+pub fn load_matching_drivers() -> (usize, usize) {
+    let mut loaded = 0usize;
+    let mut skipped = 0usize;
+
+    crate::drivers::serial::println("PurpleDetect: Scanning hardware inventory and matching APDRV driver bundle...");
+
+    for drv in APDRV_BUNDLE.iter() {
+        let is_matched = match drv.condition {
+            DriverCondition::Core => true,
+            DriverCondition::Category(cat) => {
+                crate::drivers::purple_detect::has_category(cat)
+            }
+            DriverCondition::PciDevice(v, d) => {
+                crate::drivers::purple_detect::has_pci_device(v, d)
+            }
+        };
+
+        if is_matched {
+            crate::drivers::serial::print("PurpleDetect: Matched hardware for '");
+            crate::drivers::serial::print(drv.filename);
+            crate::drivers::serial::println("' — loading driver module");
+            if let Ok(_) = load_binary(drv.binary) {
+                loaded += 1;
+            }
+        } else {
+            skipped += 1;
+            crate::drivers::serial::print("PurpleDetect: No matching hardware detected for '");
+            crate::drivers::serial::print(drv.filename);
+            crate::drivers::serial::print("' (");
+            crate::drivers::serial::print(drv.description);
+            crate::drivers::serial::println(") — skipped.");
+        }
+    }
 
     // Hardware Auto-Binding: probe discovered PCI devices against loaded modules
     crate::drivers::pci::for_each_device(|dev| {
         probe_pci_device(dev.vendor_id, dev.device_id);
     });
+
+    crate::drivers::serial::print("PurpleDetect: Hardware-driven driver load complete: ");
+    crate::drivers::serial::print_u64(loaded as u64);
+    crate::drivers::serial::print(" loaded, ");
+    crate::drivers::serial::print_u64(skipped as u64);
+    crate::drivers::serial::println(" skipped.");
+
+    (loaded, skipped)
+}
+
+pub fn init() {
+    crate::drivers::serial::println("APDRV: Subsystem v3 initialized (Max Modules: 32, W^X Enforced)");
+    load_matching_drivers();
 }
 
 pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
@@ -195,6 +309,20 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
     let mod_name = core::str::from_utf8(&hdr.name).unwrap_or("module").trim_matches('\0');
     if !crate::security::aegis_detect::verify_driver(mod_name, image) {
         return Err("Driver verification failed under AegisDetect trust anchor");
+    }
+
+    // Check if module is already loaded (idempotent reload protection)
+    {
+        let mods = MODULE_REGISTRY.lock();
+        for (idx, slot) in mods.iter().enumerate() {
+            if slot.state != ModuleState::Unloaded {
+                let slot_name_len = slot.name.iter().position(|&c| c == 0).unwrap_or(slot.name.len());
+                let slot_name = core::str::from_utf8(&slot.name[..slot_name_len]).unwrap_or("");
+                if slot_name == mod_name {
+                    return Ok(idx);
+                }
+            }
+        }
     }
 
     // Calculate required memory pages (align each section to 4 KiB for W^X memory protection)
