@@ -141,6 +141,14 @@ def build_gpt_disk(disk_path, total_disk_sectors=2097152): # 1024 MiB
         "e1000.apdrv": e1000_data,
     }
 
+    # Seed unified category modules
+    for mod_name in ["cpu.apdrv", "ram.apdrv", "gpu.apdrv", "storage.apdrv", "network.apdrv", "audio.apdrv", "usb.apdrv", "input.apdrv"]:
+        mod_path = os.path.join("build/drivers_apdrv", mod_name)
+        if not os.path.exists(mod_path):
+            mod_path = os.path.join("build", mod_name)
+        if os.path.exists(mod_path):
+            files[mod_name] = open(mod_path, "rb").read()
+
     pfs_data = format_purplefs_v2(32768, "PurpleSystem", files)
     pfs_sectors = len(pfs_data) // 512
 

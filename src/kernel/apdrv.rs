@@ -141,23 +141,27 @@ static MODULE_REGISTRY: Spinlock<[LoadedModule; APDRV_MAX_MODULES]> = Spinlock::
     LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
 ]);
 
-static E1000_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/e1000.apdrv");
-static STORAGE_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/storage.apdrv");
-static XHCI_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/xhci.apdrv");
-static HDAUDIO_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/hdaudio.apdrv");
-static R8139_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/r8139.apdrv");
+static CPU_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/cpu.apdrv");
+static RAM_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/ram.apdrv");
 static GPU_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu.apdrv");
+static STORAGE_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/storage.apdrv");
+static NETWORK_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/network.apdrv");
+static AUDIO_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/audio.apdrv");
+static USB_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/usb.apdrv");
+static INPUT_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/input.apdrv");
 
 pub fn init() {
     crate::drivers::serial::println("APDRV: Subsystem v3 initialized (Max Modules: 16, W^X Enforced)");
 
-    // System-wide automated loading of core native hardware drivers
-    let _ = load_binary(E1000_APDRV);
-    let _ = load_binary(STORAGE_APDRV);
-    let _ = load_binary(XHCI_APDRV);
-    let _ = load_binary(HDAUDIO_APDRV);
-    let _ = load_binary(R8139_APDRV);
+    // System-wide automated loading of core native hardware drivers (Unified Categories)
+    let _ = load_binary(CPU_APDRV);
+    let _ = load_binary(RAM_APDRV);
     let _ = load_binary(GPU_APDRV);
+    let _ = load_binary(STORAGE_APDRV);
+    let _ = load_binary(NETWORK_APDRV);
+    let _ = load_binary(AUDIO_APDRV);
+    let _ = load_binary(USB_APDRV);
+    let _ = load_binary(INPUT_APDRV);
 
     // Hardware Auto-Binding: probe discovered PCI devices against loaded modules
     crate::drivers::pci::for_each_device(|dev| {

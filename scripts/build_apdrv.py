@@ -165,7 +165,95 @@ def main():
     if len(sys.argv) > 1:
         out_dir = sys.argv[1]
 
-    # 1. e1000.apdrv (Intel 82540EM PCIe Gigabit NIC)
+    # =========================================================================
+    # CORE UNIFIED HARDWARE DRIVER CATEGORIES
+    # =========================================================================
+
+    # 1. cpu.apdrv (Unified CPU, SMP Multi-Core & APIC Timer Subsystem)
+    build_module(
+        os.path.join(out_dir, "cpu.apdrv"),
+        "cpu",
+        "Unified CPU, SMP Multi-Core & APIC Subsystem",
+        "Purple OS Hardware Group",
+        0x0000, 0x0000,
+        ["kinfo", "smp_core_count"]
+    )
+
+    # 2. ram.apdrv (Unified Memory Management Subsystem: PMM, VMM, Heap)
+    build_module(
+        os.path.join(out_dir, "ram.apdrv"),
+        "ram",
+        "Unified Memory Management Driver (PMM, VMM, Dynamic Heap)",
+        "Purple OS Hardware Group",
+        0x0000, 0x0000,
+        ["kinfo", "pmm_stats"]
+    )
+
+    # 3. gpu.apdrv (Unified GPU Driver Stack: Bochs VBE 2D, igd, radeongd, nvgd 3D)
+    build_module(
+        os.path.join(out_dir, "gpu.apdrv"),
+        "gpu",
+        "Unified GPU Driver Stack (Bochs VBE 2D, igd, radeongd, nvgd 3D)",
+        "Purple OS Hardware Group",
+        0x1234, 0x1111,
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+    )
+
+    # 4. storage.apdrv (Unified AHCI / NVMe / ATA / SD Block Storage Stack)
+    build_module(
+        os.path.join(out_dir, "storage.apdrv"),
+        "storage",
+        "Unified Block Storage Driver (AHCI SATA, NVMe, ATA, SDXC)",
+        "Purple OS Hardware Group",
+        0x8086, 0x2922,
+        ["kinfo", "block_dev_register"]
+    )
+
+    # 5. network.apdrv (Unified Intel E1000 / Realtek RTL8139 / TCP-IP Network Driver)
+    build_module(
+        os.path.join(out_dir, "network.apdrv"),
+        "network",
+        "Unified Network Driver (Intel E1000, RTL8139, TCP/IP L2)",
+        "Purple OS Hardware Group",
+        0x8086, 0x100E,
+        ["kinfo", "netdev_register", "pci_enable_bus_mastering"]
+    )
+
+    # 6. audio.apdrv (Unified Intel HD Audio & AC97 Sound Pipeline)
+    build_module(
+        os.path.join(out_dir, "audio.apdrv"),
+        "audio",
+        "Unified HD Audio Driver and PCM Streaming Pipeline",
+        "Purple OS Hardware Group",
+        0x8086, 0x2668,
+        ["kinfo", "audio_dump_devices"]
+    )
+
+    # 7. usb.apdrv (Unified xHCI / EHCI USB Host Controller Driver)
+    build_module(
+        os.path.join(out_dir, "usb.apdrv"),
+        "usb",
+        "Unified USB 3.0 / 2.0 Host Controller Subsystem",
+        "Purple OS Hardware Group",
+        0x1B36, 0x000D,
+        ["kinfo", "usb_dump_controllers"]
+    )
+
+    # 8. input.apdrv (Unified PS/2 & USB HID Keyboard and Mouse Driver)
+    build_module(
+        os.path.join(out_dir, "input.apdrv"),
+        "input",
+        "Unified Human Interface Device Driver (PS/2 & USB HID)",
+        "Purple OS Hardware Group",
+        0x0000, 0x0000,
+        ["kinfo", "keyboard_poll_event"]
+    )
+
+    # =========================================================================
+    # HARDWARE SUB-DRIVERS & LEGACY ALIAS PACKAGES
+    # =========================================================================
+
+    # e1000.apdrv (Intel 82540EM PCIe Gigabit NIC)
     build_module(
         os.path.join(out_dir, "e1000.apdrv"),
         "e1000",
@@ -175,7 +263,7 @@ def main():
         ["kinfo", "netdev_register", "pci_enable_bus_mastering"]
     )
 
-    # 2. r8139.apdrv (Realtek RTL8139 Fast Ethernet NIC)
+    # r8139.apdrv (Realtek RTL8139 Fast Ethernet NIC)
     build_module(
         os.path.join(out_dir, "r8139.apdrv"),
         "r8139",
@@ -185,74 +273,24 @@ def main():
         ["kinfo", "netdev_register", "pci_enable_bus_mastering"]
     )
 
-    # 3. xhci.apdrv (Extensible Host Controller Interface USB 3.0)
+    # xhci.apdrv (Extensible Host Controller Interface USB 3.0)
     build_module(
         os.path.join(out_dir, "xhci.apdrv"),
-        "usb_xhci",
+        "usb",
         "Extensible Host Controller Interface (USB 3.0)",
         "Purple OS Hardware Group",
         0xFFFF, 0xFFFF,
         ["kinfo", "usb_dump_controllers"]
     )
 
-    # 4. hdaudio.apdrv (Intel High Definition Audio Controller)
+    # hdaudio.apdrv (Intel High Definition Audio Controller)
     build_module(
         os.path.join(out_dir, "hdaudio.apdrv"),
-        "intel_hda",
+        "audio",
         "Intel High Definition Audio Controller",
         "Purple OS Hardware Group",
         0x8086, 0x2668,
         ["kinfo", "audio_dump_devices"]
-    )
-
-    # 5. storage.apdrv (AHCI / NVMe / ATA Storage Stack)
-    build_module(
-        os.path.join(out_dir, "storage.apdrv"),
-        "purple_storage",
-        "Unified AHCI / NVMe / ATA Block Storage Stack",
-        "Purple OS Hardware Group",
-        0x8086, 0x2922,
-        ["kinfo", "block_dev_register"]
-    )
-
-    # 6. network.apdrv (PCIe Ethernet Family)
-    build_module(
-        os.path.join(out_dir, "network.apdrv"),
-        "purple_net",
-        "Unified PCIe Network Interface Driver Family",
-        "Purple OS Hardware Group",
-        0x8086, 0x100E,
-        ["kinfo", "netdev_register"]
-    )
-
-    # 7. usb.apdrv (USB 3.0 / 2.0 Unified Host Driver)
-    build_module(
-        os.path.join(out_dir, "usb.apdrv"),
-        "purple_usb",
-        "Unified USB 3.0 / 2.0 Host Controller Subsystem",
-        "Purple OS Hardware Group",
-        0xFFFF, 0xFFFF,
-        ["kinfo", "usb_dump_controllers"]
-    )
-
-    # 8. audio.apdrv (Unified Audio Output Stack)
-    build_module(
-        os.path.join(out_dir, "audio.apdrv"),
-        "purple_audio",
-        "Unified HD Audio Driver and Codec Pipeline",
-        "Purple OS Hardware Group",
-        0x8086, 0x2668,
-        ["kinfo", "audio_dump_devices"]
-    )
-
-    # 9. gpu.apdrv (Unified GPU Driver Stack: Bochs VBE 2D, igd, radeongd, nvgd 3D)
-    build_module(
-        os.path.join(out_dir, "gpu.apdrv"),
-        "gpu",
-        "Unified GPU Driver Stack (Bochs VBE 2D, igd, radeongd, nvgd 3D)",
-        "Purple OS Hardware Group",
-        0x1234, 0x1111,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
     )
 
     # Legacy & sub-driver aliases
@@ -322,16 +360,6 @@ def main():
         ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
     )
 
-    # 12. input.apdrv (PS/2 & USB HID Input Subsystem)
-    build_module(
-        os.path.join(out_dir, "input.apdrv"),
-        "purple_input",
-        "Unified PS/2 & USB HID Keyboard and Mouse Driver",
-        "Purple OS Hardware Group",
-        0xFFFF, 0xFFFF,
-        ["kinfo", "keyboard_poll_event"]
-    )
-
     # 13. wifi.apdrv (802.11 Wireless Network Adapter Driver Family)
     build_module(
         os.path.join(out_dir, "wifi.apdrv"),
@@ -396,8 +424,8 @@ def main():
             with open(os.path.join("build", src), "wb") as df:
                 df.write(data)
 
-    # Also copy Graphics.apdrv, gpu.apdrv, bochs_gpu.apdrv, r8139.apdrv, e1000.apdrv, and 3D GPU drivers to build/
-    for extra in ["Graphics.apdrv", "gpu.apdrv", "bochs_gpu.apdrv", "r8139.apdrv", "e1000.apdrv", "igd.apdrv", "radeongd.apdrv", "nvgd.apdrv", "gpu-intel.apdrv", "gpu-amd.apdrv", "gpu-nvidia.apdrv"]:
+    # Also copy all unified category drivers and hardware modules to build/
+    for extra in ["cpu.apdrv", "ram.apdrv", "gpu.apdrv", "storage.apdrv", "network.apdrv", "audio.apdrv", "usb.apdrv", "input.apdrv", "Graphics.apdrv", "bochs_gpu.apdrv", "r8139.apdrv", "e1000.apdrv", "igd.apdrv", "radeongd.apdrv", "nvgd.apdrv", "gpu-intel.apdrv", "gpu-amd.apdrv", "gpu-nvidia.apdrv"]:
         p = os.path.join(out_dir, extra)
         if os.path.exists(p):
             with open(p, "rb") as sf:
