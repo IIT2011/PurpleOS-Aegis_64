@@ -128,6 +128,21 @@ pub fn set_per_cpu_kernel_stack(cpu: usize, stack_top: u64) {
     }
 }
 
+pub fn ensure_user_gs_base(cpu: usize) {
+    let cpu_idx = cpu.min(7);
+    let per_cpu_ptr = unsafe { &raw const PER_CPU_SYSCALL[cpu_idx] as u64 };
+    wrmsr(MSR_KERNEL_GS_BASE, per_cpu_ptr);
+    wrmsr(0xC0000101, 0);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn prepare_user_entry() {
+    let cpu = crate::kernel::smp::get_cpu_id().min(7);
+    let per_cpu_ptr = unsafe { &raw const PER_CPU_SYSCALL[cpu] as u64 };
+    wrmsr(MSR_KERNEL_GS_BASE, per_cpu_ptr);
+    wrmsr(0xC0000101, 0);
+}
+
 pub fn validate_user_ptr(ptr: *const u8, len: usize) -> bool {
     uaccess::validate_user_range(ptr as u64, len, false).is_ok()
 }
@@ -522,6 +537,7 @@ pub extern "C" fn syscall_dispatch(
 
         // POSIX 60: sys_exit(status)
         SYS_EXIT => {
+            prepare_user_entry();
             crate::kernel::task::exit();
         }
 
@@ -715,6 +731,7 @@ pub extern "C" fn syscall_dispatch(
 
         // POSIX 231: sys_exit_group(status)
         SYS_EXIT_GROUP => {
+            prepare_user_entry();
             crate::kernel::task::exit();
         }
 

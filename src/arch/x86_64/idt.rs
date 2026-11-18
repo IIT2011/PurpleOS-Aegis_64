@@ -126,17 +126,27 @@ pub extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
             // User mode exception - terminate task safely
             crate::drivers::serial::print("[SECURITY] User Process Exception: ");
             crate::drivers::serial::println(EXCEPTION_MESSAGES[int_no]);
+            crate::kernel::syscall::prepare_user_entry();
             crate::kernel::task::exit();
         }
 
         // Kernel panic
+        let panic_cpu = crate::kernel::smp::get_cpu_id();
         crate::kernel::smp::broadcast_halt();
         crate::drivers::serial::println("=================================================");
-        crate::drivers::serial::print("!!! KERNEL PANIC: CPU EXCEPTION ");
+        crate::drivers::serial::print("!!! KERNEL PANIC ON CPU #");
+        crate::drivers::serial::print_u64(panic_cpu as u64);
+        crate::drivers::serial::print(": CPU EXCEPTION ");
         crate::drivers::serial::print(EXCEPTION_MESSAGES[int_no]);
         crate::drivers::serial::println(" !!!");
         crate::drivers::serial::print("RIP: 0x");
         crate::drivers::serial::print_hex(frame.rip);
+        crate::drivers::serial::print(" | RSP: 0x");
+        crate::drivers::serial::print_hex(frame.rsp);
+        crate::drivers::serial::print(" | CS: 0x");
+        crate::drivers::serial::print_hex(frame.cs);
+        crate::drivers::serial::print(" | ERR: 0x");
+        crate::drivers::serial::print_hex(frame.err_code);
         crate::drivers::serial::println("");
         crate::drivers::serial::println("=================================================");
         if int_no == 14 {

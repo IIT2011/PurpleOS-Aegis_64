@@ -135,8 +135,8 @@ pub static SCHED: Spinlock<SchedState> = Spinlock::new(SchedState {
 extern "C" {
     fn switch_context(old_rsp: *mut u64, new_rsp: u64, lock_to_release: *const core::sync::atomic::AtomicBool);
     fn task_trampoline();
-    #[allow(dead_code)]
-    fn user_trampoline();
+    fn user_task_trampoline();
+    pub fn enter_user_mode(entry_rip: u64, user_rsp: u64) -> !;
 }
 
 pub fn task_trampoline_addr() -> u64 {
@@ -303,23 +303,152 @@ pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8
     Some(tid)
 }
 
-pub fn spawn_user_task(
+pub const USER_CODE_BASE: u64 = 0x0040_0000;
+pub const USER_STACK_TOP: u64 = 0x0000_7FFF_FFFF_0000;
+pub const USER_STACK_PAGES: usize = 4; // 16 KiB user stack
+
+/// Default cooperative Ring 3 worker binary:
+/// .loop:
+///   mov $24, %eax (SYS_SCHED_YIELD)
+///   syscall
+///   jmp .loop
+pub static DEFAULT_USER_WORKER_CODE: [u8; 9] = [
+    0xb8, 0x18, 0x00, 0x00, 0x00,
+    0x0f, 0x05,
+    0xeb, 0xf7,
+];
+
+/// Spawns a true Ring 3 user process with an isolated PML4 page table,
+/// dedicated user code segment at canonical `USER_CODE_BASE`, and dedicated
+/// user stack at canonical `USER_STACK_TOP`.
+pub fn spawn_user_program(
     name_str: &str,
-    entry: extern "C" fn(*mut u8),
-    arg: *mut u8,
+    code: &[u8],
     prio: TaskPriority,
 ) -> Option<u32> {
+    if code.is_empty() {
+        return None;
+    }
+
+    let kernel_stack_phys = alloc_frames(4)?;
+    let kernel_stack_top = kernel_stack_phys + TASK_STACK_SIZE;
+
     let pml4 = crate::mm::vmm::create_pml4()?;
-    let tid = spawn_affined(name_str, entry, arg, prio, !0)?;
-    let mut s = SCHED.lock();
-    for t in s.tasks.iter_mut() {
-        if t.id == tid {
-            t.is_user = true;
-            t.cr3 = pml4 as u64;
-            break;
+
+    // Map user code pages
+    let code_pages = (code.len() + 4095) / 4096;
+    for i in 0..code_pages {
+        let code_frame = alloc_frames(1)?;
+        let frame_ptr = code_frame as *mut u8;
+        unsafe {
+            frame_ptr.write_bytes(0, 4096);
+            let offset = i * 4096;
+            let chunk_len = (code.len() - offset).min(4096);
+            core::ptr::copy_nonoverlapping(code[offset..].as_ptr(), frame_ptr, chunk_len);
+        }
+        let vaddr = USER_CODE_BASE + (i * 4096) as u64;
+        if let Err(_) = crate::mm::vmm::map_page(
+            pml4,
+            vaddr,
+            code_frame as u64,
+            crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_WRITABLE,
+        ) {
+            crate::mm::vmm::destroy_pml4(pml4);
+            let _ = free_frames(kernel_stack_phys, 4);
+            return None;
         }
     }
+
+    // Map user stack pages
+    for i in 0..USER_STACK_PAGES {
+        let stack_frame = alloc_frames(1)?;
+        unsafe {
+            (stack_frame as *mut u8).write_bytes(0, 4096);
+        }
+        let vaddr = USER_STACK_TOP - ((i + 1) * 4096) as u64;
+        if let Err(_) = crate::mm::vmm::map_page(
+            pml4,
+            vaddr,
+            stack_frame as u64,
+            crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_WRITABLE,
+        ) {
+            crate::mm::vmm::destroy_pml4(pml4);
+            let _ = free_frames(kernel_stack_phys, 4);
+            return None;
+        }
+    }
+
+    let mut s = SCHED.lock();
+    let idx = alloc_task_slot(&mut s)?;
+
+    let tid = s.next_id;
+    s.next_id += 1;
+
+    let t = &mut s.tasks[idx];
+    t.id = tid;
+    let mut name = [0u8; 16];
+    let b = name_str.as_bytes();
+    let len = b.len().min(15);
+    name[0..len].copy_from_slice(&b[0..len]);
+    t.name = name;
+
+    t.stack_base = kernel_stack_phys as u64;
+    t.state = TaskState::Ready;
+    t.priority = prio;
+    t.time_slice_ticks = match prio {
+        TaskPriority::High => 20,
+        TaskPriority::Normal => 10,
+        TaskPriority::Low => 5,
+        TaskPriority::Idle => 1,
+    };
+    t.ticks_remaining = t.time_slice_ticks;
+    t.cpu_affinity = 1 << get_current_cpu();
+    t.is_user = true;
+    t.cr3 = pml4 as u64;
+
+    let user_rsp = USER_STACK_TOP - 16;
+    let user_rip = USER_CODE_BASE;
+
+    unsafe {
+        let mut sp = kernel_stack_top as *mut u64;
+
+        sp = sp.sub(1);
+        *sp = user_rsp;
+        sp = sp.sub(1);
+        *sp = user_rip;
+
+        sp = sp.sub(1);
+        *sp = user_task_trampoline as *const () as usize as u64;
+
+        sp = sp.sub(1);
+        *sp = 0x202; // RFLAGS with IF enabled
+        sp = sp.sub(1);
+        *sp = 0; // RBX
+        sp = sp.sub(1);
+        *sp = 0; // RBP
+        sp = sp.sub(1);
+        *sp = 0; // R12
+        sp = sp.sub(1);
+        *sp = 0; // R13
+        sp = sp.sub(1);
+        *sp = 0; // R14
+        sp = sp.sub(1);
+        *sp = 0; // R15
+
+        t.rsp = sp as u64;
+    }
+
+    crate::kernel::smp::broadcast_resched();
     Some(tid)
+}
+
+pub fn spawn_user_task(
+    name_str: &str,
+    _entry: extern "C" fn(*mut u8),
+    _arg: *mut u8,
+    prio: TaskPriority,
+) -> Option<u32> {
+    spawn_user_program(name_str, &DEFAULT_USER_WORKER_CODE, prio)
 }
 
 #[inline(always)]

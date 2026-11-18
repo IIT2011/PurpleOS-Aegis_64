@@ -51,3 +51,68 @@ task_trampoline:
     call task_entry_wrapper
 2:  hlt
     jmp 2b
+
+/*
+ * enter_user_mode(entry_rip: u64, user_rsp: u64) -> !
+ * Privilege transition from Ring 0 (Kernel) to Ring 3 (User) via iretq.
+ * rdi = entry_rip (Canonical user virtual address of code)
+ * rsi = user_rsp  (Canonical user virtual address of stack top)
+ */
+.global enter_user_mode
+.type enter_user_mode, @function
+enter_user_mode:
+    cli
+
+    /* Load user data segment selectors (GDT_USER_DS = 0x1B) */
+    movw $0x1B, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+
+    /* Push iretq stack frame */
+    pushq $0x1B          /* SS: User Data Segment (DPL 3) */
+    pushq %rsi           /* RSP: User Stack Pointer */
+    pushq $0x202         /* RFLAGS: Interrupts Enabled (IF=1, bit 1=1) */
+    pushq $0x23          /* CS: User Code Segment (DPL 3) */
+    pushq %rdi           /* RIP: User Instruction Pointer */
+
+    /* Zero all general-purpose registers to eliminate kernel data leakage */
+    xorq %rax, %rax
+    xorq %rbx, %rbx
+    xorq %rcx, %rcx
+    xorq %rdx, %rdx
+    xorq %rsi, %rsi
+    xorq %rdi, %rdi
+    xorq %rbp, %rbp
+    xorq %r8,  %r8
+    xorq %r9,  %r9
+    xorq %r10, %r10
+    xorq %r11, %r11
+    xorq %r12, %r12
+    xorq %r13, %r13
+    xorq %r14, %r14
+    xorq %r15, %r15
+
+    iretq
+
+/*
+ * user_task_trampoline
+ * Trampoline popped by switch_context when a new user-mode task begins.
+ * Kernel stack contains:
+ *   [sp+0]: user RIP (entry point)
+ *   [sp+8]: user RSP (stack top)
+ */
+.global user_task_trampoline
+.type user_task_trampoline, @function
+user_task_trampoline:
+    popq %rdi           /* user RIP */
+    popq %rsi           /* user RSP */
+    pushq %rsi          /* preserve user RSP across call */
+    pushq %rdi          /* preserve user RIP across call */
+    call prepare_user_entry
+    popq %rdi           /* restore user RIP */
+    popq %rsi           /* restore user RSP */
+    call enter_user_mode
+3:  hlt
+    jmp 3b

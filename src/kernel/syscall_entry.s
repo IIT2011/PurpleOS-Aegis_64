@@ -16,11 +16,12 @@
  */
 syscall_entry_asm:
     swapgs                      /* Swap user GS base with kernel per-CPU GS base */
-    movq %rsp, %gs:8            /* Save user %rsp at per-cpu user_rsp offset 8 */
-    movq %gs:0, %rsp            /* Load clean kernel stack top from per-cpu kernel_rsp offset 0 */
+    movq %rsp, %gs:8            /* Save user %rsp in per-CPU bridge */
+    movq %gs:0, %rsp            /* Load dedicated kernel stack top from per-CPU kernel_rsp */
 
-    pushq %r11                  /* Saved user RFLAGS */
-    pushq %rcx                  /* Saved user RIP */
+    pushq %gs:8                 /* Push user RSP onto dedicated task kernel stack */
+    pushq %r11                  /* Push saved user RFLAGS */
+    pushq %rcx                  /* Push saved user RIP */
 
     pushq %rbp
     pushq %rbx
@@ -32,7 +33,7 @@ syscall_entry_asm:
     /* Call Rust syscall_dispatch(num, a1, a2, a3, a4, a5, a6) */
     /* Incoming: rax=num, rdi=a1, rsi=a2, rdx=a3, r10=a4, r8=a5, r9=a6 */
     /* System V AMD64 call convention: rdi, rsi, rdx, rcx, r8, r9, 7th arg on stack */
-    pushq %r9                   /* 7th arg: a6 */
+    pushq %r9                   /* 7th arg: a6 (maintains 16-byte stack alignment) */
     movq %r8, %r9               /* 6th arg: a5 */
     movq %r10, %r8              /* 5th arg: a4 */
     movq %rdx, %rcx             /* 4th arg: a3 */
@@ -53,8 +54,8 @@ syscall_entry_asm:
 
     popq %rcx                   /* Restore user RIP */
     popq %r11                   /* Restore user RFLAGS */
+    popq %rsp                   /* Restore user RSP directly from task's private kernel stack */
 
-    movq %gs:8, %rsp            /* Restore user %rsp */
     swapgs                      /* Restore user GS base */
 
     sysretq

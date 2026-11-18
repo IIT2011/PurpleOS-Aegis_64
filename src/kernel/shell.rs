@@ -243,7 +243,8 @@ pub const COMMAND_LIST: &[&str] = &[
     "set", "env", "calc", "expr", "which", "edit", "nano", "source",
     "run", "batch", "sleep", "seq", "fortune", "tip", "reboot",
     "restart", "exit", "theme", "color", "title", "jobs", "start",
-    "kill", "top", "monitor", "bench", "sysbench", "view", "pager", "prompt"
+    "kill", "top", "monitor", "bench", "sysbench", "view", "pager", "prompt",
+    "ring3", "userland"
 ];
 
 #[derive(Copy, Clone)]
@@ -1937,6 +1938,28 @@ impl Shell {
                     serial::println("Available commands:");
                     serial::println("  native test  - Run full in-kernel 10-category validation suite");
                     serial::println("  native list  - Display complete native system call catalog");
+                }
+            }
+            "ring3" | "userland" => {
+                let sub = parts.next().unwrap_or("info");
+                match sub {
+                    "info" | "status" | "" => {
+                        crate::kernel::ring3::print_info();
+                    }
+                    "test" | "run" | "demo" => {
+                        crate::kernel::ring3::run_test();
+                    }
+                    "fault" => {
+                        let ftype = parts.next().unwrap_or("div0");
+                        if ftype == "pagefault" || ftype == "pf" || ftype == "mem" {
+                            crate::kernel::ring3::run_fault_pagefault();
+                        } else {
+                            crate::kernel::ring3::run_fault_div0();
+                        }
+                    }
+                    _ => {
+                        serial::println("Unknown ring3 subcommand. Options: info, test, fault [div0|pagefault]");
+                    }
                 }
             }
             "ksym" => self.show_symbols(),
