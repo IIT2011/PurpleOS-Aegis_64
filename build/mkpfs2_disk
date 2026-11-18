@@ -51,9 +51,11 @@ def format_purplefs_v2(total_blocks, label, files):
     # Root dir dirents block (block 10)
     dir_block = bytearray(4096)
     def pack_dirent(offset, ino, name, ftype):
-        name_b = name.encode("ascii")[:23]
-        struct.pack_into("<IHBB", dir_block, offset, ino, 32, len(name_b), ftype)
+        name_b = name.encode("ascii")[:55]
+        rec_len = 64 if len(name_b) > 23 else 32
+        struct.pack_into("<IHBB", dir_block, offset, ino, rec_len, len(name_b), ftype)
         dir_block[offset+8:offset+8+len(name_b)] = name_b
+        return rec_len
 
     pack_dirent(0, 1, ".", 2)
     pack_dirent(32, 1, "..", 2)
@@ -92,8 +94,8 @@ def format_purplefs_v2(total_blocks, label, files):
         icrc = zlib.crc32(inodes[ino_offset : ino_offset + 0x7C]) & 0xFFFFFFFF
         struct.pack_into("<I", inodes, ino_offset + 0x7C, icrc)
 
-        pack_dirent(dirent_offset, file_ino, fname, 1)
-        dirent_offset += 32
+        rec_len = pack_dirent(dirent_offset, file_ino, fname, 1)
+        dirent_offset += rec_len
         file_ino += 1
 
     # Root dir inode (Inode 1)
@@ -156,11 +158,8 @@ def build_gpt_disk(disk_path, total_disk_sectors=2097152): # 1024 MiB
         "welcome.txt": b"Welcome to Purple OS / Aegis64 Native Filesystem!\n",
         "version.txt": b"Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)\n",
         "motd": b"Message of the Day: Aegis64 Pure Rust Operational.\n",
-        "e1000.apdrv": e1000_data,
         "System/CLI/cmd.dtbase": cmd_dtbase_data,
-        "cmd.dtbase": cmd_dtbase_data,
         "System/CLI/path.dtbase": path_dtbase_data,
-        "path.dtbase": path_dtbase_data,
     }
 
     # Seed unified category modules
@@ -169,7 +168,10 @@ def build_gpt_disk(disk_path, total_disk_sectors=2097152): # 1024 MiB
         if not os.path.exists(mod_path):
             mod_path = os.path.join("build", mod_name)
         if os.path.exists(mod_path):
-            files[mod_name] = open(mod_path, "rb").read()
+            files[f"System/Drivers/{mod_name}"] = open(mod_path, "rb").read()
+
+    if e1000_data:
+        files["System/Drivers/e1000.apdrv"] = e1000_data
 
     pfs_data = format_purplefs_v2(32768, "PurpleSystem", files)
     pfs_sectors = len(pfs_data) // 512

@@ -53,11 +53,11 @@ pub struct VfsDir {
     pub len: usize,
 }
 
-pub static VFS_DIRS: Spinlock<[VfsDir; 16]> = Spinlock::new([VfsDir {
+pub static VFS_DIRS: Spinlock<[VfsDir; 32]> = Spinlock::new([VfsDir {
     in_use: false,
     path: [0; 64],
     len: 0,
-}; 16]);
+}; 32]);
 
 pub fn is_directory(path: &str) -> bool {
     let p = path.trim_start_matches('/').trim_end_matches('/');
@@ -65,7 +65,29 @@ pub fn is_directory(path: &str) -> bool {
         return true;
     }
     match p {
-        "dev" | "proc" | "tmp" | "ssd" | "hdd" | "usb" | "sdxc" | "sdhc" => return true,
+        "dev" | "proc" | "tmp" => return true,
+        _ => {}
+    }
+    match p {
+        "Boot" | "Boot/EFI" | "Boot/EFI/Boot" => return true,
+        "System"
+        | "System/Kernel"
+        | "System/Applications"
+        | "System/Drivers"
+        | "System/CLI"
+        | "System/CLI/scripts"
+        | "System/Frameworks"
+        | "System/Services"
+        | "System/Configuration"
+        | "System/Resources"
+        | "System/Libraries" => return true,
+        "Users"
+        | "Users/aegis"
+        | "Users/aegis/Applications"
+        | "Users/aegis/Desktop"
+        | "Users/aegis/Documents"
+        | "Users/Admin" => return true,
+        "Recovery" => return true,
         _ => {}
     }
     {
@@ -84,6 +106,8 @@ pub fn is_directory(path: &str) -> bool {
     let _ = crate::kernel::storage::with_fs(|fs| {
         fs.list_files(|_ino, ftype, _fsize, name| {
             if name == p && ftype == 2 {
+                is_dir = true;
+            } else if name.starts_with(p) && name.as_bytes().get(p.len()) == Some(&b'/') {
                 is_dir = true;
             }
         });
@@ -111,7 +135,7 @@ pub fn mkdir(path: &str) -> Result<(), &'static str> {
             return Ok(());
         }
     }
-    Err("VFS directory table full (maximum 16 custom directories)")
+    Err("VFS directory table full (maximum 32 custom directories)")
 }
 
 pub fn rmdir(path: &str) -> Result<(), &'static str> {
@@ -120,7 +144,7 @@ pub fn rmdir(path: &str) -> Result<(), &'static str> {
         return Err("Cannot remove root directory");
     }
     match p {
-        "dev" | "proc" | "tmp" | "ssd" | "hdd" | "usb" | "sdxc" | "sdhc" => {
+        "dev" | "proc" | "tmp" | "Boot" | "System" | "Users" | "Recovery" => {
             return Err("Cannot remove system mountpoint");
         }
         _ => {}
@@ -178,7 +202,27 @@ pub fn classify_path(path: &str) -> (VfsMountType, &str) {
 pub fn file_size(path: &str) -> Result<usize, &'static str> {
     let (mount, sub) = classify_path(path);
     match mount {
-        VfsMountType::DevFs => Ok(0),
+        VfsMountType::DevFs => {
+            if sub == "null" || sub == "zero" || sub == "console" {
+                Ok(0)
+            } else {
+                let mut sz = 0;
+                let mut found = false;
+                crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
+                    let dname = canon.trim_start_matches('/');
+                    let base = dname.rsplit('/').next().unwrap_or(dname);
+                    if base == sub {
+                        sz = (dev.total_blocks() * dev.block_size() as u64) as usize;
+                        found = true;
+                    }
+                });
+                if found {
+                    Ok(sz)
+                } else {
+                    Err("Device not found in /dev")
+                }
+            }
+        }
         VfsMountType::ProcFs => {
             let mut buf = [0u8; 1024];
             read_procfs(sub, &mut buf)
@@ -213,8 +257,26 @@ pub fn file_size(path: &str) -> Result<usize, &'static str> {
             let res = crate::kernel::storage::with_fs(|fs| {
                 if let Some(ino) = fs.lookup(sub) {
                     fs.get_file_size(ino)
+                } else if let Some(slash_pos) = sub.rfind('/') {
+                    let base_name = &sub[slash_pos + 1..];
+                    if let Some(ino) = fs.lookup(base_name) {
+                        fs.get_file_size(ino)
+                    } else {
+                        None
+                    }
                 } else {
-                    None
+                    let mut found_ino = None;
+                    fs.list_files(|ino, _ftype, _fsize, name| {
+                        if found_ino.is_some() { return; }
+                        if name == sub || (name.ends_with(sub) && name.as_bytes().get(name.len().saturating_sub(sub.len() + 1)) == Some(&b'/')) {
+                            found_ino = Some(ino);
+                        }
+                    });
+                    if let Some(ino) = found_ino {
+                        fs.get_file_size(ino)
+                    } else {
+                        None
+                    }
                 }
             });
             match res {
@@ -275,12 +337,55 @@ pub fn read_at(path: &str, offset: usize, buf: &mut [u8]) -> Result<usize, &'sta
             let res = crate::kernel::storage::with_fs(|fs| {
                 if let Some(ino) = fs.lookup(sub) {
                     fs.read_file_at(ino, offset, buf)
+                } else if let Some(slash_pos) = sub.rfind('/') {
+                    let base_name = &sub[slash_pos + 1..];
+                    if let Some(ino) = fs.lookup(base_name) {
+                        fs.read_file_at(ino, offset, buf)
+                    } else {
+                        0
+                    }
                 } else {
-                    0
+                    let mut found_ino = None;
+                    fs.list_files(|ino, _ftype, _fsize, name| {
+                        if found_ino.is_some() { return; }
+                        if name == sub || (name.ends_with(sub) && name.as_bytes().get(name.len().saturating_sub(sub.len() + 1)) == Some(&b'/')) {
+                            found_ino = Some(ino);
+                        }
+                    });
+                    if let Some(ino) = found_ino {
+                        fs.read_file_at(ino, offset, buf)
+                    } else {
+                        0
+                    }
                 }
             });
             match res {
-                Some(len) => Ok(len),
+                Some(len) if len > 0 => Ok(len),
+                Some(_) => {
+                    let exists = crate::kernel::storage::with_fs(|fs| {
+                        if fs.lookup(sub).is_some() {
+                            return true;
+                        }
+                        if let Some(p) = sub.rfind('/') {
+                            if fs.lookup(&sub[p+1..]).is_some() {
+                                return true;
+                            }
+                        }
+                        let mut found = false;
+                        fs.list_files(|_ino, _ftype, _fsize, name| {
+                            if found { return; }
+                            if name == sub || (name.ends_with(sub) && name.as_bytes().get(name.len().saturating_sub(sub.len() + 1)) == Some(&b'/')) {
+                                found = true;
+                            }
+                        });
+                        found
+                    }).unwrap_or(false);
+                    if exists {
+                        Ok(0)
+                    } else {
+                        Err("File not found on filesystem")
+                    }
+                }
                 None => Err("No persistent filesystem mounted"),
             }
         }
@@ -390,12 +495,36 @@ fn read_devfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
         }
         "console" => Ok(0),
         "storage" => {
-            let msg = b"Aegis64 Unified Storage Hierarchy: /ssd, /hdd, /usb, /sdxc, /sdhc active\n";
+            let msg = b"Aegis64 Unified Device VFS: /dev/null, /dev/zero, /dev/console, dynamic block devices online\n";
             let len = msg.len().min(buf.len());
             buf[..len].copy_from_slice(&msg[..len]);
             Ok(len)
         }
-        _ => Err("Device not found in /dev"),
+        _ => {
+            let mut found_idx = None;
+            crate::drivers::block_dev::for_each_dev(|idx, canon, _dev| {
+                let dname = canon.trim_start_matches('/');
+                let base = dname.rsplit('/').next().unwrap_or(dname);
+                if base == name {
+                    found_idx = Some(idx);
+                }
+            });
+            if let Some(idx) = found_idx {
+                let mut blk = [0u8; 512];
+                let res = crate::drivers::block_dev::with_dev(idx, |dev| {
+                    dev.read_blocks(0, 1, &mut blk)
+                });
+                if res == Some(crate::drivers::block_dev::BLOCK_DEV_OK) {
+                    let len = buf.len().min(512);
+                    buf[..len].copy_from_slice(&blk[..len]);
+                    Ok(len)
+                } else {
+                    Err("I/O error reading block device")
+                }
+            } else {
+                Err("Device not found in /dev")
+            }
+        }
     }
 }
 
@@ -578,6 +707,11 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
             cb("null", 0, false);
             cb("zero", 0, false);
             cb("console", 0, false);
+            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
+                let name = canon.trim_start_matches('/');
+                let dev_name = name.rsplit('/').next().unwrap_or(name);
+                cb(dev_name, (dev.total_blocks() * 512) as usize, false);
+            });
             Ok(())
         }
         VfsMountType::ProcFs => {
@@ -600,91 +734,113 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
             }
             Ok(())
         }
-        VfsMountType::SsdDev => {
-            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
-                if dev.category() == crate::drivers::block_dev::StorageCategory::Ssd {
-                    let name = canon.trim_start_matches("/ssd/");
-                    cb(name, (dev.total_blocks() * 512) as usize, false);
-                }
-            });
-            Ok(())
-        }
-        VfsMountType::HddDev => {
-            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
-                if dev.category() == crate::drivers::block_dev::StorageCategory::Hdd {
-                    let name = canon.trim_start_matches("/hdd/");
-                    cb(name, (dev.total_blocks() * 512) as usize, false);
-                }
-            });
-            Ok(())
-        }
-        VfsMountType::UsbDev => {
-            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
-                if dev.category() == crate::drivers::block_dev::StorageCategory::Usb {
-                    let name = canon.trim_start_matches("/usb/");
-                    cb(name, (dev.total_blocks() * 512) as usize, false);
-                }
-            });
-            Ok(())
-        }
-        VfsMountType::SdxcDev => {
-            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
-                if dev.category() == crate::drivers::block_dev::StorageCategory::Sdxc {
-                    let name = canon.trim_start_matches("/sdxc/");
-                    cb(name, (dev.total_blocks() * 512) as usize, false);
-                }
-            });
-            Ok(())
-        }
-        VfsMountType::SdhcDev => {
-            crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
-                if dev.category() == crate::drivers::block_dev::StorageCategory::Sdhc {
-                    let name = canon.trim_start_matches("/sdhc/");
-                    cb(name, (dev.total_blocks() * 512) as usize, false);
-                }
-            });
+        VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
+        VfsMountType::SdxcDev | VfsMountType::SdhcDev => {
             Ok(())
         }
         VfsMountType::RootPurpleFs => {
-            if sub.is_empty() {
-                // Root virtual mount folders
+            let clean_sub = sub.trim_start_matches('/').trim_end_matches('/');
+            if clean_sub.is_empty() {
+                // 1. Root virtual mounts (DevFS, ProcFS, TmpFS)
                 cb("dev", 0, true);
                 cb("proc", 0, true);
                 cb("tmp", 0, true);
-                cb("ssd", 0, true);
-                cb("hdd", 0, true);
-                cb("usb", 0, true);
-                cb("sdxc", 0, true);
-                cb("sdhc", 0, true);
 
-                // Registered custom VFS directories
+                // 2. Canonical PurpleOS root architecture directories
+                cb("Boot", 0, true);
+                cb("System", 0, true);
+                cb("Users", 0, true);
+                cb("Recovery", 0, true);
+
+                // 3. User-created directories in VFS_DIRS
                 {
                     let dirs = VFS_DIRS.lock();
                     for d in dirs.iter() {
                         if d.in_use {
                             if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
-                                cb(s, 0, true);
+                                if !s.contains('/') {
+                                    if s != "dev" && s != "proc" && s != "tmp" && s != "Boot" && s != "System" && s != "Users" && s != "Recovery" {
+                                        cb(s, 0, true);
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                // PurpleFS persistent files
+                // 4. Root persistent files from storage (do NOT list items containing '/')
                 crate::kernel::storage::with_fs(|fs| {
                     fs.list_files(|_ino, ftype, fsize, name| {
-                        cb(name, fsize as usize, ftype == 2);
+                        if !name.contains('/') {
+                            if name != "dev" && name != "proc" && name != "tmp" && name != "Boot" && name != "System" && name != "Users" && name != "Recovery" {
+                                cb(name, fsize as usize, ftype == 2);
+                            }
+                        }
                     });
                 });
                 Ok(())
             } else if is_directory(path) {
-                // Subdirectory listing
+                // Canonical subdirectories
+                match clean_sub {
+                    "System" => {
+                        cb("Applications", 0, true);
+                        cb("CLI", 0, true);
+                        cb("Configuration", 0, true);
+                        cb("Drivers", 0, true);
+                        cb("Frameworks", 0, true);
+                        cb("Kernel", 0, true);
+                        cb("Libraries", 0, true);
+                        cb("Resources", 0, true);
+                        cb("Services", 0, true);
+                    }
+                    "Users" => {
+                        cb("Admin", 0, true);
+                        cb("aegis", 0, true);
+                    }
+                    "Users/aegis" => {
+                        cb("Applications", 0, true);
+                        cb("Desktop", 0, true);
+                        cb("Documents", 0, true);
+                    }
+                    "Boot" => {
+                        cb("EFI", 0, true);
+                    }
+                    "Boot/EFI" => {
+                        cb("Boot", 0, true);
+                    }
+                    _ => {}
+                }
+
+                // Custom subdirectories in VFS_DIRS
+                {
+                    let dirs = VFS_DIRS.lock();
+                    for d in dirs.iter() {
+                        if d.in_use {
+                            if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
+                                if s.starts_with(clean_sub) && s.as_bytes().get(clean_sub.len()) == Some(&b'/') {
+                                    let rel = &s[clean_sub.len() + 1..];
+                                    if !rel.is_empty() && !rel.contains('/') {
+                                        cb(rel, 0, true);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Storage files matching this directory prefix
                 crate::kernel::storage::with_fs(|fs| {
                     fs.list_files(|_ino, ftype, fsize, name| {
-                        if name.starts_with(sub) && name.len() > sub.len() {
-                            let rel = &name[sub.len()..];
-                            let rel_clean = rel.trim_start_matches('/');
-                            if !rel_clean.is_empty() && !rel_clean.contains('/') {
-                                cb(rel_clean, fsize as usize, ftype == 2);
+                        if name.starts_with(clean_sub) && name.as_bytes().get(clean_sub.len()) == Some(&b'/') {
+                            let rel = &name[clean_sub.len() + 1..];
+                            if let Some(slash_idx) = rel.find('/') {
+                                let sub_dir = &rel[..slash_idx];
+                                if clean_sub == "System" && matches!(sub_dir, "Applications" | "CLI" | "Configuration" | "Drivers" | "Frameworks" | "Kernel" | "Libraries" | "Resources" | "Services") {
+                                    return;
+                                }
+                                cb(sub_dir, 0, true);
+                            } else {
+                                cb(rel, fsize as usize, ftype == 2);
                             }
                         }
                     });

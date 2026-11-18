@@ -3240,11 +3240,26 @@ impl Shell {
         serial::println("├── dev");
         serial::println("├── proc");
         serial::println("├── tmp");
-        serial::println("├── ssd (NVMe / SATA Solid State Drives)");
-        serial::println("├── hdd (ATA / IDE Hard Disk Drives)");
-        serial::println("├── usb (USB 3.x Flash Mass Storage)");
-        serial::println("├── sdxc (SDXC High-Capacity Cards)");
-        serial::println("└── sdhc (SDHC Standard Cards)\n");
+        serial::println("├── Boot");
+        serial::println("│   └── EFI");
+        serial::println("│       └── Boot");
+        serial::println("├── System");
+        serial::println("│   ├── Applications");
+        serial::println("│   ├── CLI");
+        serial::println("│   ├── Configuration");
+        serial::println("│   ├── Drivers");
+        serial::println("│   ├── Frameworks");
+        serial::println("│   ├── Kernel");
+        serial::println("│   ├── Libraries");
+        serial::println("│   ├── Resources");
+        serial::println("│   └── Services");
+        serial::println("├── Users");
+        serial::println("│   ├── aegis");
+        serial::println("│   │   ├── Applications");
+        serial::println("│   │   ├── Desktop");
+        serial::println("│   │   └── Documents");
+        serial::println("│   └── Admin");
+        serial::println("└── Recovery\n");
     }
 
     fn show_stat(&self, file: &str) {

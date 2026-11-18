@@ -291,6 +291,7 @@ impl<'a> PurpleFsV2<'a> {
         let mut slot_found = false;
         while off + 32 <= 4096 {
             let ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
+            let rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
             if ino == 0 {
                 let b = filename.as_bytes();
                 let len = b.len().min(24);
@@ -302,7 +303,18 @@ impl<'a> PurpleFsV2<'a> {
                 slot_found = true;
                 break;
             }
-            off += 32;
+            if rec_len == 0 {
+                let b = filename.as_bytes();
+                let len = b.len().min(24);
+                dir_block[off..off + 4].copy_from_slice(&new_ino.to_le_bytes());
+                dir_block[off + 4..off + 6].copy_from_slice(&32u16.to_le_bytes());
+                dir_block[off + 6] = len as u8;
+                dir_block[off + 7] = 1; // regular file
+                dir_block[off + 8..off + 8 + len].copy_from_slice(&b[..len]);
+                slot_found = true;
+                break;
+            }
+            off += rec_len.max(32);
         }
 
         if !slot_found {
