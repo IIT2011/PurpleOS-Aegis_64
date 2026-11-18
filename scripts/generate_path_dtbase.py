@@ -11,8 +11,10 @@ import os
 
 DEFAULT_PATHS = [
     "/System/Applications",
+    "/System/Services",
     "/System/CLI/scripts",
     "/System/Drivers",
+    "/System/Frameworks",
     "/System/Users/aegis/Applications",
     "/tmp",
     "/",

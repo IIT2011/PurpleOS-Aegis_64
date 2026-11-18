@@ -65,6 +65,11 @@ COMMANDS = [
     ("gpu3d", "Storage", "ring0:gpu3d", "Hardware 3D command processor status", "gpu3d"),
     ("3d", "Storage", "ring0:gpu3d", "3D command processor info", "3d"),
 
+    # GUI & Compositor
+    ("compositor", "GUI", "ring0:compositor", "Native window server and framebuffer compositor", "compositor [status|start|stop|demo|render]"),
+    ("gui", "GUI", "ring0:compositor", "Graphical user interface environment manager", "gui [start|stop|demo|status]"),
+    ("window", "GUI", "ring0:window", "Manage desktop windows and Z-order stack", "window [list|close|focus|move|demo]"),
+
     # Network
     ("ifconfig", "Network", "ring0:ifconfig", "Network interface configuration and stats", "ifconfig"),
     ("ping", "Network", "ring0:ping", "Send ICMP ECHO_REQUEST to network hosts", "ping <ip>"),

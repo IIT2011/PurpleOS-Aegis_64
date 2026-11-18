@@ -279,6 +279,11 @@ pub fn file_size(path: &str) -> Result<usize, &'static str> {
         VfsMountType::DevFs => {
             if sub == "null" || sub == "zero" || sub == "console" {
                 Ok(0)
+            } else if sub == "compositor" {
+                Ok(256)
+            } else if sub == "fb0" {
+                let v = crate::drivers::video::VIDEO.lock();
+                Ok(v.pitch * v.height * 4)
             } else {
                 let mut sz = 0;
                 let mut found = false;
@@ -568,6 +573,57 @@ fn read_devfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
             Ok(buf.len())
         }
         "console" => Ok(0),
+        "compositor" => {
+            let len = crate::compositor::format_status(buf);
+            Ok(len)
+        }
+        "fb0" => {
+            let (w, h, bpp, pitch) = {
+                let v = crate::drivers::video::VIDEO.lock();
+                (v.width, v.height, v.bpp, v.pitch)
+            };
+            let mut info_buf = [0u8; 128];
+            let mut pos = 0;
+            let append_str = |dest: &mut [u8], pos: &mut usize, s: &str| {
+                for b in s.bytes() {
+                    if *pos < dest.len() {
+                        dest[*pos] = b;
+                        *pos += 1;
+                    }
+                }
+            };
+            let append_u64 = |dest: &mut [u8], pos: &mut usize, mut val: u64| {
+                if val == 0 {
+                    if *pos < dest.len() { dest[*pos] = b'0'; *pos += 1; }
+                    return;
+                }
+                let mut tmp = [0u8; 20];
+                let mut i = 0;
+                while val > 0 && i < 20 {
+                    tmp[i] = b'0' + (val % 10) as u8;
+                    val /= 10;
+                    i += 1;
+                }
+                for j in 0..i {
+                    if *pos < dest.len() {
+                        dest[*pos] = tmp[i - 1 - j];
+                        *pos += 1;
+                    }
+                }
+            };
+            append_str(&mut info_buf, &mut pos, "fb0: ");
+            append_u64(&mut info_buf, &mut pos, w as u64);
+            append_str(&mut info_buf, &mut pos, "x");
+            append_u64(&mut info_buf, &mut pos, h as u64);
+            append_str(&mut info_buf, &mut pos, "x");
+            append_u64(&mut info_buf, &mut pos, bpp as u64);
+            append_str(&mut info_buf, &mut pos, ", pitch=");
+            append_u64(&mut info_buf, &mut pos, pitch as u64);
+            append_str(&mut info_buf, &mut pos, ", format=ARGB8888, double_buffer=active\n");
+            let len = pos.min(buf.len());
+            buf[..len].copy_from_slice(&info_buf[..len]);
+            Ok(len)
+        }
         "storage" => {
             let msg = b"Aegis64 Unified Device VFS: /dev/null, /dev/zero, /dev/console, dynamic block devices online\n";
             let len = msg.len().min(buf.len());
@@ -608,6 +664,24 @@ fn write_devfs(name: &str, content: &[u8]) -> Result<usize, &'static str> {
         "console" => {
             if let Ok(s) = core::str::from_utf8(content) {
                 crate::drivers::serial::print(s);
+            }
+            Ok(content.len())
+        }
+        "compositor" => {
+            if let Ok(cmd_str) = core::str::from_utf8(content) {
+                let trimmed = cmd_str.trim();
+                let mut parts = trimmed.split_whitespace();
+                match parts.next().unwrap_or("") {
+                    "start" | "run" => crate::compositor::start(),
+                    "stop" => crate::compositor::stop(),
+                    "demo" => {
+                        crate::compositor::start();
+                        crate::compositor::setup_demo_windows();
+                        crate::compositor::render_frame();
+                    }
+                    "render" | "frame" => crate::compositor::render_frame(),
+                    _ => {}
+                }
             }
             Ok(content.len())
         }
@@ -781,6 +855,8 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
             cb("null", 0, false);
             cb("zero", 0, false);
             cb("console", 0, false);
+            cb("compositor", 256, false);
+            cb("fb0", 800 * 600 * 4, false);
             crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
                 let name = canon.trim_start_matches('/');
                 let dev_name = name.rsplit('/').next().unwrap_or(name);

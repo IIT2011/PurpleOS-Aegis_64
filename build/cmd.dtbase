@@ -1,9 +1,9 @@
 # PURPLEOS COMMAND DATABASE — CRYPTOGRAPHICALLY SIGNED BY CREATOR
 # SIGNER: Creator (Aegis Root Developer)
 # KEY_ID: AEGIS-CREATOR-V1
-# SIGNATURE: 94fc70bf170e6dc9e7fb50d6d17e4289f63a0946ee11f13bdf6df66feaa75aba
+# SIGNATURE: 557425306c4b522cbdd5809ecb8cbe1682beb941aa55a5ff9f53c600a9815846
 # CANONICAL PATH: /System/CLI/cmd.dtbase
-# COMMAND COUNT: 120
+# COMMAND COUNT: 123
 
 [cmd:cd]
 cat=Navigation
@@ -298,6 +298,24 @@ cat=Storage
 target=ring0:gpu3d
 desc=3D command processor info
 usage=3d
+
+[cmd:compositor]
+cat=GUI
+target=ring0:compositor
+desc=Native window server and framebuffer compositor
+usage=compositor [status|start|stop|demo|render]
+
+[cmd:gui]
+cat=GUI
+target=ring0:compositor
+desc=Graphical user interface environment manager
+usage=gui [start|stop|demo|status]
+
+[cmd:window]
+cat=GUI
+target=ring0:window
+desc=Manage desktop windows and Z-order stack
+usage=window [list|close|focus|move|demo]
 
 [cmd:ifconfig]
 cat=Network

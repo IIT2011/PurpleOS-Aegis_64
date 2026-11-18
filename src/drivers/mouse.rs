@@ -115,6 +115,13 @@ pub fn handle_byte(b: u8) {
             };
             m.x = (m.x + dx).clamp(0, max_x);
             m.y = (m.y - dy).clamp(0, max_y);
+
+            let cur_x = m.x;
+            let cur_y = m.y;
+            let cur_btns = m.buttons;
+            drop(m);
+
+            crate::compositor::handle_mouse_event(cur_x, cur_y, cur_btns);
         }
         _ => m.cycle = 0,
     }

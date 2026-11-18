@@ -22,6 +22,7 @@ pub mod crypto;
 pub mod security;
 pub mod kernel;
 pub mod net;
+pub mod compositor;
 
 extern "C" {
     static _kernel_start: u8;
@@ -149,6 +150,9 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
         drivers::video::set_cursor(0, 3);
         drivers::video::set_colors(drivers::video::COLOR_WHITE, drivers::video::COLOR_PURPLE_BG);
     }
+
+    // 16b. Native Window Server & Compositor Subsystem
+    compositor::init();
 
     // 17. Enable Hardware Interrupts
     arch::x86_64::cpu::sti();

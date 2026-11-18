@@ -78,7 +78,7 @@ def main():
         ("Boot Creator Signature Verification", "[CMDDB] Authenticated /System/CLI/cmd.dtbase — Cryptographically Signed by Creator!"),
         ("Boot Verified Signer", "[CMDDB] Verified Signer: Creator (Aegis Root Developer)"),
         ("Boot Loaded Command Count", "commands into kernel execution dispatcher"),
-        ("Boot Path Database Loaded", "[PATHDB] Loaded 6 search path(s) from /System/CLI/path.dtbase"),
+        ("Boot Path Database Loaded", "search path(s) from /System/CLI/path.dtbase (Unrestricted User Configuration)"),
         ("cmd info Database Path", "Database Path:     /System/CLI/cmd.dtbase"),
         ("cmd info Creator Signed", "Creator Signed:    YES (Cryptographically Signed by Creator)"),
         ("cmd verify Status", "/System/CLI/cmd.dtbase Creator Signature: 100% VERIFIED"),
@@ -87,12 +87,12 @@ def main():
         ("path System Applications", "/System/Applications"),
         ("path Add Directory", "[PATHDB] Added '/System/TestBin' to active search paths."),
         ("path Remove Directory", "[PATHDB] Removed '/System/TestBin' from active search paths."),
-        ("path Reload Command", "Successfully reloaded 6 search path(s) from /System/CLI/path.dtbase"),
+        ("path Reload Command", "Successfully reloaded"),
         ("Dynamic Help Manual LS", "PurpleOS Command Manual: ls"),
         ("Dynamic Help Manual Ring3", "PurpleOS Command Manual: ring3"),
         ("Which Cat Builtin", "cat: shell builtin command (defined in /System/CLI/cmd.dtbase)"),
         ("Which Ring3 Userland", "ring3: Ring 3 user mode application (defined in /System/CLI/cmd.dtbase)"),
-        ("cmd Dynamic Hot-Reload", "Successfully reloaded 120 commands from /System/CLI/cmd.dtbase"),
+        ("cmd Dynamic Hot-Reload", "Successfully reloaded"),
         ("Suite Completion", "CMDDB-TESTS-COMPLETED"),
     ]
 

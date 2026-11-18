@@ -1839,6 +1839,8 @@ impl Shell {
                 }
             }
             "3d" | "gpu3d" => self.show_gpu3d(),
+            "compositor" | "gui" => self.show_compositor(&mut parts),
+            "window" => self.show_window(&mut parts),
             "ifconfig" => self.show_network(),
 
             // Driver Modules & Symbols
@@ -3824,6 +3826,149 @@ impl Shell {
             }
         }
         serial::println("");
+    }
+
+    fn show_compositor(&self, parts: &mut core::str::SplitWhitespace) {
+        let sub = parts.next().unwrap_or("");
+        match sub {
+            "start" | "run" => {
+                crate::compositor::start();
+                serial::println("Compositor: Aegis64 desktop environment and window server started.");
+            }
+            "stop" => {
+                crate::compositor::stop();
+                serial::println("Compositor: Stopped, restored text mode console.");
+            }
+            "demo" => {
+                crate::compositor::start();
+                crate::compositor::setup_demo_windows();
+                crate::compositor::render_frame();
+                serial::println("Compositor: Demo desktop launched with 3 interactive windows.");
+            }
+            "render" | "frame" => {
+                crate::compositor::render_frame();
+                serial::println("Compositor: Frame rendered.");
+            }
+            _ => {
+                let comp = crate::compositor::COMPOSITOR.lock();
+                serial::println("\n=== Aegis64 Native Framebuffer Compositor Subsystem ===");
+                serial::print("  Status:          ");
+                serial::println(if comp.running { "Online (Active 60 Hz Desktop Loop)" } else { "Standby / Stopped" });
+                serial::print("  Resolution:      ");
+                serial::print_u64(comp.width as u64);
+                serial::print("x");
+                serial::print_u64(comp.height as u64);
+                serial::println("@32bpp ARGB8888");
+                serial::println("  Double Buffer:   Hardware VBE Offset / Coherent RAM Back-Buffer");
+                serial::println("  Alpha Blending:  Porter-Duff SourceOver (Translucent Shadows & Borders)");
+                serial::println("  Cursor Engine:   Anti-Aliased Flicker-Free Pointer Overlay");
+                serial::println("  Window Server:   Active (Z-Ordered Scene Graph & Damage Rect Tracking)");
+                serial::println("  VFS Device Node: /dev/compositor, /dev/fb0");
+                serial::println("  Service Daemon:  /System/Services/Compositor");
+                serial::println("  Framework:       /System/Frameworks/Compositor.framework/");
+                serial::println("  Configuration:   /System/Configuration/desktop.cfg");
+                serial::print("  Windows Open:    ");
+                serial::print_u64(comp.window_count() as u64);
+                serial::println("");
+                serial::print("  Frames Rendered: ");
+                serial::print_u64(comp.frame_count);
+                serial::println("\n");
+                serial::println("Commands: 'compositor start', 'compositor stop', 'compositor demo', 'window list'");
+            }
+        }
+    }
+
+    fn show_window(&self, parts: &mut core::str::SplitWhitespace) {
+        let sub = parts.next().unwrap_or("list");
+        match sub {
+            "close" => {
+                if let Some(id_str) = parts.next() {
+                    let mut id = 0usize;
+                    for b in id_str.bytes() {
+                        if b >= b'0' && b <= b'9' {
+                            id = id * 10 + (b - b'0') as usize;
+                        }
+                    }
+                    if crate::compositor::close_window(id) {
+                        serial::print("Closed window ");
+                        serial::print_u64(id as u64);
+                        serial::println("");
+                    } else {
+                        serial::print("Window ");
+                        serial::print_u64(id as u64);
+                        serial::println(" not found.");
+                    }
+                } else {
+                    serial::println("Usage: window close <id>");
+                }
+            }
+            "focus" => {
+                if let Some(id_str) = parts.next() {
+                    let mut id = 0usize;
+                    for b in id_str.bytes() {
+                        if b >= b'0' && b <= b'9' {
+                            id = id * 10 + (b - b'0') as usize;
+                        }
+                    }
+                    if crate::compositor::focus_window(id) {
+                        serial::print("Focused window ");
+                        serial::print_u64(id as u64);
+                        serial::println("");
+                    } else {
+                        serial::print("Window ");
+                        serial::print_u64(id as u64);
+                        serial::println(" not found.");
+                    }
+                } else {
+                    serial::println("Usage: window focus <id>");
+                }
+            }
+            "demo" => {
+                crate::compositor::setup_demo_windows();
+                if crate::compositor::is_running() {
+                    crate::compositor::render_frame();
+                }
+                serial::println("Initialized demo windows.");
+            }
+            _ => {
+                let comp = crate::compositor::COMPOSITOR.lock();
+                serial::println("\nActive Windows Stack:");
+                let mut found = false;
+                for win_opt in comp.windows.iter() {
+                    if let Some(win) = win_opt {
+                        found = true;
+                        serial::print("  [ID ");
+                        serial::print_u64(win.id as u64);
+                        serial::print("] \"");
+                        serial::print(win.title_str());
+                        serial::print("\" pos=(");
+                        serial::print_u64(win.x.max(0) as u64);
+                        serial::print(",");
+                        serial::print_u64(win.y.max(0) as u64);
+                        serial::print(") size=");
+                        serial::print_u64(win.client_w as u64);
+                        serial::print("x");
+                        serial::print_u64(win.client_h as u64);
+                        serial::print(" z=");
+                        serial::print_u64(win.z_order as u64);
+                        if win.is_focused {
+                            serial::print(" [FOCUSED]");
+                        }
+                        if win.is_minimized {
+                            serial::print(" [MINIMIZED]");
+                        }
+                        if win.is_maximized {
+                            serial::print(" [MAXIMIZED]");
+                        }
+                        serial::println("");
+                    }
+                }
+                if !found {
+                    serial::println("  No active windows open. (Use 'compositor demo' to create demo windows)");
+                }
+                serial::println("");
+            }
+        }
     }
 
     fn show_network(&self) {

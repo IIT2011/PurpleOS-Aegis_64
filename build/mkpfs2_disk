@@ -154,12 +154,69 @@ def build_gpt_disk(disk_path, total_disk_sectors=2097152): # 1024 MiB
         subprocess.check_call([sys.executable, script_path, path_dtbase_path])
     path_dtbase_data = open(path_dtbase_path, "rb").read() if os.path.exists(path_dtbase_path) else b""
 
+    desktop_cfg = b"""[Display]
+resolution = 800x600
+bpp = 32
+refresh_rate = 60
+double_buffer = true
+vsync = true
+
+[Theme]
+name = PurpleNebula
+wallpaper_gradient_top = 0x120722
+wallpaper_gradient_bot = 0x280E46
+accent_color = 0x7E3FF2
+window_title_active_top = 0x5D289D
+window_title_active_bot = 0x351259
+window_title_inactive_top = 0x332E3F
+window_title_inactive_bot = 0x1D1926
+font = Aegis8x16
+
+[Cursor]
+theme = DefaultAegisArrow
+size = 16
+pointer_color = 0xFFFFFFFF
+border_color = 0xFF000000
+
+[Compositor]
+service = /System/Services/Compositor
+framework = /System/Frameworks/Compositor.framework
+device = /dev/compositor
+fb_device = /dev/fb0
+max_windows = 16
+shadows = true
+"""
+
+    compositor_service = b"""[Service]
+Name = PurpleCompositor
+Description = Aegis64 Native Window Server and Framebuffer Compositor
+Type = KernelSubsystem
+DeviceNode = /dev/compositor
+Framebuffer = /dev/fb0
+Status = Active
+Priority = RealTime
+Target = Desktop
+"""
+
+    compositor_fw_conf = b"""[Framework]
+Name = Compositor.framework
+Version = 1.0.0
+Description = Aegis64 Native Windowing and Surface Client Library
+Target = x86_64-unknown-none
+Protocol = AegisIPC-Compositor-v1
+Header = Compositor.h
+Library = libcompositor.a
+"""
+
     files = {
         "welcome.txt": b"Welcome to Purple OS / Aegis64 Native Filesystem!\n",
         "version.txt": b"Aegis64 Kernel v0.4.0 (Stage 4B Safe Kernel Storage Integration)\n",
         "motd": b"Message of the Day: Aegis64 Pure Rust Operational.\n",
         "System/CLI/cmd.dtbase": cmd_dtbase_data,
         "System/CLI/path.dtbase": path_dtbase_data,
+        "System/Configuration/desktop.cfg": desktop_cfg,
+        "System/Services/Compositor": compositor_service,
+        "System/Frameworks/Compositor.framework/compositor.conf": compositor_fw_conf,
     }
 
     # Seed unified category modules and filesystem drivers
