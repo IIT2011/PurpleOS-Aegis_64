@@ -165,31 +165,59 @@ def build_payload():
         lines.append("")
     return "\n".join(lines).encode("utf-8")
 
-import hmac
+import subprocess
+import shutil
 
-def get_creator_key():
-    for kp in ["keys/creator_key.txt", "OS/keys/creator_key.txt", "../keys/creator_key.txt"]:
+OPENSSL_CANDIDATES = [
+    shutil.which("openssl"),
+    r"D:\OS Development\Dev Tools\Git\usr\bin\openssl.exe",
+    r"C:\Program Files\Git\usr\bin\openssl.exe",
+    r"C:\Program Files\OpenSSL-Win64\bin\openssl.exe",
+]
+
+def get_openssl_bin() -> str:
+    for cand in OPENSSL_CANDIDATES:
+        if cand and os.path.exists(cand):
+            return cand
+    raise RuntimeError("OpenSSL executable not found.")
+
+def get_creator_private_key():
+    for kp in [
+        "keys/creator_private_key.pem",
+        "OS/keys/creator_private_key.pem",
+        "../keys/creator_private_key.pem",
+        "d:/OS Development/OS/keys/creator_private_key.pem",
+    ]:
         if os.path.exists(kp):
-            with open(kp, "r") as f:
-                content = f.read().strip()
-                if len(content) == 64:
-                    try:
-                        return bytes.fromhex(content)
-                    except ValueError:
-                        pass
-                return hashlib.sha256(content.encode("utf-8")).digest()
-    raise RuntimeError("Creator signing key file not found. Ensure keys/creator_key.txt exists.")
+            return os.path.abspath(kp)
+    raise RuntimeError("Creator RSA private key file not found. Ensure keys/creator_private_key.pem exists.")
 
-def generate_database(creator_key: bytes = None):
-    if creator_key is None:
-        creator_key = get_creator_key()
+def sign_payload_rsa(payload: bytes, key_path: str) -> str:
+    openssl = get_openssl_bin()
+    p = subprocess.Popen(
+        [openssl, "dgst", "-sha256", "-sign", key_path],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    sig_bytes, err = p.communicate(input=payload)
+    if p.returncode != 0:
+        raise RuntimeError(f"OpenSSL signing failed: {err.decode('utf-8', errors='replace')}")
+    if len(sig_bytes) != 256:
+        raise RuntimeError(f"Unexpected signature length: {len(sig_bytes)} (expected 256 bytes)")
+    return sig_bytes.hex()
+
+def generate_database(key_path: str = None):
+    if key_path is None:
+        key_path = get_creator_private_key()
     payload = build_payload()
-    sig = hmac.new(creator_key, payload, hashlib.sha256).hexdigest()
+    sig = sign_payload_rsa(payload, key_path)
     
     header = (
         f"# PURPLEOS COMMAND DATABASE\n"
         f"# SIGNER: Creator (Aegis Root Developer)\n"
         f"# KEY_ID: AEGIS-CREATOR-V1\n"
+        f"# ALGORITHM: RSA-2048 PKCS#1 v1.5 / SHA-256\n"
         f"# SIGNATURE: {sig}\n"
         f"# CANONICAL PATH: /System/CLI/cmd.dtbase\n"
         f"# COMMAND COUNT: {len(COMMANDS)}\n\n"

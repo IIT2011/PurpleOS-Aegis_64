@@ -86,9 +86,8 @@ pub struct CmdTable {
     pub entries: [CmdRecord; MAX_COMMANDS],
     pub count: usize,
     pub signature_verified: bool,
-    pub signature_expected: [u8; 64],
-    pub signature_computed: [u8; 32],
-    pub signature_hex: [u8; 64],
+    pub signature_expected: [u8; 512],
+    pub payload_hash: [u8; 32],
     pub signer_name: [u8; 32],
     pub signer_len: u8,
     pub payload_bytes: usize,
@@ -101,9 +100,8 @@ impl CmdTable {
             entries: [CmdRecord::empty(); MAX_COMMANDS],
             count: 0,
             signature_verified: false,
-            signature_expected: [0; 64],
-            signature_computed: [0; 32],
-            signature_hex: [0; 64],
+            signature_expected: [0; 512],
+            payload_hash: [0; 32],
             signer_name: [0; 32],
             signer_len: 0,
             payload_bytes: 0,
@@ -118,8 +116,6 @@ impl CmdTable {
 
 static CMD_TABLE: Spinlock<CmdTable> = Spinlock::new(CmdTable::new());
 static RAW_BUFFER: Spinlock<[u8; 24576]> = Spinlock::new([0u8; 24576]);
-
-const HEX_CHARS: &[u8] = b"0123456789abcdef";
 
 /// Initialize the command database by reading `/System/CLI/cmd.dtbase` from storage,
 /// verifying its Cryptographic Creator Signature, and parsing all command records.
@@ -157,13 +153,12 @@ fn parse_and_verify(data: &[u8]) -> bool {
     table.count = 0;
     table.signature_verified = false;
     table.signature_expected.fill(0);
-    table.signature_computed.fill(0);
-    table.signature_hex.fill(0);
+    table.payload_hash.fill(0);
     table.signer_name.fill(0);
     table.signer_len = 0;
 
     // 1. Locate `# SIGNATURE: ` and `# SIGNER: ` lines in header
-    let mut expected_hex = [0u8; 64];
+    let mut expected_hex = [0u8; 512];
     let mut payload_start = 0usize;
     let mut found_sig = false;
 
@@ -179,8 +174,8 @@ fn parse_and_verify(data: &[u8]) -> bool {
 
         if trimmed.starts_with(b"# SIGNATURE:") {
             let rest = trim_slice(&trimmed[12..]);
-            if rest.len() >= 64 {
-                expected_hex.copy_from_slice(&rest[..64]);
+            if rest.len() >= 512 {
+                expected_hex.copy_from_slice(&rest[..512]);
                 table.signature_expected = expected_hex;
                 found_sig = true;
             }
@@ -203,18 +198,10 @@ fn parse_and_verify(data: &[u8]) -> bool {
         return false;
     }
 
-    // 2. Cryptographic Creator Signature Verification (via AegisDetect Trust Anchor)
+    // 2. Cryptographic Creator Signature Verification (RSA-2048 PKCS#1 v1.5 / SHA-256)
     let payload = &data[payload_start..];
     table.payload_bytes = payload.len();
-    let sig_digest = crate::security::aegis_detect::compute_signature(payload);
-    table.signature_computed = sig_digest;
-
-    let mut computed_hex = [0u8; 64];
-    for (i, &b) in sig_digest.iter().enumerate() {
-        computed_hex[i * 2] = HEX_CHARS[(b >> 4) as usize];
-        computed_hex[i * 2 + 1] = HEX_CHARS[(b & 0x0f) as usize];
-    }
-    table.signature_hex = computed_hex;
+    table.payload_hash = crate::crypto::sha256::hash(payload);
 
     let is_verified = crate::security::aegis_detect::verify_signature(payload, &expected_hex);
     table.signature_verified = is_verified;
@@ -376,8 +363,9 @@ pub fn verify_integrity() -> bool {
         return false;
     }
 
-    let disk_sig = crate::security::aegis_detect::compute_signature(&data[payload_start..]);
-    disk_sig == table.signature_computed && table.signature_verified
+    let disk_payload = &data[payload_start..];
+    let disk_hash = crate::crypto::sha256::hash(disk_payload);
+    disk_hash == table.payload_hash && table.signature_verified
 }
 
 /// Autocomplete matching for interactive shell Tab completion.

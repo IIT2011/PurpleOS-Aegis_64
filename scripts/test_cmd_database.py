@@ -40,7 +40,15 @@ def main():
             bufsize=0
         )
 
-        time.sleep(2.5)
+        import threading
+        captured_chunks = []
+        def read_stdout():
+            for line in iter(proc.stdout.readline, ''):
+                captured_chunks.append(line)
+        t = threading.Thread(target=read_stdout, daemon=True)
+        t.start()
+
+        time.sleep(3.5)
 
         test_commands = [
             "cmd info\n",
@@ -63,13 +71,14 @@ def main():
             proc.stdin.flush()
             time.sleep(0.3)
 
-        time.sleep(1.0)
+        time.sleep(1.5)
         proc.terminate()
         try:
-            stdout, _ = proc.communicate(timeout=3)
+            proc.wait(timeout=3)
         except Exception:
             proc.kill()
-            stdout, _ = proc.communicate()
+        t.join(timeout=2)
+        stdout = "".join(captured_chunks)
 
     print("=== Captured Output ===")
     print(stdout)

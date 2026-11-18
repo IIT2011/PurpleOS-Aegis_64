@@ -30,6 +30,7 @@ keys/
 *.key.txt
 *.key
 *.private.key
+*.pem
 
 # Test audit and forensic reports (per user directive)
 docs/*AUDIT*.md
