@@ -162,9 +162,16 @@ def build_payload():
 
 import hmac
 
-DEFAULT_CREATOR_KEY = b"PURPLEOS_AEGIS_CREATOR_ROOT_KEY_2026"
+def get_creator_key():
+    for kp in ["keys/creator_key.txt", "OS/keys/creator_key.txt", "../keys/creator_key.txt"]:
+        if os.path.exists(kp):
+            with open(kp, "r") as f:
+                return hashlib.sha256(f.read().strip().encode("utf-8")).digest()
+    raise RuntimeError("Creator signing key file not found. Ensure keys/creator_key.txt exists.")
 
-def generate_database(creator_key: bytes = DEFAULT_CREATOR_KEY):
+def generate_database(creator_key: bytes = None):
+    if creator_key is None:
+        creator_key = get_creator_key()
     payload = build_payload()
     sig = hmac.new(creator_key, payload, hashlib.sha256).hexdigest()
     

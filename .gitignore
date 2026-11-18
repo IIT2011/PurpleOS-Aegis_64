@@ -25,6 +25,12 @@ vlc/
 build/aegis64-uefi.img
 build/aegis64-uefi-test.img
 
+# Security & Cryptographic Creator Keys (Strictly Local)
+keys/
+*.key.txt
+*.key
+*.private.key
+
 # Test audit and forensic reports (per user directive)
 docs/*AUDIT*.md
 docs/*audit*.md

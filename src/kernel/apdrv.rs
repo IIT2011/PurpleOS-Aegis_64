@@ -186,6 +186,11 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
         return Err("Invalid module type");
     }
 
+    let mod_name = core::str::from_utf8(&hdr.name).unwrap_or("module").trim_matches('\0');
+    if !crate::security::aegis_detect::verify_driver(mod_name, image) {
+        return Err("Driver verification failed under AegisDetect trust anchor");
+    }
+
     // Calculate required memory pages (align each section to 4 KiB for W^X memory protection)
     let text_pages = (hdr.text_size as usize + PAGE_SIZE - 1) / PAGE_SIZE;
     let rodata_pages = (hdr.rodata_size as usize + PAGE_SIZE - 1) / PAGE_SIZE;

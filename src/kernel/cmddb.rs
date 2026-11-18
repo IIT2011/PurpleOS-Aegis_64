@@ -13,7 +13,8 @@ use crate::sync::Spinlock;
 pub const CMD_DATABASE_PATH: &str = "/System/CLI/cmd.dtbase";
 pub const FALLBACK_DATABASE_PATH: &str = "cmd.dtbase";
 
-pub const CREATOR_SIGN_KEY: &[u8] = b"PURPLEOS_AEGIS_CREATOR_ROOT_KEY_2026";
+pub const CREATOR_SIGNER: &str = crate::security::aegis_detect::CREATOR_SIGNER;
+pub const CREATOR_KEY_ID: &str = crate::security::aegis_detect::CREATOR_KEY_ID;
 
 pub const MAX_COMMANDS: usize = 160;
 pub const MAX_NAME_LEN: usize = 24;
@@ -202,10 +203,10 @@ fn parse_and_verify(data: &[u8]) -> bool {
         return false;
     }
 
-    // 2. Cryptographic Creator Signature Verification (HMAC-SHA256 with Creator Key)
+    // 2. Cryptographic Creator Signature Verification (via AegisDetect Trust Anchor)
     let payload = &data[payload_start..];
     table.payload_bytes = payload.len();
-    let sig_digest = crate::crypto::sha256::hmac(CREATOR_SIGN_KEY, payload);
+    let sig_digest = crate::security::aegis_detect::compute_signature(payload);
     table.signature_computed = sig_digest;
 
     let mut computed_hex = [0u8; 64];
@@ -215,7 +216,7 @@ fn parse_and_verify(data: &[u8]) -> bool {
     }
     table.signature_hex = computed_hex;
 
-    let is_verified = computed_hex == expected_hex;
+    let is_verified = crate::security::aegis_detect::verify_signature(payload, &expected_hex);
     table.signature_verified = is_verified;
 
     if is_verified {
@@ -375,7 +376,7 @@ pub fn verify_integrity() -> bool {
         return false;
     }
 
-    let disk_sig = crate::crypto::sha256::hmac(CREATOR_SIGN_KEY, &data[payload_start..]);
+    let disk_sig = crate::security::aegis_detect::compute_signature(&data[payload_start..]);
     disk_sig == table.signature_computed && table.signature_verified
 }
 

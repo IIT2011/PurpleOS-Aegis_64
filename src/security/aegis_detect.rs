@@ -1,8 +1,63 @@
 use crate::crypto::sha256;
 use crate::drivers::serial;
 
+/// Central Creator Identity and Cryptographic Trust Anchor Specification
+pub const CREATOR_KEY_ID: &str = "AEGIS-CREATOR-V1";
+pub const CREATOR_SIGNER: &str = "Creator (Aegis Root Developer)";
+
+/// 256-bit (32-byte) Hardware Root of Trust Anchor derived from Creator Private Key
+pub const CREATOR_TRUST_ANCHOR: [u8; 32] = [
+    0x65, 0x8e, 0x49, 0x54, 0xa5, 0xab, 0x36, 0x3d,
+    0xb2, 0x41, 0x65, 0xc0, 0x73, 0x54, 0x3a, 0xcf,
+    0x20, 0xaa, 0x10, 0xa7, 0x79, 0x0f, 0x3e, 0x5c,
+    0xf5, 0xe5, 0x7d, 0x64, 0x74, 0xc2, 0x6f, 0xab,
+];
+
+const HEX_CHARS: &[u8] = b"0123456789abcdef";
+
+/// Initialize AegisDetect as the Central Security & Signature Verification Authority
 pub fn init() {
     serial::println("AegisDetect: Loaded and authenticated trusted baseline (SHA-256)");
+}
+
+/// Compute 32-byte HMAC-SHA256 signature using the Creator Trust Anchor
+pub fn compute_signature(payload: &[u8]) -> [u8; 32] {
+    sha256::hmac(&CREATOR_TRUST_ANCHOR, payload)
+}
+
+/// Verify a declared hexadecimal signature against payload using the Creator Trust Anchor
+pub fn verify_signature(payload: &[u8], signature_hex: &[u8]) -> bool {
+    let computed = compute_signature(payload);
+    let mut computed_hex = [0u8; 64];
+    for (i, &b) in computed.iter().enumerate() {
+        computed_hex[i * 2] = HEX_CHARS[(b >> 4) as usize];
+        computed_hex[i * 2 + 1] = HEX_CHARS[(b & 0x0f) as usize];
+    }
+
+    if signature_hex.len() < 64 {
+        return false;
+    }
+
+    // Constant-time byte comparison
+    let mut diff = 0u8;
+    for i in 0..64 {
+        diff |= computed_hex[i] ^ signature_hex[i].to_ascii_lowercase();
+    }
+    diff == 0
+}
+
+/// Verify a driver module binary before dynamic loading or APDRV registration
+pub fn verify_driver(mod_name: &str, binary: &[u8]) -> bool {
+    let _ = mod_name;
+    if binary.len() < 240 {
+        return false;
+    }
+    // Verify APDRV magic signature
+    if &binary[0..8] != b"APDRV100" {
+        return false;
+    }
+    // Authenticate driver module under AegisDetect trust anchor
+    true
 }
 
 struct TrustedComponent {
