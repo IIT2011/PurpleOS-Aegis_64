@@ -245,10 +245,20 @@ def main():
         ["kinfo", "audio_dump_devices"]
     )
 
-    # 9. bochs_gpu.apdrv (Bochs / QEMU DRM Graphics Driver)
+    # 9. gpu.apdrv (Unified GPU Driver Stack: Bochs VBE 2D, igd, radeongd, nvgd 3D)
+    build_module(
+        os.path.join(out_dir, "gpu.apdrv"),
+        "gpu",
+        "Unified GPU Driver Stack (Bochs VBE 2D, igd, radeongd, nvgd 3D)",
+        "Purple OS Hardware Group",
+        0x1234, 0x1111,
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+    )
+
+    # Legacy & sub-driver aliases
     build_module(
         os.path.join(out_dir, "bochs_gpu.apdrv"),
-        "bochs_gpu",
+        "gpu",
         "Bochs / QEMU DRM VBE Framebuffer Video Accelerator",
         "Purple OS Hardware Group",
         0x1234, 0x1111,
@@ -386,8 +396,8 @@ def main():
             with open(os.path.join("build", src), "wb") as df:
                 df.write(data)
 
-    # Also copy Graphics.apdrv, bochs_gpu.apdrv, r8139.apdrv, e1000.apdrv, and 3D GPU drivers to build/
-    for extra in ["Graphics.apdrv", "bochs_gpu.apdrv", "r8139.apdrv", "e1000.apdrv", "igd.apdrv", "radeongd.apdrv", "nvgd.apdrv", "gpu-intel.apdrv", "gpu-amd.apdrv", "gpu-nvidia.apdrv"]:
+    # Also copy Graphics.apdrv, gpu.apdrv, bochs_gpu.apdrv, r8139.apdrv, e1000.apdrv, and 3D GPU drivers to build/
+    for extra in ["Graphics.apdrv", "gpu.apdrv", "bochs_gpu.apdrv", "r8139.apdrv", "e1000.apdrv", "igd.apdrv", "radeongd.apdrv", "nvgd.apdrv", "gpu-intel.apdrv", "gpu-amd.apdrv", "gpu-nvidia.apdrv"]:
         p = os.path.join(out_dir, extra)
         if os.path.exists(p):
             with open(p, "rb") as sf:
