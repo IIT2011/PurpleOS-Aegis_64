@@ -3,6 +3,11 @@ mod con {
     use crate::drivers::{serial, video};
     use crate::sync::Spinlock;
 
+    #[inline(always)]
+    pub fn video_enabled() -> bool {
+        video::is_available() && !crate::compositor::is_running()
+    }
+
     pub struct OutputCapture {
         pub active: bool,
         pub buf: [u8; 4096],
@@ -31,7 +36,7 @@ mod con {
             }
         }
         serial::print(s);
-        if video::is_available() {
+        if video_enabled() {
             video::puts(s);
         }
     }
@@ -57,7 +62,7 @@ mod con {
             }
         }
         serial::println(s);
-        if video::is_available() {
+        if video_enabled() {
             video::puts(s);
             video::putc(b'\n');
         }
@@ -96,7 +101,7 @@ mod con {
             }
         }
         serial::print_u64(n);
-        if video::is_available() {
+        if video_enabled() {
             let mut buf = [0u8; 20];
             let mut i = 0;
             let mut val = n;
@@ -150,7 +155,7 @@ mod con {
             }
         }
         serial::print_hex(n);
-        if video::is_available() {
+        if video_enabled() {
             let mut buf = [0u8; 16];
             let mut i = 0;
             let mut val = n;
@@ -189,7 +194,7 @@ mod con {
             }
         }
         serial::print_hex_u64(n);
-        if video::is_available() {
+        if video_enabled() {
             let hex_chars = b"0123456789abcdef";
             for i in (0..16).rev() {
                 let digit = ((n >> (i * 4)) & 0xF) as usize;
@@ -212,7 +217,7 @@ mod con {
             }
         }
         serial::putchar(c);
-        if video::is_available() {
+        if video_enabled() {
             video::putc(c);
         }
     }
@@ -413,7 +418,7 @@ impl Shell {
         }
 
         if self.cwd_len == 1 && self.cwd[0] == b'/' {
-            if video::is_available() {
+            if con::video_enabled() {
                 video::set_colors(video::COLOR_PURPLE_ACC, video::COLOR_PURPLE_BG);
                 video::puts("aegis64");
                 video::set_colors(video::COLOR_GOLD, video::COLOR_PURPLE_BG);
@@ -424,7 +429,7 @@ impl Shell {
             crate::drivers::serial::print("aegis64@purple:~$ ");
         } else {
             let cwd_str = core::str::from_utf8(&self.cwd[..self.cwd_len]).unwrap_or("/");
-            if video::is_available() {
+            if con::video_enabled() {
                 video::set_colors(video::COLOR_PURPLE_ACC, video::COLOR_PURPLE_BG);
                 video::puts("aegis64");
                 video::set_colors(video::COLOR_GOLD, video::COLOR_PURPLE_BG);
@@ -454,7 +459,7 @@ impl Shell {
         }
 
         // Framebuffer console update
-        if video::is_available() {
+        if con::video_enabled() {
             let (_, cur_row) = video::get_cursor();
             video::set_cursor(0, cur_row);
             self.print_prompt();
@@ -494,7 +499,7 @@ impl Shell {
 
         let banner = "\n=======================================================================\n  Welcome to Purple OS / Aegis64 (Native 64-bit Kernel - Pure Rust)\n  Command Environment: AegisShell 2.5 (MS-DOS & Linux POSIX Hybrid)\n  Type 'help' for commands, 'dir' or 'ls' to view files.\n=======================================================================\n\n";
         crate::drivers::serial::print(banner);
-        if video::is_available() {
+        if con::video_enabled() {
             video::puts(banner);
         }
         self.print_prompt();
@@ -679,17 +684,17 @@ impl Shell {
                 }
             } else {
                 crate::drivers::serial::print("\n");
-                if video::is_available() { video::putc(b'\n'); }
+                if con::video_enabled() { video::putc(b'\n'); }
                 for i in 0..match_count {
                     crate::drivers::serial::print("  ");
                     crate::drivers::serial::print(matches[i]);
-                    if video::is_available() {
+                    if con::video_enabled() {
                         video::puts("  ");
                         video::puts(matches[i]);
                     }
                 }
                 crate::drivers::serial::print("\n");
-                if video::is_available() { video::putc(b'\n'); }
+                if con::video_enabled() { video::putc(b'\n'); }
                 self.redraw_line();
             }
         }
@@ -876,7 +881,7 @@ impl Shell {
 
         if c == b'\n' || c == b'\r' {
             crate::drivers::serial::print("\n");
-            if video::is_available() {
+            if con::video_enabled() {
                 video::putc(b'\n');
             }
             if self.len > 0 {
@@ -908,7 +913,7 @@ impl Shell {
         } else if c == 0x03 {
             // Ctrl+C -> Cancel line
             crate::drivers::serial::println("^C");
-            if video::is_available() {
+            if con::video_enabled() {
                 video::puts("^C\n");
             }
             self.len = 0;
@@ -934,8 +939,10 @@ impl Shell {
                 self.editor_redraw();
                 self.print_prompt();
             } else {
-                let (_, bg) = video::get_colors();
-                video::clear_screen(bg);
+                if con::video_enabled() {
+                    let (_, bg) = video::get_colors();
+                    video::clear_screen(bg);
+                }
                 crate::drivers::serial::print("\x1b[2J\x1b[H");
                 self.redraw_line();
             }
@@ -975,7 +982,7 @@ impl Shell {
                     self.cursor_pos -= 1;
                     self.len -= 1;
                     crate::drivers::serial::print("\x08 \x08");
-                    if video::is_available() {
+                    if con::video_enabled() {
                         video::putc(b'\x08');
                     }
                 } else {
@@ -993,7 +1000,7 @@ impl Shell {
                 self.len += 1;
                 self.cursor_pos += 1;
                 crate::drivers::serial::putchar(c);
-                if video::is_available() {
+                if con::video_enabled() {
                     video::putc(c);
                 }
             } else {
@@ -3833,7 +3840,7 @@ impl Shell {
         match sub {
             "start" | "run" => {
                 crate::compositor::start();
-                serial::println("Compositor: Aegis64 desktop environment and window server started.");
+                serial::println("Compositor: Native framebuffer compositor active.");
             }
             "stop" => {
                 crate::compositor::stop();
@@ -3843,7 +3850,7 @@ impl Shell {
                 crate::compositor::start();
                 crate::compositor::setup_demo_windows();
                 crate::compositor::render_frame();
-                serial::println("Compositor: Demo desktop launched with 3 interactive windows.");
+                serial::println("Compositor: Demo windows launched with 3 interactive surfaces.");
             }
             "render" | "frame" => {
                 crate::compositor::render_frame();
@@ -3853,7 +3860,7 @@ impl Shell {
                 let comp = crate::compositor::COMPOSITOR.lock();
                 serial::println("\n=== Aegis64 Native Framebuffer Compositor Subsystem ===");
                 serial::print("  Status:          ");
-                serial::println(if comp.running { "Online (Active 60 Hz Desktop Loop)" } else { "Standby / Stopped" });
+                serial::println(if comp.running { "Online (Native Compositor Loop)" } else { "Standby / Stopped" });
                 serial::print("  Resolution:      ");
                 serial::print_u64(comp.width as u64);
                 serial::print("x");

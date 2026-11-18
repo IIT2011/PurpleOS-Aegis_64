@@ -24,6 +24,9 @@ pub use window::{Window, WindowHitArea, MAX_WINDOWS};
 use crate::drivers::gpu::GPU;
 use crate::drivers::video::{self, VIDEO};
 use crate::sync::Spinlock;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+pub static COMPOSITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
 pub struct CompositorEngine {
     pub running: bool,
@@ -124,14 +127,9 @@ impl CompositorEngine {
         }
 
         self.running = true;
-
-        // Populate initial desktop windows if no windows exist
-        if self.window_count() == 0 {
-            self.setup_demo_windows();
-        }
-
+        COMPOSITOR_RUNNING.store(true, Ordering::SeqCst);
         self.render_frame();
-        crate::drivers::serial::println("Compositor: Desktop Environment active and rendering at 60 Hz");
+        crate::drivers::serial::println("Compositor: Native framebuffer compositor active (pure window server)");
     }
 
     /// Stop compositor and return to text console
@@ -140,6 +138,7 @@ impl CompositorEngine {
             return;
         }
         self.running = false;
+        COMPOSITOR_RUNNING.store(false, Ordering::SeqCst);
         self.dragging_window_id = None;
 
         // Restore text mode top bar on console
@@ -594,7 +593,7 @@ pub fn stop() {
 }
 
 pub fn is_running() -> bool {
-    COMPOSITOR.lock().running
+    COMPOSITOR_RUNNING.load(Ordering::Relaxed)
 }
 
 pub fn handle_mouse_event(x: i32, y: i32, buttons: u8) {

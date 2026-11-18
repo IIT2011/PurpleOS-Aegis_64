@@ -140,19 +140,12 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     kernel::apdrv::init();
     kernel::apexec::init();
 
-    // 16. Linear Framebuffer Console
+    // 16. Linear Framebuffer Driver Initialization
     drivers::video::init(mbi);
-    if drivers::video::is_available() {
-        drivers::video::draw_rect(0, 0, drivers::video::get_width(), 32, drivers::video::COLOR_PURPLE_BAR);
-        drivers::video::set_cursor(2, 0);
-        drivers::video::set_colors(drivers::video::COLOR_WHITE, drivers::video::COLOR_PURPLE_BAR);
-        drivers::video::puts("Purple OS / Aegis64 Native Console [Pure Rust x86-64]");
-        drivers::video::set_cursor(0, 3);
-        drivers::video::set_colors(drivers::video::COLOR_WHITE, drivers::video::COLOR_PURPLE_BG);
-    }
 
-    // 16b. Native Window Server & Compositor Subsystem
+    // 16b. Direct Boot to Native Compositor (No CUI on display)
     compositor::init();
+    compositor::start();
 
     // 17. Enable Hardware Interrupts
     arch::x86_64::cpu::sti();

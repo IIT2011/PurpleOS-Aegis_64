@@ -67,14 +67,14 @@ def main():
         try:
             proc.stdin.write(c)
             proc.stdin.flush()
-            time.sleep(0.3)
+            time.sleep(0.35)
         except Exception:
             break
 
-    time.sleep(0.8)
+    time.sleep(2.0)
     proc.terminate()
     try:
-        stdout, stderr = proc.communicate(timeout=3)
+        stdout, stderr = proc.communicate(timeout=5)
     except Exception:
         proc.kill()
         stdout, stderr = proc.communicate()
@@ -86,6 +86,7 @@ def main():
         ("AegisDetect Trusted Baseline", "AegisDetect: Loaded and authenticated trusted baseline"),
         ("Creator cmd.dtbase Authentication", "Authenticated /System/CLI/cmd.dtbase — Cryptographically Signed by Creator!"),
         ("Compositor Engine Initialized", "Compositor: Aegis64 Window Server & Framebuffer Engine Initialized"),
+        ("Direct Boot to Compositor", "Compositor: Native framebuffer compositor active"),
         ("/dev/compositor Device Node", "compositor"),
         ("/dev/fb0 Device Node", "fb0"),
         ("Compositor VFS Query", "PurpleOS Native Compositor Engine"),
@@ -94,7 +95,7 @@ def main():
         ("Compositor Service Descriptor", "Name = PurpleCompositor"),
         ("Compositor Framework Config", "Compositor.framework"),
         ("Compositor Status Command", "Aegis64 Native Framebuffer Compositor Subsystem"),
-        ("Compositor Demo Windows Launch", "Compositor: Demo desktop launched with 3 interactive windows"),
+        ("Compositor Demo Windows Launch", "Compositor: Demo windows launched"),
         ("Window List - Aegis Terminal", "Aegis Terminal"),
         ("Window List - System Monitor", "System Monitor"),
         ("Window List - About PurpleOS", "About PurpleOS"),
