@@ -1512,27 +1512,32 @@ impl Shell {
         let engine = crate::drivers::gpu_accel::GPU_3D.lock();
         serial::println("\n=== Purple OS 3D Hardware Acceleration Engine ===");
         match engine.gpu_type {
-            crate::drivers::gpu_accel::AccelGpuType::IntelGen9 => {
-                serial::println("  Architecture:  Intel Gen9/Gen11 HD Graphics (Linux i915 RCS Engine)");
+            crate::drivers::gpu_accel::AccelGpuType::Igd => {
+                serial::println("  Driver:        igd (Intel Graphics Driver)");
+                serial::println("  Domain:        Clean-room Gen9/Gen11 3D Command Streamer (MI Batch)");
                 serial::print("  PCI Device:    8086:");
                 serial::print_hex(engine.device_id as u64);
-                serial::println("");
+                serial::println(" (Hardware spec ref: i915)");
             }
-            crate::drivers::gpu_accel::AccelGpuType::AmdGcn => {
-                serial::println("  Architecture:  AMD Radeon GCN/RDNA (Linux amdgpu PM4 Engine)");
+            crate::drivers::gpu_accel::AccelGpuType::Radeongd => {
+                serial::println("  Driver:        radeongd (AMD Radeon Graphics Driver)");
+                serial::println("  Domain:        Clean-room GCN/RDNA PM4 3D Command Processor");
                 serial::print("  PCI Device:    1002:");
                 serial::print_hex(engine.device_id as u64);
-                serial::println("");
+                serial::println(" (Hardware spec ref: amdgpu)");
             }
-            crate::drivers::gpu_accel::AccelGpuType::NvidiaNouveau => {
-                serial::println("  Architecture:  NVIDIA GeForce (Linux nouveau NV9097 Pushbuffer)");
+            crate::drivers::gpu_accel::AccelGpuType::Nvgd => {
+                serial::println("  Driver:        nvgd (NVIDIA Graphics Driver)");
+                serial::println("  Domain:        Clean-room NV9097 Class Pushbuffer FIFO 3D Engine");
+                serial::println("  Workload:      Good for daily 3D acceleration (not for gaming for now)");
                 serial::print("  PCI Device:    10DE:");
                 serial::print_hex(engine.device_id as u64);
-                serial::println("");
+                serial::println(" (Hardware spec ref: nouveau)");
             }
             crate::drivers::gpu_accel::AccelGpuType::None => {
                 serial::println("  Status:        Software Raster Fallback / Bochs VBE Emulation");
-                serial::println("  Supported HW:  Intel Gen9/Gen11 (i915), AMD GCN/RDNA (amdgpu), NVIDIA (nouveau)");
+                serial::println("  Supported HW:  igd (Intel), radeongd (AMD), nvgd (NVIDIA - daily 3D accel)");
+                serial::println("  Licensing:     100% Pure Rust clean-room (Linux drivers cited as spec reference only)");
             }
         }
         serial::println("");

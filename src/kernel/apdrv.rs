@@ -147,9 +147,9 @@ static XHCI_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/xhci.apdrv"
 static HDAUDIO_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/hdaudio.apdrv");
 static BOCHS_GPU_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/bochs_gpu.apdrv");
 static R8139_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/r8139.apdrv");
-static GPU_INTEL_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-intel.apdrv");
-static GPU_AMD_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-amd.apdrv");
-static GPU_NVIDIA_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu-nvidia.apdrv");
+static IGD_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/igd.apdrv");
+static RADEONGD_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/radeongd.apdrv");
+static NVGD_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/nvgd.apdrv");
 
 pub fn init() {
     crate::drivers::serial::println("APDRV: Subsystem v3 initialized (Max Modules: 16, W^X Enforced)");
@@ -161,9 +161,9 @@ pub fn init() {
     let _ = load_binary(HDAUDIO_APDRV);
     let _ = load_binary(BOCHS_GPU_APDRV);
     let _ = load_binary(R8139_APDRV);
-    let _ = load_binary(GPU_INTEL_APDRV);
-    let _ = load_binary(GPU_AMD_APDRV);
-    let _ = load_binary(GPU_NVIDIA_APDRV);
+    let _ = load_binary(IGD_APDRV);
+    let _ = load_binary(RADEONGD_APDRV);
+    let _ = load_binary(NVGD_APDRV);
 
     // Hardware Auto-Binding: probe discovered PCI devices against loaded modules
     crate::drivers::pci::for_each_device(|dev| {

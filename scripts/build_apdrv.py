@@ -255,31 +255,58 @@ def main():
         ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
     )
 
-    # 10. gpu-intel.apdrv (Intel HD Graphics Hardware Accelerator)
+    # 10. igd.apdrv (Intel Graphics Driver - Hardware Accelerator)
+    build_module(
+        os.path.join(out_dir, "igd.apdrv"),
+        "igd",
+        "Intel Graphics Driver (igd) Gen9/Gen11 Ring Buffer Accelerator (Ref: i915 specs)",
+        "Purple OS Hardware Group",
+        0x8086, 0x5912,
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+    )
+    # Also write legacy alias gpu-intel.apdrv
     build_module(
         os.path.join(out_dir, "gpu-intel.apdrv"),
-        "gpu_intel",
-        "Intel HD Graphics Gen9/Gen11 Ring Buffer Accelerator",
+        "igd",
+        "Intel Graphics Driver (igd) Gen9/Gen11 Ring Buffer Accelerator (Ref: i915 specs)",
         "Purple OS Hardware Group",
         0x8086, 0x5912,
         ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
     )
 
-    # 11. gpu-amd.apdrv (AMD Radeon GCN/RDNA Hardware Accelerator)
+    # 11. radeongd.apdrv (AMD Radeon Graphics Driver - Hardware Accelerator)
+    build_module(
+        os.path.join(out_dir, "radeongd.apdrv"),
+        "radeongd",
+        "AMD Radeon Graphics Driver (radeongd) PM4 3D Command Processor (Ref: amdgpu specs)",
+        "Purple OS Hardware Group",
+        0x1002, 0x67DF,
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+    )
+    # Also write legacy alias gpu-amd.apdrv
     build_module(
         os.path.join(out_dir, "gpu-amd.apdrv"),
-        "gpu_amd",
-        "AMD Radeon GCN/RDNA PM4 3D Command Processor Driver",
+        "radeongd",
+        "AMD Radeon Graphics Driver (radeongd) PM4 3D Command Processor (Ref: amdgpu specs)",
         "Purple OS Hardware Group",
         0x1002, 0x67DF,
         ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
     )
 
-    # 12. gpu-nvidia.apdrv (NVIDIA Nouveau Pushbuffer 3D Accelerator)
+    # 12. nvgd.apdrv (NVIDIA Graphics Driver - Daily 3D Accelerator)
+    build_module(
+        os.path.join(out_dir, "nvgd.apdrv"),
+        "nvgd",
+        "NVIDIA Graphics Driver (nvgd) FIFO 3D Accelerator (Daily 3D Accel - Ref: nouveau specs)",
+        "Purple OS Hardware Group",
+        0x10DE, 0x1B80,
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+    )
+    # Also write legacy alias gpu-nvidia.apdrv
     build_module(
         os.path.join(out_dir, "gpu-nvidia.apdrv"),
-        "gpu_nvidia",
-        "NVIDIA Nouveau Pushbuffer NV9097/NVC0 3D Acceleration Driver",
+        "nvgd",
+        "NVIDIA Graphics Driver (nvgd) FIFO 3D Accelerator (Daily 3D Accel - Ref: nouveau specs)",
         "Purple OS Hardware Group",
         0x10DE, 0x1B80,
         ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
@@ -360,7 +387,7 @@ def main():
                 df.write(data)
 
     # Also copy Graphics.apdrv, bochs_gpu.apdrv, r8139.apdrv, e1000.apdrv, and 3D GPU drivers to build/
-    for extra in ["Graphics.apdrv", "bochs_gpu.apdrv", "r8139.apdrv", "e1000.apdrv", "gpu-intel.apdrv", "gpu-amd.apdrv", "gpu-nvidia.apdrv"]:
+    for extra in ["Graphics.apdrv", "bochs_gpu.apdrv", "r8139.apdrv", "e1000.apdrv", "igd.apdrv", "radeongd.apdrv", "nvgd.apdrv", "gpu-intel.apdrv", "gpu-amd.apdrv", "gpu-nvidia.apdrv"]:
         p = os.path.join(out_dir, extra)
         if os.path.exists(p):
             with open(p, "rb") as sf:
