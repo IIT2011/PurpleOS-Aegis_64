@@ -171,7 +171,13 @@ def get_creator_key():
     for kp in ["keys/creator_key.txt", "OS/keys/creator_key.txt", "../keys/creator_key.txt"]:
         if os.path.exists(kp):
             with open(kp, "r") as f:
-                return hashlib.sha256(f.read().strip().encode("utf-8")).digest()
+                content = f.read().strip()
+                if len(content) == 64:
+                    try:
+                        return bytes.fromhex(content)
+                    except ValueError:
+                        pass
+                return hashlib.sha256(content.encode("utf-8")).digest()
     raise RuntimeError("Creator signing key file not found. Ensure keys/creator_key.txt exists.")
 
 def generate_database(creator_key: bytes = None):

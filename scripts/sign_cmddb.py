@@ -43,6 +43,12 @@ def load_creator_key(cli_key_str: str = None, cli_key_file: str = None) -> bytes
         print("        Place your secret key into keys/creator_key.txt (which is ignored by git).")
         sys.exit(1)
 
+    if len(raw_key) == 64:
+        try:
+            return bytes.fromhex(raw_key.decode("ascii"))
+        except ValueError:
+            pass
+
     # Derive 32-byte cryptographic trust anchor
     derived_key = hashlib.sha256(raw_key).digest()
     return derived_key
