@@ -247,6 +247,27 @@ pub fn set_colors(fg: u32, bg: u32) {
     v.bg_color = bg;
 }
 
+pub fn get_colors() -> (u32, u32) {
+    let v = VIDEO.lock();
+    (v.fg_color, v.bg_color)
+}
+
+pub fn redraw_top_bar(title: &str) {
+    let (width, bg) = {
+        let v = VIDEO.lock();
+        if !v.available || v.fb_ptr.is_null() {
+            return;
+        }
+        (v.width, v.bg_color)
+    };
+    draw_rect(0, 0, width, 32, COLOR_PURPLE_BAR);
+    set_cursor(2, 0);
+    set_colors(COLOR_WHITE, COLOR_PURPLE_BAR);
+    puts(title);
+    set_cursor(0, 3);
+    set_colors(COLOR_WHITE, bg);
+}
+
 pub fn set_cursor(col: usize, row: usize) {
     let mut v = VIDEO.lock();
     v.cursor_col = col;

@@ -96,6 +96,16 @@ def main():
             ":wq\n",
             "cat /tmp/edtest.txt\n",
 
+            # 10. Native Terminal Features (Themes, Benchmark, Top, Viewer, Jobs, Prompt)
+            "theme matrix\n",
+            "bench\n",
+            "top\n",
+            "view /tmp/edtest.txt\n",
+            "prompt [testos]$ \n",
+            "jobs\n",
+            "start bench\n",
+            "prompt default\n",
+
             # End marker
             "echo QOL-TEST-COMPLETED\n"
         ]
@@ -150,11 +160,19 @@ def main():
             ("History Command Ring", "=== AegisShell Command History ==="),
 
             # Editor assertions
-            ("Editor Mode Header", "AegisEdit / Nano v1.0"),
+            ("Editor Mode Header", "PurpleOS AegisEdit"),
             ("Editor Appended Line 1", "[+ Line 1]"),
             ("Editor Appended Line 2", "[+ Line 2]"),
             ("Editor Saved File", "Saved"),
             ("Editor Cat Verified", "First Line in Editor\nSecond Line in Editor"),
+
+            # Native Features assertions
+            ("Theme Applied", "[Theme applied: matrix]"),
+            ("Benchmark Completed", "PurpleMarks"),
+            ("Top Monitor", "Real-Time System Monitor"),
+            ("File Pager View", "=== Viewing: '/tmp/edtest.txt'"),
+            ("Prompt Customized", "[Prompt set to: '[testos]$ ']"),
+            ("Jobs Command", "=== AegisShell Native Background Jobs ==="),
 
             # End marker
             ("Test Suite Completed", "QOL-TEST-COMPLETED")
