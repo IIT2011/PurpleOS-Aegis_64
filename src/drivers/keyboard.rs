@@ -177,17 +177,23 @@ pub fn process_scancode(sc: u8) {
             k.last_scancode = 0;
             return;
         }
-        let ch = match sc {
-            0x1C => b'\n', // Keypad Enter
-            0x35 => b'/',  // Keypad /
-            0x53 => 127,   // Delete key
-            _ => 0,
+        let ext_seq: &[u8] = match sc {
+            0x48 => b"\x1b[A",  // Up Arrow
+            0x50 => b"\x1b[B",  // Down Arrow
+            0x4D => b"\x1b[C",  // Right Arrow
+            0x4B => b"\x1b[D",  // Left Arrow
+            0x47 => b"\x1b[H",  // Home
+            0x4F => b"\x1b[F",  // End
+            0x53 => b"\x1b[3~", // Delete
+            0x1C => b"\n",     // Keypad Enter
+            0x35 => b"/",      // Keypad /
+            _ => b"",
         };
-        if ch != 0 {
+        for &byte in ext_seq {
             let next = (k.head + 1) % k.buf.len();
             if next != k.tail {
                 let head = k.head;
-                k.buf[head] = ch;
+                k.buf[head] = byte;
                 k.head = next;
             }
         }
@@ -236,7 +242,15 @@ pub fn process_scancode(sc: u8) {
 
     if (sc as usize) < SCANCODE_TABLE.len() {
         let base_ch = SCANCODE_TABLE[sc as usize];
-        let ch = if (k.modifiers & KBD_MOD_SHIFT) != 0 {
+        let ch = if (k.modifiers & KBD_MOD_CTRL) != 0 {
+            if base_ch >= b'a' && base_ch <= b'z' {
+                base_ch - b'a' + 1
+            } else if base_ch >= b'A' && base_ch <= b'Z' {
+                base_ch - b'A' + 1
+            } else {
+                base_ch
+            }
+        } else if (k.modifiers & KBD_MOD_SHIFT) != 0 {
             let shift_ch = SCANCODE_SHIFT_TABLE[sc as usize];
             if (k.modifiers & KBD_MOD_CAPS) != 0 && shift_ch >= b'A' && shift_ch <= b'Z' {
                 shift_ch + 32

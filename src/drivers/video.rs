@@ -253,6 +253,33 @@ pub fn set_cursor(col: usize, row: usize) {
     v.cursor_row = row;
 }
 
+pub fn get_cursor() -> (usize, usize) {
+    let v = VIDEO.lock();
+    (v.cursor_col, v.cursor_row)
+}
+
+pub fn clear_to_eol() {
+    let v = VIDEO.lock();
+    if !v.available || v.fb_ptr.is_null() {
+        return;
+    }
+    let max_cols = v.width / FONT_WIDTH;
+    let y = v.cursor_row * FONT_HEIGHT;
+    let pitch = v.pitch;
+    let bg = v.bg_color;
+    for col in v.cursor_col..max_cols {
+        let x = col * FONT_WIDTH;
+        unsafe {
+            for row in 0..FONT_HEIGHT {
+                let offset = (y + row) * pitch + x;
+                for px in 0..FONT_WIDTH {
+                    *v.fb_ptr.add(offset + px) = bg;
+                }
+            }
+        }
+    }
+}
+
 pub fn get_width() -> usize {
     VIDEO.lock().width
 }
