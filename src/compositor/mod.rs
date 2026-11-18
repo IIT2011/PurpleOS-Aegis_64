@@ -12,12 +12,14 @@
 
 pub mod blend;
 pub mod cursor;
+pub mod desktop;
 pub mod pipeline;
 pub mod surface;
 pub mod wallpaper;
 pub mod window;
 
 pub use cursor::Cursor;
+pub use desktop::DesktopAction;
 pub use pipeline::CompositorPipeline;
 pub use surface::{DamageTracker, Rect, Surface};
 pub use wallpaper::Wallpaper;
@@ -148,7 +150,7 @@ impl CompositorEngine {
         self.running = true;
         COMPOSITOR_RUNNING.store(true, Ordering::SeqCst);
         self.render_frame();
-        crate::drivers::serial::println("Compositor: Native framebuffer compositor active (pure window server)");
+        crate::drivers::serial::println("Compositor: Native framebuffer compositor active (Purple Desktop UI online)");
     }
 
     /// Stop compositor and return to text console
@@ -330,7 +332,66 @@ impl CompositorEngine {
 
         // Handle left click hit-testing
         if left_clicked {
-            // Find window clicked under cursor, searching from highest Z to lowest Z
+            // 1. First hit-test the desktop shell UI (Aegis Bar and Flow Dock)
+            let action = desktop::hit_test(x, y, self.width, self.height);
+            match action {
+                desktop::DesktopAction::LaunchTerminal => {
+                    if let Some(id) = self.find_window_by_title("Aegis Terminal") {
+                        self.focus_window(id);
+                        if let Some(win) = self.get_window_mut(id) {
+                            win.is_minimized = false;
+                        }
+                    } else {
+                        self.create_terminal_window();
+                    }
+                    if self.running {
+                        self.render_frame();
+                    }
+                    return;
+                }
+                desktop::DesktopAction::LaunchSystemMonitor => {
+                    if let Some(id) = self.find_window_by_title("System Monitor") {
+                        self.focus_window(id);
+                        if let Some(win) = self.get_window_mut(id) {
+                            win.is_minimized = false;
+                        }
+                    } else {
+                        self.create_sysmon_window();
+                    }
+                    if self.running {
+                        self.render_frame();
+                    }
+                    return;
+                }
+                desktop::DesktopAction::ToggleLauncher | desktop::DesktopAction::LaunchSettings => {
+                    if let Some(id) = self.find_window_by_title("About PurpleOS") {
+                        self.focus_window(id);
+                        if let Some(win) = self.get_window_mut(id) {
+                            win.is_minimized = false;
+                        }
+                    } else {
+                        self.create_about_window();
+                    }
+                    if self.running {
+                        self.render_frame();
+                    }
+                    return;
+                }
+                desktop::DesktopAction::LaunchFiles | desktop::DesktopAction::LaunchCodeStudio => {
+                    if let Some(id) = self.find_window_by_title("About PurpleOS") {
+                        self.focus_window(id);
+                    } else {
+                        self.create_about_window();
+                    }
+                    if self.running {
+                        self.render_frame();
+                    }
+                    return;
+                }
+                desktop::DesktopAction::None => {}
+            }
+
+            // 2. Find window clicked under cursor, searching from highest Z to lowest Z
             let mut top_hit_idx = None;
             let mut highest_z = 0;
 
@@ -472,68 +533,83 @@ impl CompositorEngine {
         }
     }
 
+    pub fn find_window_by_title(&self, title: &str) -> Option<usize> {
+        for win in self.windows.iter().flatten() {
+            if win.title_str().contains(title) {
+                return Some(win.id);
+            }
+        }
+        None
+    }
+
+    pub fn create_terminal_window(&mut self) -> Option<usize> {
+        let id = self.create_window("Aegis Terminal", 40, 50, 360, 210)?;
+        if let Some(win) = self.get_window_mut(id) {
+            win.surface.fill_rect(Rect::new(0, 0, 360, 210), 0xFF140B24);
+            win.surface.draw_text(10, 10, "aegis64@purple:~$", 0xFF2ED573, 0, true);
+            win.surface.draw_text(154, 10, "compositor status", 0xFFFFFFFF, 0, true);
+
+            win.surface.draw_text(10, 34, "Compositor: ONLINE (x86_64 Pure Rust)", 0xFFB3A7C7, 0, true);
+            win.surface.draw_text(10, 54, "Resolution: 1024x768@32bpp Double Buffered", 0xFFB3A7C7, 0, true);
+            win.surface.draw_text(10, 74, "VFS Device: /dev/compositor, /dev/fb0", 0xFFB3A7C7, 0, true);
+            win.surface.draw_text(10, 94, "Security:   AegisDetect Root Trust Anchor", 0xFFFFA502, 0, true);
+
+            win.surface.draw_text(10, 126, "aegis64@purple:~$", 0xFF2ED573, 0, true);
+            win.surface.draw_text(154, 126, "ls -la /System/Services", 0xFFFFFFFF, 0, true);
+            win.surface.draw_text(10, 150, "Compositor  WindowServer  PurpleDetect", 0xFFC084FC, 0, true);
+            win.surface.draw_text(10, 174, "aegis64@purple:~$ _", 0xFF2ED573, 0, true);
+        }
+        Some(id)
+    }
+
+    pub fn create_sysmon_window(&mut self) -> Option<usize> {
+        let id = self.create_window("System Monitor", 420, 80, 340, 220)?;
+        if let Some(win) = self.get_window_mut(id) {
+            win.surface.fill_rect(Rect::new(0, 0, 340, 220), 0xFF0F172A);
+
+            win.surface.draw_text(10, 10, "Hardware Peripherals & Drivers", 0xFF38BDF8, 0, true);
+            win.surface.draw_line(10, 28, 330, 28, 0xFF334155);
+
+            win.surface.draw_text(10, 36, "CPU Cores:    4 Cores Active (x86_64 SMP)", 0xFFE2E8F0, 0, true);
+            win.surface.draw_text(10, 56, "Memory PMM:   Dual-Bitmap PMM Allocator", 0xFFE2E8F0, 0, true);
+            win.surface.draw_text(10, 76, "Storage:      PurpleFS v2 GPT Journaled", 0xFFE2E8F0, 0, true);
+            win.surface.draw_text(10, 96, "Display GPU:  Bochs VBE / VirtIO-GPU 2D", 0xFFE2E8F0, 0, true);
+            win.surface.draw_text(10, 116, "APDRV Bundles: filesystems.apdrv, gpu.apdrv", 0xFFE2E8F0, 0, true);
+
+            win.surface.draw_text(10, 146, "RAM Load: [========                    ] 14%", 0xFF4ADE80, 0, true);
+            win.surface.draw_text(10, 170, "Syscalls: 68 Native System Calls Online", 0xFFFCD34D, 0, true);
+            win.surface.draw_text(10, 190, "POSIX:    IEEE Std 1003.1-2024 Verified", 0xFFF472B6, 0, true);
+        }
+        Some(id)
+    }
+
+    pub fn create_about_window(&mut self) -> Option<usize> {
+        let id = self.create_window("About PurpleOS", 200, 250, 380, 160)?;
+        if let Some(win) = self.get_window_mut(id) {
+            win.surface.fill_rect(Rect::new(0, 0, 380, 160), 0xFF1C1033);
+
+            win.surface.draw_text(10, 12, "PurpleOS / Aegis64 Operating System", 0xFFC084FC, 0, true);
+            win.surface.draw_text(10, 32, "Version 0.5.0 Pure Rust Bare-Metal Edition", 0xFFFFFFFF, 0, true);
+            win.surface.draw_line(10, 50, 370, 50, 0xFF4C1D95);
+
+            win.surface.draw_text(10, 58, "Kernel:    Aegis64 Micro-Monolithic Core", 0xFFD8B4FE, 0, true);
+            win.surface.draw_text(10, 78, "Developer: Creator (Aegis Root Developer)", 0xFFD8B4FE, 0, true);
+            win.surface.draw_text(10, 98, "Trust Key: AEGIS-CREATOR-V1 RSA-2048 PKCS#1", 0xFFD8B4FE, 0, true);
+            win.surface.draw_text(10, 118, "Desktop:   Purple Desktop UI (60Hz Compositor)", 0xFF34D399, 0, true);
+            win.surface.draw_text(10, 138, "License:   100% Original Pure Rust Codebase", 0xFF9CA3AF, 0, true);
+        }
+        Some(id)
+    }
+
     /// Create rich default demo windows
     pub fn setup_demo_windows(&mut self) {
         if self.window_count() > 0 {
             return;
         }
 
-        // Window 1: Aegis Terminal
-        if let Some(id) = self.create_window("Aegis Terminal", 40, 50, 360, 210) {
-            if let Some(win) = self.get_window_mut(id) {
-                win.surface.fill_rect(Rect::new(0, 0, 360, 210), 0xFF140B24);
-                win.surface.draw_text(10, 10, "aegis64@purple:~$", 0xFF2ED573, 0, true);
-                win.surface.draw_text(154, 10, "compositor status", 0xFFFFFFFF, 0, true);
-
-                win.surface.draw_text(10, 34, "Compositor: ONLINE (x86_64 Pure Rust)", 0xFFB3A7C7, 0, true);
-                win.surface.draw_text(10, 54, "Resolution: 800x600@32bpp Double Buffered", 0xFFB3A7C7, 0, true);
-                win.surface.draw_text(10, 74, "VFS Device: /dev/compositor, /dev/fb0", 0xFFB3A7C7, 0, true);
-                win.surface.draw_text(10, 94, "Security:   AegisDetect Root Trust Anchor", 0xFFFFA502, 0, true);
-
-                win.surface.draw_text(10, 126, "aegis64@purple:~$", 0xFF2ED573, 0, true);
-                win.surface.draw_text(154, 126, "ls -la /System/Services", 0xFFFFFFFF, 0, true);
-                win.surface.draw_text(10, 150, "Compositor  WindowServer  PurpleDetect", 0xFFC084FC, 0, true);
-                win.surface.draw_text(10, 174, "aegis64@purple:~$ _", 0xFF2ED573, 0, true);
-            }
-        }
-
-        // Window 2: System Monitor
-        if let Some(id) = self.create_window("System Monitor", 420, 80, 340, 220) {
-            if let Some(win) = self.get_window_mut(id) {
-                win.surface.fill_rect(Rect::new(0, 0, 340, 220), 0xFF0F172A);
-
-                win.surface.draw_text(10, 10, "Hardware Peripherals & Drivers", 0xFF38BDF8, 0, true);
-                win.surface.draw_line(10, 28, 330, 28, 0xFF334155);
-
-                win.surface.draw_text(10, 36, "CPU Cores:    4 Cores Active (x86_64 SMP)", 0xFFE2E8F0, 0, true);
-                win.surface.draw_text(10, 56, "Memory PMM:   Dual-Bitmap PMM Allocator", 0xFFE2E8F0, 0, true);
-                win.surface.draw_text(10, 76, "Storage:      PurpleFS v2 GPT Journaled", 0xFFE2E8F0, 0, true);
-                win.surface.draw_text(10, 96, "Display GPU:  Bochs VBE / VirtIO-GPU 2D", 0xFFE2E8F0, 0, true);
-                win.surface.draw_text(10, 116, "APDRV Bundles: filesystems.apdrv, gpu.apdrv", 0xFFE2E8F0, 0, true);
-
-                // Progress Bar: Memory Utilization (approx 12%)
-                win.surface.draw_text(10, 146, "RAM Load: [========                    ] 14%", 0xFF4ADE80, 0, true);
-                win.surface.draw_text(10, 170, "Syscalls: 68 Native System Calls Online", 0xFFFCD34D, 0, true);
-                win.surface.draw_text(10, 190, "POSIX:    IEEE Std 1003.1-2024 Verified", 0xFFF472B6, 0, true);
-            }
-        }
-
-        // Window 3: About PurpleOS
-        if let Some(id) = self.create_window("About PurpleOS", 200, 250, 380, 160) {
-            if let Some(win) = self.get_window_mut(id) {
-                win.surface.fill_rect(Rect::new(0, 0, 380, 160), 0xFF1C1033);
-
-                win.surface.draw_text(10, 12, "PurpleOS / Aegis64 Operating System", 0xFFC084FC, 0, true);
-                win.surface.draw_text(10, 32, "Version 0.5.0 Pure Rust Bare-Metal Edition", 0xFFFFFFFF, 0, true);
-                win.surface.draw_line(10, 50, 370, 50, 0xFF4C1D95);
-
-                win.surface.draw_text(10, 58, "Kernel:    Aegis64 Micro-Monolithic Core", 0xFFD8B4FE, 0, true);
-                win.surface.draw_text(10, 78, "Developer: Creator (Aegis Root Developer)", 0xFFD8B4FE, 0, true);
-                win.surface.draw_text(10, 98, "Trust Key: AEGIS-CREATOR-V1 HMAC-SHA256", 0xFFD8B4FE, 0, true);
-                win.surface.draw_text(10, 118, "GUI:       Native Pure Rust Compositor", 0xFF34D399, 0, true);
-                win.surface.draw_text(10, 138, "License:   100% Original Pure Rust Codebase", 0xFF9CA3AF, 0, true);
-            }
-        }
+        self.create_terminal_window();
+        self.create_sysmon_window();
+        self.create_about_window();
     }
 
     pub fn get_window_mut(&mut self, id: usize) -> Option<&mut Window> {
@@ -589,6 +665,7 @@ impl CompositorEngine {
         append_u64(&mut temp, &mut pos, win_cnt as u64);
         append_str(&mut temp, &mut pos, "\nDoubleBuffer: Hardware/Memory VBE\n");
         append_str(&mut temp, &mut pos, "Cursor:       Flicker-Free Anti-Aliased\n");
+        append_str(&mut temp, &mut pos, "Desktop:      Purple Desktop UI (Aegis Bar & Flow Dock)\n");
         append_str(&mut temp, &mut pos, "VFS Node:     /dev/compositor, /dev/fb0\n");
 
         let copy_len = pos.min(buf.len());

@@ -32,7 +32,10 @@ impl CompositorPipeline {
         // Pass 2: Render Windows in Z-Order (ascending: lowest Z first, highest on top)
         Self::render_windows(target, windows);
 
-        // Pass 3: Render Cursor Overlay on Top
+        // Pass 3: Desktop Shell Layers (Aegis Bar & Flow Dock with mirror reflection)
+        super::desktop::render_desktop_shell(target, windows);
+
+        // Pass 4: Render Cursor Overlay on Top
         cursor.draw(target);
     }
 
