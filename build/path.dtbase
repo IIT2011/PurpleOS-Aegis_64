@@ -1,0 +1,11 @@
+# PURPLEOS SEARCH PATH DATABASE (/System/CLI/path.dtbase)
+# User and system configurable search paths for applications and scripts
+# Security checks disabled on this file to permit dynamic user customization
+
+[paths]
+path = /System/Applications
+path = /System/CLI/scripts
+path = /System/Drivers
+path = /System/Users/aegis/Applications
+path = /tmp
+path = /

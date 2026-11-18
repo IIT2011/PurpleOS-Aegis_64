@@ -115,6 +115,7 @@ COMMANDS = [
     # CLI Engine & Utilities
     ("help", "CLI", "ring0:help", "Display categorized commands and command usage manual", "help [command]"),
     ("cmd", "CLI", "ring0:cmd", "Command database manager from /System/CLI/cmd.dtbase", "cmd [reload|verify|info]"),
+    ("path", "CLI", "ring0:path", "Search path manager from /System/CLI/path.dtbase", "path [add|remove|reload]"),
     ("history", "CLI", "ring0:history", "Display command execution history", "history"),
     ("alias", "CLI", "ring0:alias", "Define or display command aliases", "alias [name=command]"),
     ("unalias", "CLI", "ring0:unalias", "Remove defined command alias", "unalias <name>"),
@@ -159,25 +160,31 @@ def build_payload():
         lines.append("")
     return "\n".join(lines).encode("utf-8")
 
-def generate_database():
+import hmac
+
+DEFAULT_CREATOR_KEY = b"PURPLEOS_AEGIS_CREATOR_ROOT_KEY_2026"
+
+def generate_database(creator_key: bytes = DEFAULT_CREATOR_KEY):
     payload = build_payload()
-    digest = hashlib.sha256(payload).hexdigest()
+    sig = hmac.new(creator_key, payload, hashlib.sha256).hexdigest()
     
     header = (
         f"# PURPLEOS COMMAND DATABASE\n"
-        f"# SHA256: {digest}\n"
+        f"# SIGNER: Creator (Aegis Root Developer)\n"
+        f"# KEY_ID: AEGIS-CREATOR-V1\n"
+        f"# SIGNATURE: {sig}\n"
         f"# CANONICAL PATH: /System/CLI/cmd.dtbase\n"
         f"# COMMAND COUNT: {len(COMMANDS)}\n\n"
     ).encode("utf-8")
     
     full_content = header + payload
-    return full_content, digest
+    return full_content, sig
 
 if __name__ == "__main__":
     out_path = sys.argv[1] if len(sys.argv) > 1 else "OS/build/cmd.dtbase"
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    content, digest = generate_database()
+    content, sig = generate_database()
     with open(out_path, "wb") as f:
         f.write(content)
     print(f"[OK] Generated {out_path} ({len(content)} bytes, {len(COMMANDS)} commands)")
-    print(f"[OK] SHA-256 Digest: {digest}")
+    print(f"[OK] Creator Cryptographic Signature: {sig}")

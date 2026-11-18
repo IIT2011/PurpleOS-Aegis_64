@@ -1,15 +1,19 @@
 //! PurpleOS / Aegis64 Command Database Subsystem (/System/CLI/cmd.dtbase)
 //!
 //! Provides dynamic, storage-backed command resolution, metadata introspection,
-//! and cryptographic SHA-256 integrity verification. Command definitions are
-//! loaded directly from `/System/CLI/cmd.dtbase` on the filesystem rather than
-//! being hardcoded into the kernel image.
+//! and cryptographic Creator Signature verification. Commands are loaded directly
+//! from `/System/CLI/cmd.dtbase` on the filesystem rather than hardcoded in the kernel.
+//!
+//! Integrity is enforced via a Cryptographic Signature specifically signed by the
+//! Creator (Aegis Root Developer) using HMAC-SHA256 with the Creator Root Signing Key.
 
 use crate::drivers::serial;
 use crate::sync::Spinlock;
 
 pub const CMD_DATABASE_PATH: &str = "/System/CLI/cmd.dtbase";
 pub const FALLBACK_DATABASE_PATH: &str = "cmd.dtbase";
+
+pub const CREATOR_SIGN_KEY: &[u8] = b"PURPLEOS_AEGIS_CREATOR_ROOT_KEY_2026";
 
 pub const MAX_COMMANDS: usize = 160;
 pub const MAX_NAME_LEN: usize = 24;
@@ -80,10 +84,12 @@ impl CmdRecord {
 pub struct CmdTable {
     pub entries: [CmdRecord; MAX_COMMANDS],
     pub count: usize,
-    pub sha256_verified: bool,
-    pub sha256_expected: [u8; 64],
-    pub sha256_computed: [u8; 32],
-    pub sha256_hex: [u8; 64],
+    pub signature_verified: bool,
+    pub signature_expected: [u8; 64],
+    pub signature_computed: [u8; 32],
+    pub signature_hex: [u8; 64],
+    pub signer_name: [u8; 32],
+    pub signer_len: u8,
     pub payload_bytes: usize,
     pub initialized: bool,
 }
@@ -93,13 +99,19 @@ impl CmdTable {
         Self {
             entries: [CmdRecord::empty(); MAX_COMMANDS],
             count: 0,
-            sha256_verified: false,
-            sha256_expected: [0; 64],
-            sha256_computed: [0; 32],
-            sha256_hex: [0; 64],
+            signature_verified: false,
+            signature_expected: [0; 64],
+            signature_computed: [0; 32],
+            signature_hex: [0; 64],
+            signer_name: [0; 32],
+            signer_len: 0,
             payload_bytes: 0,
             initialized: false,
         }
+    }
+
+    pub fn signer(&self) -> &str {
+        core::str::from_utf8(&self.signer_name[..self.signer_len as usize]).unwrap_or("Creator")
     }
 }
 
@@ -109,12 +121,11 @@ static RAW_BUFFER: Spinlock<[u8; 24576]> = Spinlock::new([0u8; 24576]);
 const HEX_CHARS: &[u8] = b"0123456789abcdef";
 
 /// Initialize the command database by reading `/System/CLI/cmd.dtbase` from storage,
-/// verifying its SHA-256 cryptographic digest, and parsing all command records.
+/// verifying its Cryptographic Creator Signature, and parsing all command records.
 pub fn init() -> bool {
     let mut raw_buf = RAW_BUFFER.lock();
     raw_buf.fill(0);
 
-    // Read command database from canonical path, falling back to root if needed
     let read_bytes = match crate::fs::vfs::read(CMD_DATABASE_PATH, &mut *raw_buf) {
         Ok(b) if b > 0 => b,
         _ => match crate::fs::vfs::read(FALLBACK_DATABASE_PATH, &mut *raw_buf) {
@@ -143,15 +154,17 @@ pub fn reload() -> Result<usize, &'static str> {
 fn parse_and_verify(data: &[u8]) -> bool {
     let mut table = CMD_TABLE.lock();
     table.count = 0;
-    table.sha256_verified = false;
-    table.sha256_expected.fill(0);
-    table.sha256_computed.fill(0);
-    table.sha256_hex.fill(0);
+    table.signature_verified = false;
+    table.signature_expected.fill(0);
+    table.signature_computed.fill(0);
+    table.signature_hex.fill(0);
+    table.signer_name.fill(0);
+    table.signer_len = 0;
 
-    // 1. Locate `# SHA256: ` line in header
+    // 1. Locate `# SIGNATURE: ` and `# SIGNER: ` lines in header
     let mut expected_hex = [0u8; 64];
     let mut payload_start = 0usize;
-    let mut found_header = false;
+    let mut found_sig = false;
 
     let mut line_start = 0usize;
     while line_start < data.len() {
@@ -163,14 +176,19 @@ fn parse_and_verify(data: &[u8]) -> bool {
         let line = &data[line_start..line_end];
         let trimmed = trim_slice(line);
 
-        if trimmed.starts_with(b"# SHA256:") {
-            let rest = trim_slice(&trimmed[9..]);
+        if trimmed.starts_with(b"# SIGNATURE:") {
+            let rest = trim_slice(&trimmed[12..]);
             if rest.len() >= 64 {
                 expected_hex.copy_from_slice(&rest[..64]);
-                table.sha256_expected = expected_hex;
-                found_header = true;
+                table.signature_expected = expected_hex;
+                found_sig = true;
             }
-        } else if found_header && !trimmed.starts_with(b"#") && !trimmed.is_empty() {
+        } else if trimmed.starts_with(b"# SIGNER:") {
+            let rest = trim_slice(&trimmed[9..]);
+            let len = rest.len().min(32);
+            table.signer_name[..len].copy_from_slice(&rest[..len]);
+            table.signer_len = len as u8;
+        } else if found_sig && !trimmed.starts_with(b"#") && !trimmed.is_empty() {
             // Found start of payload
             payload_start = line_start;
             break;
@@ -179,37 +197,39 @@ fn parse_and_verify(data: &[u8]) -> bool {
         line_start = if line_end < data.len() { line_end + 1 } else { line_end };
     }
 
-    if !found_header || payload_start >= data.len() {
-        serial::println("[CMDDB] Error: Invalid or missing SHA-256 header in cmd.dtbase");
+    if !found_sig || payload_start >= data.len() {
+        serial::println("[CMDDB] Error: Missing or invalid Creator Signature header in cmd.dtbase");
         return false;
     }
 
-    // 2. Cryptographic SHA-256 Verification over the payload
+    // 2. Cryptographic Creator Signature Verification (HMAC-SHA256 with Creator Key)
     let payload = &data[payload_start..];
     table.payload_bytes = payload.len();
-    let digest = crate::crypto::sha256::hash(payload);
-    table.sha256_computed = digest;
+    let sig_digest = crate::crypto::sha256::hmac(CREATOR_SIGN_KEY, payload);
+    table.signature_computed = sig_digest;
 
     let mut computed_hex = [0u8; 64];
-    for (i, &b) in digest.iter().enumerate() {
+    for (i, &b) in sig_digest.iter().enumerate() {
         computed_hex[i * 2] = HEX_CHARS[(b >> 4) as usize];
         computed_hex[i * 2 + 1] = HEX_CHARS[(b & 0x0f) as usize];
     }
-    table.sha256_hex = computed_hex;
+    table.signature_hex = computed_hex;
 
     let is_verified = computed_hex == expected_hex;
-    table.sha256_verified = is_verified;
+    table.signature_verified = is_verified;
 
     if is_verified {
         serial::print("[CMDDB] Authenticated ");
         serial::print(CMD_DATABASE_PATH);
-        serial::print(" (SHA-256: ");
-        if let Ok(hex_str) = core::str::from_utf8(&computed_hex) {
-            serial::print(hex_str);
+        serial::println(" — Cryptographically Signed by Creator!");
+        serial::print("[CMDDB] Verified Signer: ");
+        if table.signer_len > 0 {
+            serial::println(table.signer());
+        } else {
+            serial::println("Creator (Aegis Root Developer)");
         }
-        serial::println(") — 100% Integrity Verified!");
     } else {
-        serial::println("[SECURITY] ALERT: /System/CLI/cmd.dtbase SHA-256 Checksum Mismatch! Integrity Compromised!");
+        serial::println("[SECURITY] ALERT: /System/CLI/cmd.dtbase Signature INVALID! Not signed by Creator!");
     }
 
     // 3. Parse Command Records from payload
@@ -308,9 +328,9 @@ pub fn count() -> usize {
     CMD_TABLE.lock().count
 }
 
-/// Check if the database passed cryptographic SHA-256 verification.
+/// Check if the database passed cryptographic Creator Signature verification.
 pub fn is_verified() -> bool {
-    CMD_TABLE.lock().sha256_verified
+    CMD_TABLE.lock().signature_verified
 }
 
 /// Verify integrity of the command database currently in memory against on-disk file.
@@ -329,11 +349,11 @@ pub fn verify_integrity() -> bool {
         return false;
     }
 
-    // Compute fresh SHA-256 on disk payload
+    // Compute fresh HMAC-SHA256 signature on disk payload
     let data = &raw_buf[..read_bytes];
     let mut payload_start = 0usize;
     let mut line_start = 0usize;
-    let mut found_header = false;
+    let mut found_sig = false;
 
     while line_start < data.len() {
         let mut line_end = line_start;
@@ -342,21 +362,21 @@ pub fn verify_integrity() -> bool {
         }
         let line = &data[line_start..line_end];
         let trimmed = trim_slice(line);
-        if trimmed.starts_with(b"# SHA256:") {
-            found_header = true;
-        } else if found_header && !trimmed.starts_with(b"#") && !trimmed.is_empty() {
+        if trimmed.starts_with(b"# SIGNATURE:") {
+            found_sig = true;
+        } else if found_sig && !trimmed.starts_with(b"#") && !trimmed.is_empty() {
             payload_start = line_start;
             break;
         }
         line_start = if line_end < data.len() { line_end + 1 } else { line_end };
     }
 
-    if !found_header || payload_start >= data.len() {
+    if !found_sig || payload_start >= data.len() {
         return false;
     }
 
-    let disk_digest = crate::crypto::sha256::hash(&data[payload_start..]);
-    disk_digest == table.sha256_computed && table.sha256_verified
+    let disk_sig = crate::crypto::sha256::hmac(CREATOR_SIGN_KEY, &data[payload_start..]);
+    disk_sig == table.signature_computed && table.signature_verified
 }
 
 /// Autocomplete matching for interactive shell Tab completion.
@@ -388,17 +408,17 @@ pub fn find_completions(
 /// Print formatted categorized commands directly from `/System/CLI/cmd.dtbase`.
 pub fn print_categorized_help() {
     let table = CMD_TABLE.lock();
-    serial::println("\nAegisShell / PurpleOS Commands (Defined in /System/CLI/cmd.dtbase):");
+    serial::println("\nAegisShell / Purple Shell Commands (MS-DOS & Linux POSIX Hybrid Engine) [Defined in /System/CLI/cmd.dtbase]:");
 
     let categories = [
-        ("Navigation", "Directory & Path Navigation"),
+        ("Navigation", "Directory & Navigation"),
         ("FileOps", "File Operations & Text Processing"),
         ("Storage", "Storage & Hardware Devices"),
         ("Network", "Networking & Communications"),
         ("System", "System Architecture & Execution"),
-        ("Security", "Security & Integrity"),
+        ("Security", "Security & Cryptographic Signatures"),
         ("Userland", "Ring 3 (Userland / User Mode)"),
-        ("CLI", "CLI Quality of Life & Utilities"),
+        ("CLI", "CLI Quality of Life & Path Management"),
     ];
 
     for &(cat_key, cat_title) in &categories {
@@ -436,7 +456,7 @@ pub fn print_categorized_help() {
         }
     }
 
-    serial::println("\nType 'help <command>' for detailed manual, or 'cmd info' for database status.");
+    serial::println("\nType 'help <command>' for detailed manual, or 'cmd info' for signature status.");
 }
 
 /// Print manual entry for a specific command from the database.

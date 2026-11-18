@@ -118,6 +118,7 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     if kernel::storage::is_mounted() {
         security::aegis_detect::verify_storage();
         kernel::cmddb::init();
+        kernel::pathdb::init();
     }
 
     // 14. Peripheral Discovery Daemon

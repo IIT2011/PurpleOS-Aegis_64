@@ -1,7 +1,9 @@
 # PURPLEOS COMMAND DATABASE
-# SHA256: 1e577c200b099ef6544a677fd8bda679f2226044da80010e63523f24e06fb0eb
+# SIGNER: Creator (Aegis Root Developer)
+# KEY_ID: AEGIS-CREATOR-V1
+# SIGNATURE: d65c206155f169c89bbb792921d87afba0f8e8f722d039aef89a53983b40f60e
 # CANONICAL PATH: /System/CLI/cmd.dtbase
-# COMMAND COUNT: 119
+# COMMAND COUNT: 120
 
 [cmd:cd]
 cat=Navigation
@@ -530,6 +532,12 @@ cat=CLI
 target=ring0:cmd
 desc=Command database manager from /System/CLI/cmd.dtbase
 usage=cmd [reload|verify|info]
+
+[cmd:path]
+cat=CLI
+target=ring0:path
+desc=Search path manager from /System/CLI/path.dtbase
+usage=path [add|remove|reload]
 
 [cmd:history]
 cat=CLI

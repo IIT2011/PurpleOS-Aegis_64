@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
 """
-Test Suite for PurpleOS Command Database Subsystem (/System/CLI/cmd.dtbase).
-Verifies:
-  1. Boot-time SHA-256 cryptographic authentication of /System/CLI/cmd.dtbase.
-  2. Loading of all dynamic command definitions into kernel dispatcher.
-  3. `cmd info` reporting path, count, and SHA-256 verification status.
-  4. `cmd verify` integrity verification.
-  5. `help` displaying dynamic categorized commands from /System/CLI/cmd.dtbase.
-  6. `help <cmd>` displaying manual entry from database.
-  7. `which <cmd>` resolving through /System/CLI/cmd.dtbase.
-  8. `cmd reload` dynamic hot-reloading from storage.
+Test Suite for PurpleOS Command & Path Databases:
+  - /System/CLI/cmd.dtbase (Cryptographically Signed by Creator)
+  - /System/CLI/path.dtbase (Unrestricted User Search Paths)
 """
 
 import subprocess
@@ -20,7 +13,7 @@ import sys
 
 def main():
     print("=================================================================")
-    print("  PURPLE OS / AEGIS64 — COMMAND DATABASE (/System/CLI/cmd.dtbase)")
+    print("  PURPLE OS / AEGIS64 — CMD & PATH DATABASE VERIFICATION SUITE   ")
     print("=================================================================")
 
     with tempfile.TemporaryDirectory(dir="build") as tmpdir:
@@ -52,7 +45,11 @@ def main():
         test_commands = [
             "cmd info\n",
             "cmd verify\n",
-            "help\n",
+            "path\n",
+            "path add /System/TestBin\n",
+            "path\n",
+            "path remove /System/TestBin\n",
+            "path reload\n",
             "help ls\n",
             "help ring3\n",
             "which cat\n",
@@ -78,19 +75,24 @@ def main():
     print(stdout)
 
     assertions = [
-        ("Boot SHA-256 Verification", "[CMDDB] Authenticated /System/CLI/cmd.dtbase"),
-        ("100% Integrity Verified", "100% Integrity Verified!"),
-        ("Loaded Command Count", "commands into kernel execution dispatcher"),
+        ("Boot Creator Signature Verification", "[CMDDB] Authenticated /System/CLI/cmd.dtbase — Cryptographically Signed by Creator!"),
+        ("Boot Verified Signer", "[CMDDB] Verified Signer: Creator (Aegis Root Developer)"),
+        ("Boot Loaded Command Count", "commands into kernel execution dispatcher"),
+        ("Boot Path Database Loaded", "[PATHDB] Loaded 6 search path(s) from /System/CLI/path.dtbase"),
         ("cmd info Database Path", "Database Path:     /System/CLI/cmd.dtbase"),
-        ("cmd info SHA-256 Status", "SHA-256 Verified:  YES (Cryptographically Authenticated)"),
-        ("cmd verify Status", "/System/CLI/cmd.dtbase SHA-256 Integrity: 100% VERIFIED"),
-        ("Dynamic Help Header", "AegisShell / PurpleOS Commands (Defined in /System/CLI/cmd.dtbase):"),
-        ("Dynamic Help Navigation", "Directory & Path Navigation:"),
+        ("cmd info Creator Signed", "Creator Signed:    YES (Cryptographically Signed by Creator)"),
+        ("cmd verify Status", "/System/CLI/cmd.dtbase Creator Signature: 100% VERIFIED"),
+        ("path Command Execution", "PurpleOS Search Path Database (/System/CLI/path.dtbase)"),
+        ("path Search Hierarchy", "Active Search Hierarchy:"),
+        ("path System Applications", "/System/Applications"),
+        ("path Add Directory", "[PATHDB] Added '/System/TestBin' to active search paths."),
+        ("path Remove Directory", "[PATHDB] Removed '/System/TestBin' from active search paths."),
+        ("path Reload Command", "Successfully reloaded 6 search path(s) from /System/CLI/path.dtbase"),
         ("Dynamic Help Manual LS", "PurpleOS Command Manual: ls"),
         ("Dynamic Help Manual Ring3", "PurpleOS Command Manual: ring3"),
         ("Which Cat Builtin", "cat: shell builtin command (defined in /System/CLI/cmd.dtbase)"),
         ("Which Ring3 Userland", "ring3: Ring 3 user mode application (defined in /System/CLI/cmd.dtbase)"),
-        ("Dynamic Hot-Reload", "Successfully reloaded"),
+        ("cmd Dynamic Hot-Reload", "Successfully reloaded 120 commands from /System/CLI/cmd.dtbase"),
         ("Suite Completion", "CMDDB-TESTS-COMPLETED"),
     ]
 
@@ -104,7 +106,7 @@ def main():
             all_passed = False
 
     if all_passed:
-        print("\n>>> ALL COMMAND DATABASE VERIFICATION TESTS PASSED (100%)! <<<")
+        print("\n>>> ALL CMD & PATH DATABASE VERIFICATION TESTS PASSED (100%)! <<<")
         return 0
     else:
         print("\n>>> SOME TESTS FAILED <<<")

@@ -1915,9 +1915,9 @@ impl Shell {
                     }
                     "verify" => {
                         if crate::kernel::cmddb::verify_integrity() {
-                            serial::println("[CMDDB] /System/CLI/cmd.dtbase SHA-256 Integrity: 100% VERIFIED.");
+                            serial::println("[CMDDB] /System/CLI/cmd.dtbase Creator Signature: 100% VERIFIED.");
                         } else {
-                            serial::println("[CMDDB] /System/CLI/cmd.dtbase SHA-256 Integrity: COMPROMISED / MISMATCH.");
+                            serial::println("[CMDDB] /System/CLI/cmd.dtbase Creator Signature: COMPROMISED / MISMATCH.");
                         }
                     }
                     "info" => {
@@ -1931,11 +1931,11 @@ impl Shell {
                             serial::print("  Loaded Commands:   ");
                             serial::print_u64(crate::kernel::cmddb::count() as u64);
                             serial::println("");
-                            serial::print("  SHA-256 Verified:  ");
+                            serial::print("  Creator Signed:    ");
                             if crate::kernel::cmddb::is_verified() {
-                                serial::println("YES (Cryptographically Authenticated)");
+                                serial::println("YES (Cryptographically Signed by Creator)");
                             } else {
-                                serial::println("NO (Integrity check failed)");
+                                serial::println("NO (Signature check failed)");
                             }
                             serial::println("  Subcommands:       cmd reload, cmd verify, cmd info [command]");
                             serial::println("=======================================================================");
@@ -1949,6 +1949,64 @@ impl Shell {
                     }
                     _ => {
                         serial::println("Usage: cmd [reload|verify|info [command]]");
+                    }
+                }
+            }
+            "path" => {
+                let sub = parts.next().unwrap_or("list");
+                match sub {
+                    "list" | "show" | "" => {
+                        crate::kernel::pathdb::print_paths();
+                    }
+                    "reload" => {
+                        match crate::kernel::pathdb::reload() {
+                            Ok(count) => {
+                                serial::print("[PATHDB] Successfully reloaded ");
+                                serial::print_u64(count as u64);
+                                serial::println(" search path(s) from /System/CLI/path.dtbase.");
+                            }
+                            Err(e) => {
+                                serial::print("[PATHDB] Reload error: ");
+                                serial::println(e);
+                            }
+                        }
+                    }
+                    "add" => {
+                        if let Some(dir) = parts.next() {
+                            match crate::kernel::pathdb::add_path(dir) {
+                                Ok(()) => {
+                                    serial::print("[PATHDB] Added '");
+                                    serial::print(dir);
+                                    serial::println("' to active search paths.");
+                                }
+                                Err(e) => {
+                                    serial::print("[PATHDB] Add error: ");
+                                    serial::println(e);
+                                }
+                            }
+                        } else {
+                            serial::println("Usage: path add <directory>");
+                        }
+                    }
+                    "remove" | "del" | "rm" => {
+                        if let Some(dir) = parts.next() {
+                            match crate::kernel::pathdb::remove_path(dir) {
+                                Ok(()) => {
+                                    serial::print("[PATHDB] Removed '");
+                                    serial::print(dir);
+                                    serial::println("' from active search paths.");
+                                }
+                                Err(e) => {
+                                    serial::print("[PATHDB] Remove error: ");
+                                    serial::println(e);
+                                }
+                            }
+                        } else {
+                            serial::println("Usage: path remove <directory>");
+                        }
+                    }
+                    _ => {
+                        serial::println("Usage: path [list|reload|add <dir>|remove <dir>]");
                     }
                 }
             }
@@ -2949,7 +3007,7 @@ impl Shell {
         let resolved = self.resolve_path(cmd, &mut path_buf);
 
         let mut header = [0u8; 8];
-        let read_len = if resolved.starts_with("/tmp/") {
+        let mut read_len = if resolved.starts_with("/tmp/") {
             crate::fs::vfs::read(resolved, &mut header).unwrap_or(0)
         } else {
             let clean = resolved.trim_start_matches('/');
@@ -2961,6 +3019,24 @@ impl Shell {
                 }
             }).unwrap_or(0)
         };
+
+        if read_len < 4 {
+            if let Some(candidate) = crate::kernel::pathdb::resolve_file(cmd, &mut path_buf) {
+                let clean = candidate.trim_start_matches('/');
+                let mut alt_hdr = [0u8; 8];
+                let p_len = crate::kernel::storage::with_fs(|fs| {
+                    if let Some(ino) = fs.lookup(clean) {
+                        fs.read_file(ino, &mut alt_hdr)
+                    } else {
+                        0
+                    }
+                }).unwrap_or(0);
+                if p_len >= 4 {
+                    header = alt_hdr;
+                    read_len = p_len;
+                }
+            }
+        }
 
         if read_len >= 4 {
             if &header[..4] == b"\x7fELF" {
