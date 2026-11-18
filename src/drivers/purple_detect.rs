@@ -4,23 +4,25 @@ use crate::drivers::video;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum DeviceCategory {
-    Storage,
-    Input,
-    Display,
-    Audio,
-    Network,
-    Serial,
-    Timer,
-    Interrupt,
-    Bridge,
-    Bus,
-    Unknown,
+    Storage = 0,
+    Filesystem = 1,
+    Input = 2,
+    Display = 3,
+    Audio = 4,
+    Network = 5,
+    Serial = 6,
+    Timer = 7,
+    Interrupt = 8,
+    Bridge = 9,
+    Bus = 10,
+    Unknown = 11,
 }
 
 impl DeviceCategory {
     pub fn as_str(&self) -> &'static str {
         match self {
             DeviceCategory::Storage => "STORAGE",
+            DeviceCategory::Filesystem => "FILESYSTEM",
             DeviceCategory::Input => "INPUT",
             DeviceCategory::Display => "DISPLAY",
             DeviceCategory::Audio => "AUDIO",
@@ -83,7 +85,7 @@ impl PurpleDevice {
     }
 }
 
-const MAX_DEVICES: usize = 32;
+const MAX_DEVICES: usize = 64;
 
 struct PurpleRegistry {
     devices: [PurpleDevice; MAX_DEVICES],
@@ -197,6 +199,9 @@ pub fn scan_all() {
         register(cat, "PCI_DEV", vendor_name, model_name, "PCI", bdf_addr, pdev.irq_line, DeviceState::Active);
     });
 
+    // 3. Discover and Register Filesystem Drivers and VFS Engines
+    crate::fs::fs_registry::register_with_purple_detect();
+
     let reg = REGISTRY.lock();
     serial::print("PurpleDetect: Hardware inventory completed: ");
     serial::print_u64(reg.count as u64);
@@ -208,7 +213,7 @@ pub fn print_table() {
     let header = "\n=== PurpleDetect Hardware & Removable Device Registry ===\n  Discovered Devices: ";
     serial::print(header);
     serial::print_u64(reg.count as u64);
-    serial::println("\n\n  ID  NAME      CATEGORY    STATE       BUS    ADDRESS     IRQ  VENDOR / MODEL");
+    serial::println("\n\n  ID   NAME          CATEGORY    STATE       BUS    ADDRESS     IRQ  VENDOR / MODEL");
     serial::println("  --------------------------------------------------------------------------------");
 
     if video::is_available() {
@@ -220,19 +225,33 @@ pub fn print_table() {
         let d = &reg.devices[i];
         serial::print("  #");
         serial::print_u64(d.id as u64);
-        serial::print("  ");
+        if d.id < 10 {
+            serial::print("   ");
+        } else {
+            serial::print("  ");
+        }
         let name_str = core::str::from_utf8(&d.name).unwrap_or("").trim_matches(char::from(0));
         serial::print(name_str);
-        for _ in name_str.len()..10 {
+        let pad = if name_str.len() < 14 { 14 - name_str.len() } else { 2 };
+        for _ in 0..pad {
             serial::print(" ");
         }
-        serial::print(d.category.as_str());
-        serial::print("  ");
-        serial::print(d.state.as_str());
-        serial::print("  ");
+        let cat_str = d.category.as_str();
+        serial::print(cat_str);
+        for _ in cat_str.len()..12 {
+            serial::print(" ");
+        }
+        let st_str = d.state.as_str();
+        serial::print(st_str);
+        for _ in st_str.len()..12 {
+            serial::print(" ");
+        }
         let bus_str = core::str::from_utf8(&d.bus).unwrap_or("").trim_matches(char::from(0));
         serial::print(bus_str);
-        serial::print("  0x");
+        for _ in bus_str.len()..7 {
+            serial::print(" ");
+        }
+        serial::print("0x");
         serial::print_hex(d.address);
         serial::print("  ");
         serial::print_u64(d.irq as u64);

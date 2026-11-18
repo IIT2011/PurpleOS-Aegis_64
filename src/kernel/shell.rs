@@ -1488,7 +1488,15 @@ impl Shell {
                 let sub = parts.next().unwrap_or("");
                 match sub {
                     "disks" | "disk" | "storage" => self.show_disks(),
-                    "filesystem" | "fs" | "df" => self.show_df(),
+                    "filesystem" | "fs" | "df" => {
+                        let sub2 = parts.next().unwrap_or("");
+                        if sub2 == "drivers" || sub2 == "driver" {
+                            crate::fs::fs_registry::print_driver_table();
+                        } else {
+                            self.show_df();
+                        }
+                    }
+                    "filesystems" => crate::fs::fs_registry::print_driver_table(),
                     "memory" | "mem" => self.show_mem(),
                     "system" | "sysinfo" => self.show_sysinfo(),
                     "cpu" | "cpuinfo" => self.show_cpuinfo(),
@@ -1759,10 +1767,13 @@ impl Shell {
                 let sub = parts.next().unwrap_or("");
                 if sub == "status" || sub == "df" {
                     self.show_df();
+                } else if sub == "drivers" || sub == "driver" || sub == "list" {
+                    crate::fs::fs_registry::print_driver_table();
                 } else {
-                    serial::println("Usage: filesystem <status>");
+                    serial::println("Usage: filesystem <status|drivers>");
                 }
             }
+            "filesystems" => crate::fs::fs_registry::print_driver_table(),
             "df" => self.show_df(),
             "list" => {
                 let sub = parts.next().unwrap_or("");

@@ -249,6 +249,16 @@ def main():
         ["kinfo", "keyboard_poll_event"]
     )
 
+    # 9. filesystems.apdrv (Unified Filesystem Driver Subsystem)
+    build_module(
+        os.path.join(out_dir, "filesystems.apdrv"),
+        "filesystems",
+        "Unified Filesystem Drivers (PurpleFS v2/v3, FAT32, Ext4, ISO9660, RAMFS)",
+        "Purple OS Filesystem Group",
+        0x0000, 0x0000,
+        ["kinfo", "vfs_register_fs", "block_dev_get"]
+    )
+
     # =========================================================================
     # HARDWARE SUB-DRIVERS & LEGACY ALIAS PACKAGES
     # =========================================================================
@@ -400,6 +410,56 @@ def main():
         ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
     )
 
+    # 17. purplefs.apdrv (PurpleFS v2/v3 Native Journaled Filesystem Driver)
+    build_module(
+        os.path.join(out_dir, "purplefs.apdrv"),
+        "purplefs",
+        "PurpleFS v2/v3 Native 64-bit Journaled Filesystem Driver",
+        "Purple OS Filesystem Group",
+        0x0000, 0x0000,
+        ["kinfo", "vfs_register_fs"]
+    )
+
+    # 18. fat32.apdrv (FAT12/16/32 / VFAT Filesystem Driver)
+    build_module(
+        os.path.join(out_dir, "fat32.apdrv"),
+        "fat32",
+        "FAT12/16/32 & VFAT Removable Storage Filesystem Driver",
+        "Purple OS Filesystem Group",
+        0x0000, 0x0000,
+        ["kinfo", "vfs_register_fs"]
+    )
+
+    # 19. ext4.apdrv (Ext2/3/4 Extended Filesystem Driver)
+    build_module(
+        os.path.join(out_dir, "ext4.apdrv"),
+        "ext4",
+        "Ext2/Ext3/Ext4 Linux Compatible Filesystem Driver",
+        "Purple OS Filesystem Group",
+        0x0000, 0x0000,
+        ["kinfo", "vfs_register_fs"]
+    )
+
+    # 20. iso9660.apdrv (ISO9660 / El Torito Optical Disc Driver)
+    build_module(
+        os.path.join(out_dir, "iso9660.apdrv"),
+        "iso9660",
+        "ISO9660 / El Torito CD-ROM & DVD Optical Media Driver",
+        "Purple OS Filesystem Group",
+        0x0000, 0x0000,
+        ["kinfo", "vfs_register_fs"]
+    )
+
+    # 21. ramfs.apdrv (RAM / TmpFS Virtual Memory Filesystem Driver)
+    build_module(
+        os.path.join(out_dir, "ramfs.apdrv"),
+        "ramfs",
+        "RAM / TmpFS Volatile Virtual Memory Filesystem Driver",
+        "Purple OS Filesystem Group",
+        0x0000, 0x0000,
+        ["kinfo", "vfs_register_fs"]
+    )
+
     # TitleCase aliases
     title_cases = {
         "storage.apdrv": "Storage.apdrv",
@@ -409,7 +469,8 @@ def main():
         "input.apdrv": "Input.apdrv",
         "wifi.apdrv": "WiFi.apdrv",
         "bluetooth.apdrv": "Bluetooth.apdrv",
-        "camera.apdrv": "Camera.apdrv"
+        "camera.apdrv": "Camera.apdrv",
+        "filesystems.apdrv": "Filesystems.apdrv"
     }
     for src, dst in title_cases.items():
         src_path = os.path.join(out_dir, src)
@@ -425,7 +486,15 @@ def main():
                 df.write(data)
 
     # Also copy all unified category drivers and hardware modules to build/
-    for extra in ["cpu.apdrv", "ram.apdrv", "gpu.apdrv", "storage.apdrv", "network.apdrv", "audio.apdrv", "usb.apdrv", "input.apdrv", "Graphics.apdrv", "bochs_gpu.apdrv", "r8139.apdrv", "e1000.apdrv", "igd.apdrv", "radeongd.apdrv", "nvgd.apdrv", "gpu-intel.apdrv", "gpu-amd.apdrv", "gpu-nvidia.apdrv"]:
+    for extra in [
+        "cpu.apdrv", "ram.apdrv", "gpu.apdrv", "storage.apdrv", "network.apdrv",
+        "audio.apdrv", "usb.apdrv", "input.apdrv", "filesystems.apdrv",
+        "purplefs.apdrv", "fat32.apdrv", "ext4.apdrv", "iso9660.apdrv", "ramfs.apdrv",
+        "Filesystems.apdrv",
+        "Graphics.apdrv", "bochs_gpu.apdrv", "r8139.apdrv", "e1000.apdrv",
+        "igd.apdrv", "radeongd.apdrv", "nvgd.apdrv",
+        "gpu-intel.apdrv", "gpu-amd.apdrv", "gpu-nvidia.apdrv"
+    ]:
         p = os.path.join(out_dir, extra)
         if os.path.exists(p):
             with open(p, "rb") as sf:

@@ -8,7 +8,7 @@ pub const APDRV_TYPE_AEGISMOD: &[u8; 8] = b"AEGISMOD";
 pub const APDRV_MAX_NAME: usize = 32;
 pub const APDRV_MAX_DESC: usize = 64;
 pub const APDRV_MAX_AUTHOR: usize = 32;
-pub const APDRV_MAX_MODULES: usize = 16;
+pub const APDRV_MAX_MODULES: usize = 32;
 
 /* Relocation Types */
 pub const APDRV_RELOC_NONE: u32 = 0;
@@ -139,6 +139,10 @@ static MODULE_REGISTRY: Spinlock<[LoadedModule; APDRV_MAX_MODULES]> = Spinlock::
     LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
     LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
     LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
+    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
+    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
+    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
+    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
 ]);
 
 static CPU_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/cpu.apdrv");
@@ -149,9 +153,10 @@ static NETWORK_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/network.
 static AUDIO_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/audio.apdrv");
 static USB_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/usb.apdrv");
 static INPUT_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/input.apdrv");
+static FILESYSTEMS_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/filesystems.apdrv");
 
 pub fn init() {
-    crate::drivers::serial::println("APDRV: Subsystem v3 initialized (Max Modules: 16, W^X Enforced)");
+    crate::drivers::serial::println("APDRV: Subsystem v3 initialized (Max Modules: 32, W^X Enforced)");
 
     // System-wide automated loading of core native hardware drivers (Unified Categories)
     let _ = load_binary(CPU_APDRV);
@@ -162,6 +167,7 @@ pub fn init() {
     let _ = load_binary(AUDIO_APDRV);
     let _ = load_binary(USB_APDRV);
     let _ = load_binary(INPUT_APDRV);
+    let _ = load_binary(FILESYSTEMS_APDRV);
 
     // Hardware Auto-Binding: probe discovered PCI devices against loaded modules
     crate::drivers::pci::for_each_device(|dev| {
@@ -443,7 +449,34 @@ pub fn insmod(name: &str) {
     let mut loaded = false;
 
     crate::kernel::storage::with_fs(|fs| {
-        if let Some(ino) = fs.lookup(clean) {
+        let mut target_ino = fs.lookup(clean);
+
+        if target_ino.is_none() {
+            let mut sys_path = [0u8; 64];
+            let prefix = b"System/Drivers/";
+            sys_path[..prefix.len()].copy_from_slice(prefix);
+            let cl_bytes = clean.as_bytes();
+            let cl_len = cl_bytes.len().min(sys_path.len() - prefix.len() - 1);
+            sys_path[prefix.len()..prefix.len() + cl_len].copy_from_slice(&cl_bytes[..cl_len]);
+            if let Ok(sys_str) = core::str::from_utf8(&sys_path[..prefix.len() + cl_len]) {
+                target_ino = fs.lookup(sys_str);
+            }
+        }
+
+        if target_ino.is_none() && !clean.ends_with(".apdrv") {
+            let mut sys_path = [0u8; 64];
+            let prefix = b"System/Drivers/";
+            sys_path[..prefix.len()].copy_from_slice(prefix);
+            let cl_bytes = clean.as_bytes();
+            let cl_len = cl_bytes.len().min(sys_path.len() - prefix.len() - 7);
+            sys_path[prefix.len()..prefix.len() + cl_len].copy_from_slice(&cl_bytes[..cl_len]);
+            sys_path[prefix.len() + cl_len..prefix.len() + cl_len + 6].copy_from_slice(b".apdrv");
+            if let Ok(sys_str) = core::str::from_utf8(&sys_path[..prefix.len() + cl_len + 6]) {
+                target_ino = fs.lookup(sys_str);
+            }
+        }
+
+        if let Some(ino) = target_ino {
             let len = fs.read_file(ino, &mut buf);
             if len > 0 {
                 if let Ok(_) = load_binary(&buf[..len]) {

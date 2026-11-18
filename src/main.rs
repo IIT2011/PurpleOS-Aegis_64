@@ -112,6 +112,7 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
 
     // 12. Storage Subsystem & PurpleFS Auto-Mount
     kernel::storage::init();
+    fs::fs_registry::init();
 
     // 13. Security & Integrity Subsystems
     security::aegis_detect::init();
