@@ -4,7 +4,6 @@
 //! tracking, and high-performance pixel operations without external dependencies.
 
 use crate::drivers::dma::{alloc_coherent, free_coherent};
-use crate::drivers::font8x16::FONT8X16;
 
 /// 2D Axis-Aligned Bounding Box (Rectangle)
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -284,23 +283,59 @@ impl Surface {
         }
     }
 
-    /// Draw a single ASCII character onto the surface
+    /// Draw a single ASCII character onto the surface with Inter anti-aliasing
     pub fn draw_char(&mut self, x: usize, y: usize, c: u8, fg: u32, bg: u32, transparent_bg: bool) {
+        self.draw_char_styled(x, y, c, fg, bg, transparent_bg, crate::drivers::font::FontWeight::Regular);
+    }
+
+    /// Draw a single ASCII character onto the surface with custom font weight
+    pub fn draw_char_styled(
+        &mut self,
+        x: usize,
+        y: usize,
+        c: u8,
+        fg: u32,
+        bg: u32,
+        transparent_bg: bool,
+        weight: crate::drivers::font::FontWeight,
+    ) {
         if !self.is_valid() || x + 8 > self.width || y + 16 > self.height {
             return;
         }
 
-        let glyph = FONT8X16[c as usize];
-        for row in 0..16 {
-            let bits = glyph[row];
-            let py = y + row;
-            let offset = py * self.stride + x;
-            for col in 0..8 {
-                let is_fg = (bits & (0x80 >> col)) != 0;
-                if is_fg {
-                    unsafe { *self.pixels.add(offset + col) = fg; }
-                } else if !transparent_bg {
-                    unsafe { *self.pixels.add(offset + col) = bg; }
+        let face = crate::drivers::font::get_active_font();
+        match face {
+            crate::drivers::font::FontFace::Inter => {
+                for row in 0..16 {
+                    let py = y + row;
+                    let offset = py * self.stride + x;
+                    for col in 0..8 {
+                        let a = crate::drivers::font::get_glyph_alpha(c, row, col, weight);
+                        if a > 0 {
+                            unsafe {
+                                let dst = if transparent_bg { *self.pixels.add(offset + col) } else { bg };
+                                *self.pixels.add(offset + col) = crate::drivers::font::blend_alpha(fg, dst, a);
+                            }
+                        } else if !transparent_bg {
+                            unsafe { *self.pixels.add(offset + col) = bg; }
+                        }
+                    }
+                }
+            }
+            crate::drivers::font::FontFace::ClassicVga => {
+                let glyph = crate::drivers::font8x16::FONT8X16[c as usize];
+                for row in 0..16 {
+                    let bits = glyph[row];
+                    let py = y + row;
+                    let offset = py * self.stride + x;
+                    for col in 0..8 {
+                        let is_fg = (bits & (0x80 >> col)) != 0;
+                        if is_fg {
+                            unsafe { *self.pixels.add(offset + col) = fg; }
+                        } else if !transparent_bg {
+                            unsafe { *self.pixels.add(offset + col) = bg; }
+                        }
+                    }
                 }
             }
         }
@@ -316,6 +351,20 @@ impl Surface {
                 break;
             }
             self.draw_char(x, y, b, fg, bg, transparent_bg);
+            x += 8;
+        }
+    }
+
+    /// Draw a bold text string onto the surface
+    pub fn draw_text_bold(&mut self, mut x: usize, y: usize, text: &str, fg: u32, bg: u32, transparent_bg: bool) {
+        for b in text.bytes() {
+            if b == b'\n' {
+                break;
+            }
+            if x + 8 > self.width {
+                break;
+            }
+            self.draw_char_styled(x, y, b, fg, bg, transparent_bg, crate::drivers::font::FontWeight::Bold);
             x += 8;
         }
     }

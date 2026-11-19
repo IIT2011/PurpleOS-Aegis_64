@@ -80,6 +80,9 @@ pub fn is_directory(path: &str) -> bool {
         | "System/Services"
         | "System/Configuration"
         | "System/Resources"
+        | "System/Resources/Fonts"
+        | "System/Resources/Icons"
+        | "System/Resources/Wallpapers"
         | "System/Libraries" => return true,
         "Users"
         | "Users/aegis"
@@ -948,6 +951,11 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                         cb("Resources", 0, true);
                         cb("Services", 0, true);
                     }
+                    "System/Resources" => {
+                        cb("Fonts", 0, true);
+                        cb("Icons", 0, true);
+                        cb("Wallpapers", 0, true);
+                    }
                     "Users" => {
                         cb("Admin", 0, true);
                         cb("aegis", 0, true);
@@ -996,6 +1004,9 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                             if let Some(slash_idx) = rel.find('/') {
                                 let sub_dir = &rel[..slash_idx];
                                 if clean_sub == "System" && matches!(sub_dir, "Applications" | "CLI" | "Configuration" | "Drivers" | "Frameworks" | "Kernel" | "Libraries" | "Resources" | "Services") {
+                                    return;
+                                }
+                                if clean_sub == "System/Resources" && matches!(sub_dir, "Fonts" | "Icons" | "Wallpapers") {
                                     return;
                                 }
                                 cb(sub_dir, 0, true);

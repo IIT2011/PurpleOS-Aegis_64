@@ -125,10 +125,14 @@ impl<'a> PurpleFsV2<'a> {
             return 0;
         }
 
+        let total_file_blocks = (size_bytes + 4095) / 4096;
         let mut bytes_copied = 0;
         let mut block_buf = [0u8; 4096];
+        let mut indirect_buf = [0u8; 4096];
+        let mut indirect_loaded = false;
+        let indirect_blk = u32::from_le_bytes(inode_block[ino_off + 0x5C..ino_off + 0x60].try_into().unwrap());
 
-        for i in 0..12 {
+        for i in 0..total_file_blocks.min(12 + 1024) {
             if bytes_copied >= buf.len() {
                 break;
             }
@@ -144,8 +148,24 @@ impl<'a> PurpleFsV2<'a> {
                 continue;
             }
 
-            let ptr_off = ino_off + 0x2C + i * 4;
-            let data_blk = u32::from_le_bytes(inode_block[ptr_off..ptr_off + 4].try_into().unwrap());
+            let data_blk = if i < 12 {
+                let ptr_off = ino_off + 0x2C + i * 4;
+                u32::from_le_bytes(inode_block[ptr_off..ptr_off + 4].try_into().unwrap())
+            } else {
+                if indirect_blk == 0 {
+                    0
+                } else {
+                    if !indirect_loaded {
+                        if self.read_fs_block(indirect_blk, &mut indirect_buf).is_ok() {
+                            indirect_loaded = true;
+                        } else {
+                            break;
+                        }
+                    }
+                    let ind_idx = i - 12;
+                    u32::from_le_bytes(indirect_buf[ind_idx * 4..(ind_idx + 1) * 4].try_into().unwrap())
+                }
+            };
             if data_blk == 0 {
                 break;
             }

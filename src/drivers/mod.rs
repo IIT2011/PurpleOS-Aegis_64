@@ -2,6 +2,8 @@ pub mod serial;
 pub mod video;
 pub mod font;
 pub mod font8x16;
+pub mod font_ttf;
+pub mod inter_font;
 pub mod keyboard;
 pub mod mouse;
 pub mod pit;

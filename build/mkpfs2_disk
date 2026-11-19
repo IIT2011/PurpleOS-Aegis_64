@@ -90,6 +90,16 @@ def format_purplefs_v2(total_blocks, label, files):
         )
         for i, blk in enumerate(file_blocks[:12]):
             struct.pack_into("<I", inodes, ino_offset + 0x2C + i*4, blk)
+        if len(file_blocks) > 12:
+            indirect_blk = cur_data_block
+            set_bit(indirect_blk)
+            cur_data_block += 1
+            allocated_blocks += 1
+            struct.pack_into("<I", inodes, ino_offset + 0x5C, indirect_blk)
+            ind_buf = bytearray(4096)
+            for j, blk in enumerate(file_blocks[12:12+1024]):
+                struct.pack_into("<I", ind_buf, j*4, blk)
+            data[indirect_blk*4096 : (indirect_blk+1)*4096] = ind_buf
 
         icrc = zlib.crc32(inodes[ino_offset : ino_offset + 0x7C]) & 0xFFFFFFFF
         struct.pack_into("<I", inodes, ino_offset + 0x7C, icrc)
@@ -233,6 +243,26 @@ Library = libcompositor.a
 
     if e1000_data:
         files["System/Drivers/e1000.apdrv"] = e1000_data
+
+    # Seed System Fonts from assets/fonts/Inter
+    font_files = [
+        "Inter-Regular.ttf",
+        "Inter-Bold.ttf",
+        "Inter-Medium.ttf",
+        "Inter-SemiBold.ttf",
+        "Inter-Italic.ttf",
+        "Inter-Light.ttf",
+        "Inter.conf",
+        "LICENSE.txt",
+    ]
+    for font_f in font_files:
+        fpath = os.path.join("assets/fonts/Inter", font_f)
+        if not os.path.exists(fpath):
+            fpath = os.path.join("../Inter-4.1/extras/ttf", font_f)
+        if not os.path.exists(fpath):
+            fpath = os.path.join("../Inter-4.1", font_f)
+        if os.path.exists(fpath):
+            files[f"System/Resources/Fonts/{font_f}"] = open(fpath, "rb").read()
 
     pfs_data = format_purplefs_v2(32768, "PurpleSystem", files)
     pfs_sectors = len(pfs_data) // 512

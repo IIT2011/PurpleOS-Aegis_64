@@ -1848,6 +1848,7 @@ impl Shell {
             "3d" | "gpu3d" => self.show_gpu3d(),
             "compositor" | "gui" => self.show_compositor(&mut parts),
             "window" => self.show_window(&mut parts),
+            "font" | "fonts" => self.show_font(&mut parts),
             "ifconfig" => self.show_network(),
 
             // Driver Modules & Symbols
@@ -3975,6 +3976,167 @@ impl Shell {
                     serial::println("  No active windows open. (Use 'compositor demo' to create demo windows)");
                 }
                 serial::println("");
+            }
+        }
+    }
+
+    fn show_font(&self, parts: &mut core::str::SplitWhitespace) {
+        let sub = parts.next().unwrap_or("");
+        match sub {
+            "list" | "ls" => {
+                serial::println("\nSystem Fonts Registry (/System/Resources/Fonts/):");
+                let mut count = 0usize;
+                let _ = crate::fs::vfs::list_directory("System/Resources/Fonts", |name, size, is_dir| {
+                    if !is_dir {
+                        count += 1;
+                        serial::print("  [");
+                        serial::print_u64(count as u64);
+                        serial::print("] ");
+                        serial::print(name);
+                        serial::print(" (");
+                        serial::print_u64(size as u64);
+                        serial::print(" bytes) - ");
+                        if name.ends_with(".ttf") {
+                            serial::println("TrueType Vector Font");
+                        } else if name.ends_with(".conf") {
+                            serial::println("Font Family Descriptor");
+                        } else {
+                            serial::println("Resource Asset");
+                        }
+                    }
+                });
+                if count == 0 {
+                    serial::println("  (No fonts installed in /System/Resources/Fonts/)");
+                }
+                serial::print("\nTotal Fonts Discovered: ");
+                serial::print_u64(count as u64);
+                serial::println("\n");
+            }
+            "info" => {
+                let target_name = parts.next().unwrap_or("Inter-Regular.ttf");
+                let mut full_path = [0u8; 128];
+                let prefix = b"System/Resources/Fonts/";
+                full_path[..prefix.len()].copy_from_slice(prefix);
+                let mut path_len = prefix.len();
+                if target_name.starts_with("System/Resources/Fonts/") {
+                    path_len = target_name.len().min(127);
+                    full_path[..path_len].copy_from_slice(&target_name.as_bytes()[..path_len]);
+                } else {
+                    let copy_len = target_name.len().min(127 - prefix.len());
+                    full_path[prefix.len()..prefix.len() + copy_len].copy_from_slice(&target_name.as_bytes()[..copy_len]);
+                    path_len += copy_len;
+                }
+
+                if let Ok(path_str) = core::str::from_utf8(&full_path[..path_len]) {
+                    let mut dir_buf = [0u8; 512];
+                    match crate::fs::vfs::read_at(path_str, 0, &mut dir_buf) {
+                        Ok(bytes_read) if bytes_read >= 12 => {
+                            match crate::drivers::font_ttf::TtfTableDirectory::parse(&dir_buf[..bytes_read]) {
+                                Ok(ttf) => {
+                                    let mut meta = crate::drivers::font_ttf::TtfMetadata::empty();
+
+                                    // Parse 'head'
+                                    if let Some(tbl) = ttf.find_table(b"head") {
+                                        let mut head_buf = [0u8; 64];
+                                        if let Ok(n) = crate::fs::vfs::read_at(path_str, tbl.offset, &mut head_buf) {
+                                            meta.units_per_em = crate::drivers::font_ttf::TtfTableDirectory::parse_head(&head_buf[..n]);
+                                        }
+                                    }
+
+                                    // Parse 'name'
+                                    if let Some(tbl) = ttf.find_table(b"name") {
+                                        let mut name_buf = [0u8; 4096];
+                                        let to_read = tbl.length.min(4096);
+                                        if let Ok(n) = crate::fs::vfs::read_at(path_str, tbl.offset, &mut name_buf[..to_read]) {
+                                            crate::drivers::font_ttf::TtfTableDirectory::parse_name(&name_buf[..n], &mut meta);
+                                        }
+                                    }
+
+                                    // Parse 'hhea'
+                                    if let Some(tbl) = ttf.find_table(b"hhea") {
+                                        let mut hhea_buf = [0u8; 64];
+                                        if let Ok(n) = crate::fs::vfs::read_at(path_str, tbl.offset, &mut hhea_buf) {
+                                            let (asc, desc, gap) = crate::drivers::font_ttf::TtfTableDirectory::parse_hhea(&hhea_buf[..n]);
+                                            meta.ascender = asc;
+                                            meta.descender = desc;
+                                            meta.line_gap = gap;
+                                        }
+                                    }
+
+                                    // Parse 'maxp'
+                                    if let Some(tbl) = ttf.find_table(b"maxp") {
+                                        let mut maxp_buf = [0u8; 32];
+                                        if let Ok(n) = crate::fs::vfs::read_at(path_str, tbl.offset, &mut maxp_buf) {
+                                            meta.num_glyphs = crate::drivers::font_ttf::TtfTableDirectory::parse_maxp(&maxp_buf[..n]);
+                                        }
+                                    }
+
+                                    serial::println("\n=== TrueType Font Vector Specification ===");
+                                    serial::print("  File:            ");
+                                    serial::println(target_name);
+                                    serial::print("  Family Name:     ");
+                                    serial::println(meta.family_str());
+                                    serial::print("  Subfamily/Style: ");
+                                    serial::println(meta.subfamily_str());
+                                    serial::print("  Version:         ");
+                                    serial::println(meta.version_str());
+                                    serial::print("  Designer:        ");
+                                    serial::println(meta.designer_str());
+                                    serial::print("  Units per EM:    ");
+                                    serial::print_u64(meta.units_per_em as u64);
+                                    serial::println("");
+                                    serial::print("  Total Glyphs:    ");
+                                    serial::print_u64(meta.num_glyphs as u64);
+                                    serial::println("");
+                                    serial::print("  Ascender:        ");
+                                    serial::print_u64(meta.ascender.max(0) as u64);
+                                    serial::println("");
+                                    serial::print("  Descender:       ");
+                                    serial::print_u64((-meta.descender).max(0) as u64);
+                                    serial::println(" (neg)");
+                                    serial::print("  Line Gap:        ");
+                                    serial::print_u64(meta.line_gap as u64);
+                                    serial::println("");
+                                    serial::print("  Tables Found:    ");
+                                    serial::print_u64(ttf.num_tables as u64);
+                                    serial::println("\n");
+                                }
+                                Err(e) => {
+                                    serial::print("Failed to parse TrueType font: ");
+                                    serial::println(e);
+                                }
+                            }
+                        }
+                        _ => {
+                            serial::print("Could not read font file: ");
+                            serial::println(path_str);
+                        }
+                    }
+                }
+            }
+            "set" => {
+                let face_name = parts.next().unwrap_or("inter");
+                if face_name.eq_ignore_ascii_case("vga") {
+                    crate::drivers::font::set_active_font(crate::drivers::font::FontFace::ClassicVga);
+                    serial::println("System font set to: Classic IBM VGA (8x16 Bitmap)");
+                } else {
+                    crate::drivers::font::set_active_font(crate::drivers::font::FontFace::Inter);
+                    serial::println("System font set to: Inter (Subpixel Anti-Aliased Vector Font)");
+                }
+            }
+            _ => {
+                let face = crate::drivers::font::get_active_font();
+                serial::println("\n=== PurpleOS System Font Subsystem ===");
+                serial::print("  Active Font:     ");
+                serial::println(match face {
+                    crate::drivers::font::FontFace::Inter => "Inter 4.1 (Clean Modern Neo-Grotesque Vector Font)",
+                    crate::drivers::font::FontFace::ClassicVga => "Classic IBM VGA 8x16 (Bitmap Fallback)",
+                });
+                serial::println("  Anti-Aliasing:   Subpixel 8-Bit Fractional Coverage Blending");
+                serial::println("  Font Directory:  /System/Resources/Fonts/");
+                serial::println("  System Family:   Inter");
+                serial::println("  Installed:       Inter-Regular.ttf, Inter-Bold.ttf, Inter-Medium.ttf, etc.");
+                serial::println("\nCommands: 'font list', 'font info <file.ttf>', 'font set <inter|vga>'");
             }
         }
     }
