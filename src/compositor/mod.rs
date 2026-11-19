@@ -332,7 +332,7 @@ impl CompositorEngine {
 
         // Handle left click hit-testing
         if left_clicked {
-            // 1. First hit-test the desktop shell UI (Aegis Bar and Flow Dock)
+            // 1. First hit-test the desktop shell UI (Purple Bar and Purple Dock)
             let action = desktop::hit_test(x, y, self.width, self.height);
             match action {
                 desktop::DesktopAction::PurpleLogoClick => {
@@ -577,7 +577,7 @@ impl CompositorEngine {
         append_u64(&mut temp, &mut pos, win_cnt as u64);
         append_str(&mut temp, &mut pos, "\nDoubleBuffer: Hardware/Memory VBE\n");
         append_str(&mut temp, &mut pos, "Cursor:       Flicker-Free Anti-Aliased\n");
-        append_str(&mut temp, &mut pos, "Desktop:      Purple Desktop UI (Aegis Bar & Flow Dock)\n");
+        append_str(&mut temp, &mut pos, "Desktop:      Purple Desktop UI (Purple Bar & Purple Dock)\n");
         append_str(&mut temp, &mut pos, "VFS Node:     /dev/compositor, /dev/fb0\n");
 
         let copy_len = pos.min(buf.len());

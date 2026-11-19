@@ -11,9 +11,9 @@
 Per the user's directive:
 > *"did i tell yoi to implement apps yet? we eill only eork on the bars for now and refine them...remove apps source"*
 
-All application creation sources, mock window launching logic, and app-specific indicators were purged from the compositor engine. Focus was directed 100% into the visual fidelity, vector glyph geometry, glassmorphism, specular highlights, and floor reflections of the desktop shell bars:
-1. **The Aegis Bar** (Floating top panel).
-2. **The Purple Flow Dock** (Floating bottom shelf with Looking Glass-inspired floor reflection).
+All application creation sources, mock window launching logic, and app-specific indicators were purged from the compositor engine. Focus was directed 100% into the visual fidelity, vector glyph geometry, glassmorphism, specular highlights, and floor reflections of the desktop shell bars, officially designated as **Purple Bar** and **Purple Dock**:
+1. **Purple Bar** (Floating top panel).
+2. **Purple Dock** (Floating bottom shelf with Looking Glass-inspired floor reflection).
 
 ---
 
@@ -25,7 +25,7 @@ All application creation sources, mock window launching logic, and app-specific 
 - **Diagnostic Fixture:** Maintained `setup_demo_windows` strictly as an internal diagnostic surface fixture for the `compositor demo` CLI test command.
 
 ### B. Refinement of Desktop Shell Bars ([src/compositor/desktop.rs](file:///data/data/com.termux/files/home/OS%20Development/OS/src/compositor/desktop.rs))
-- **Aegis Bar Enhancements:**
+- **Purple Bar Enhancements:**
   - Dimensions: 34px height, 12px rounded corner radius, positioned at `y = 10`.
   - Glass Styling: Acrylic glass base (`0xB8120724`), translucent neon violet border (`0x48A855F7`), and top specular sheen line (`0x3CFFFFFF`).
   - Vector 'P' Logo: 26x26 rounded button housing a razor-sharp vector 'P' glyph with a 2px vertical stem and crisp curved loop.
@@ -34,7 +34,7 @@ All application creation sources, mock window launching logic, and app-specific 
     - Wi-Fi: 3-tier concentric cyan arcs (`0xFF38BDF8`) with signal dot.
     - Audio: Megaphone silhouette with dual sound wave arcs.
     - Battery: Emerald energy pill (`0xFF10B981`) with slate terminal pip.
-- **Purple Flow Dock Enhancements:**
+- **Purple Dock Enhancements:**
   - Dimensions: 288px width, 56px height, smooth 22px rounded pill caps, centered at bottom.
   - 5 High-Fidelity Vector Launcher Cards (38x38 glass cards with 10px rounded corners):
     - **Card 0 (Terminal):** Deep violet card with electric cyan prompt chevron `>` and amethyst cursor `_`.
@@ -48,6 +48,8 @@ All application creation sources, mock window launching logic, and app-specific 
 - Developed a pure Python standard library QMP screendump script with zero external dependencies (no Pillow/C-extensions needed on ARM Termux).
 - Implemented pure Python `zlib` PPM-to-PNG compression to dump full 1024x768@32bpp framebuffer captures directly from QEMU.
 - Captured screenshots:
+  - `purple_bar_and_purple_dock.png`: Framebuffer screendump of boot state showing wallpaper, refined Purple Bar, refined Purple Dock with floor reflection, and software pointer.
+  - Copied directly to Android storage: `/sdcard/Pictures/Purple_Desktop_UI/Purple_Bar_and_Purple_Dock.png`.
   - `purple_desktop_actual_boot.png`: Clean desktop showing only the wallpaper, refined Aegis Bar, refined Flow Dock with floor reflection, and software cursor.
   - Copied directly to Android storage: `/sdcard/Pictures/Purple_Desktop_UI/Purple_Desktop_Actual_Boot.png`.
 

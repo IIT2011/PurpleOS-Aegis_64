@@ -2,7 +2,7 @@
 """
 Capture Native Framebuffer Screenshots from Aegis64 in QEMU via QMP screendump.
 Generates PNG screenshots of:
-  1. Boot Desktop (Wallpaper + Aegis Bar + Flow Dock + Mirror Reflection + Pointer)
+  1. Boot Desktop (Wallpaper + Purple Bar + Purple Dock + Mirror Reflection + Pointer)
   2. Active Desktop (with Demo Windows & Active Dock Indicator Dots)
 """
 
@@ -155,10 +155,12 @@ def main():
 
     out_dir = "/data/data/com.termux/files/home/.gemini/antigravity-cli/brain/352e5877-a9d7-49e4-ab09-5d00ef99fd0a"
     png_boot = os.path.join(out_dir, "purple_desktop_actual_boot.png")
+    png_bar_dock = os.path.join(out_dir, "purple_bar_and_purple_dock.png")
     png_windows = os.path.join(out_dir, "purple_desktop_actual_windows.png")
 
     if os.path.exists(ppm_boot):
         ppm_to_png(ppm_boot, png_boot)
+        ppm_to_png(ppm_boot, png_bar_dock)
         try: os.remove(ppm_boot)
         except: pass
 
@@ -176,6 +178,12 @@ def main():
             shutil.copyfile(png_boot, dst)
             os.system(f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://{dst}" 2>/dev/null || true')
             print(f"[OK] Copied to phone storage: {dst}")
+
+            dst_bar_dock = os.path.join(phone_dir, "Purple_Bar_and_Purple_Dock.png")
+            shutil.copyfile(png_boot, dst_bar_dock)
+            os.system(f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://{dst_bar_dock}" 2>/dev/null || true')
+            print(f"[OK] Copied to phone storage: {dst_bar_dock}")
+
         if os.path.exists(png_windows):
             dst = os.path.join(phone_dir, "Purple_Desktop_Actual_Windows.png")
             shutil.copyfile(png_windows, dst)

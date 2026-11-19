@@ -1,6 +1,6 @@
 //! Native Purple Desktop UI Shell Subsystem for Aegis64.
 //!
-//! Provides the refined Aegis Bar (top floating panel) and Purple Flow Dock
+//! Provides the refined Purple Bar (top floating panel) and Purple Dock
 //! (bottom floating shelf with Looking Glass-inspired floor reflection).
 //! Focuses exclusively on the desktop shell bars and visual refinement.
 
@@ -141,8 +141,8 @@ pub fn render_dock_reflection(target: &mut Surface, dock_rect: Rect) {
     }
 }
 
-/// Render the refined Aegis Bar across the top of the display
-pub fn render_aegis_bar(target: &mut Surface) {
+/// Render the refined Purple Bar across the top of the display
+pub fn render_purple_bar(target: &mut Surface) {
     if !target.is_valid() || target.width < 120 || target.height < 100 {
         return;
     }
@@ -245,8 +245,8 @@ pub fn render_aegis_bar(target: &mut Surface) {
     target.fill_rect(Rect::new(bat_x + 18, tray_y + 5, 2, 5), 0xFF64748B); // Terminal pip
 }
 
-/// Render the refined Purple Flow Dock at the bottom of the screen
-pub fn render_flow_dock(target: &mut Surface, _windows: &[Option<Window>]) {
+/// Render the refined Purple Dock at the bottom of the screen
+pub fn render_purple_dock(target: &mut Surface, _windows: &[Option<Window>]) {
     if !target.is_valid() || target.width < 320 || target.height < 140 {
         return;
     }
@@ -337,13 +337,13 @@ pub fn render_flow_dock(target: &mut Surface, _windows: &[Option<Window>]) {
 
 /// Render the complete desktop shell overlay in correct scene pass order
 pub fn render_desktop_shell(target: &mut Surface, windows: &[Option<Window>]) {
-    render_aegis_bar(target);
-    render_flow_dock(target, windows);
+    render_purple_bar(target);
+    render_purple_dock(target, windows);
 }
 
 /// Hit test pointer coordinate against the desktop shell UI
 pub fn hit_test(x: i32, y: i32, screen_w: usize, screen_h: usize) -> DesktopAction {
-    // 1. Check Aegis Bar 'P' Button
+    // 1. Check Purple Bar 'P' Button
     let margin = 16.min(screen_w / 10);
     let bar_x = margin as i32;
     let bar_y = 10;
@@ -352,7 +352,7 @@ pub fn hit_test(x: i32, y: i32, screen_w: usize, screen_h: usize) -> DesktopActi
         return DesktopAction::PurpleLogoClick;
     }
 
-    // 2. Check Flow Dock Icons
+    // 2. Check Purple Dock Icons
     let dock_w = 288;
     let dock_x = (screen_w as i32 - dock_w as i32) / 2;
     let dock_y = screen_h as i32 - 56 - 16;

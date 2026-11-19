@@ -96,7 +96,7 @@ def main():
         ("Compositor Service Descriptor", "Name = PurpleCompositor"),
         ("Compositor Framework Config", "Compositor.framework"),
         ("Compositor Status Command", "Aegis64 Native Framebuffer Compositor Subsystem"),
-        ("Desktop Shell Status Query", "Purple Desktop UI (Aegis Bar & Flow Dock Active)"),
+        ("Desktop Shell Status Query", "Purple Desktop UI (Purple Bar & Purple Dock Active)"),
         ("Compositor Demo Windows Launch", "Compositor: Demo windows launched"),
         ("Window List - Aegis Terminal", "Aegis Terminal"),
         ("Window List - System Monitor", "System Monitor"),

@@ -3870,7 +3870,7 @@ impl Shell {
                 serial::println("  Alpha Blending:  Porter-Duff SourceOver (Translucent Shadows & Borders)");
                 serial::println("  Cursor Engine:   Anti-Aliased Flicker-Free Pointer Overlay");
                 serial::println("  Window Server:   Active (Z-Ordered Scene Graph & Damage Rect Tracking)");
-                serial::println("  Desktop Shell:   Purple Desktop UI (Aegis Bar & Flow Dock Active)");
+                serial::println("  Desktop Shell:   Purple Desktop UI (Purple Bar & Purple Dock Active)");
                 serial::println("  VFS Device Node: /dev/compositor, /dev/fb0");
                 serial::println("  Service Daemon:  /System/Services/Compositor");
                 serial::println("  Framework:       /System/Frameworks/Compositor.framework/");
