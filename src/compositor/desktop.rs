@@ -141,19 +141,28 @@ pub fn render_dock_reflection(target: &mut Surface, dock_rect: Rect) {
     }
 }
 
-/// Render the refined Purple Bar across the top of the display
-pub fn render_purple_bar(target: &mut Surface) {
+/// Render the refined Purple Bar across the top of the display with slick animations
+pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
     if !target.is_valid() || target.width < 120 || target.height < 100 {
         return;
     }
 
     let margin = 16.min(target.width / 10);
     let bar_x = margin as i32;
-    let bar_y = 10;
     let bar_w = target.width - margin * 2;
     let bar_h = BAR_HEIGHT;
 
-    // 1. Frosted glass panel with specular top edge and subtle border
+    // 1. Slick Animation: Boot Entrance Slide-Down (Quadratic Deceleration Ease-Out)
+    // Starts flush with the screen top (y = 0) and smoothly glides down into resting floating position (y = 10)
+    let slide_offset = if frame_count < 20 {
+        let rem = 20 - frame_count as i32;
+        (rem * rem * 10) / 400
+    } else {
+        0
+    };
+    let bar_y = 10 - slide_offset;
+
+    // 2. Frosted glass panel with specular top edge and subtle border
     render_rounded_glass_rect(
         target,
         bar_x,
@@ -165,9 +174,32 @@ pub fn render_purple_bar(target: &mut Surface) {
         COLOR_GLASS_BORDER,
     );
 
-    // 2. Left Region: Glowing Purple 'P' Logo Button
+    // 3. Slick Animation: Specular Horizon Light Ray (Gleam Shimmer Sweep)
+    let shimmer_period = (bar_w as u64 + 200).max(1);
+    let shimmer_center = bar_x - 100 + ((frame_count * 6) % shimmer_period) as i32;
+    let shimmer_radius = 45;
+
+    let sheen_x1 = (bar_x + 12).max(shimmer_center - shimmer_radius);
+    let sheen_x2 = (bar_x + bar_w as i32 - 12).min(shimmer_center + shimmer_radius);
+    if sheen_x1 < sheen_x2 && bar_y >= 0 && (bar_y as usize) < target.height {
+        for px in sheen_x1..sheen_x2 {
+            let dist = (px - shimmer_center).abs();
+            let alpha = (((shimmer_radius - dist) * 0x90) / shimmer_radius) as u8;
+            target.blend_pixel(px as usize, bar_y as usize, (alpha as u32) << 24 | 0x00FFFFFF);
+        }
+    }
+
+    // 4. Left Region: Glowing Purple 'P' Logo Button with Breathing Amethyst Aura
     let btn_x = bar_x + 8;
     let btn_y = bar_y + 4;
+
+    // Breathing aura pulse: alpha oscillates smoothly between 0x60 and 0xD0 (frequency ~0.5Hz)
+    let pulse_cycle = (frame_count % 60) as i32;
+    let pulse_delta = if pulse_cycle < 30 { pulse_cycle } else { 60 - pulse_cycle }; // 0..30
+    let aura_alpha = 0x60 + (pulse_delta * 0x70 / 30) as u32; // 0x60..0xD0
+    let aura_border_color = (aura_alpha << 24) | 0x00C084FC; // Neon Violet pulsing border
+    let aura_base_color = 0xEE220C3A;
+
     render_rounded_glass_rect(
         target,
         btn_x,
@@ -175,30 +207,38 @@ pub fn render_purple_bar(target: &mut Surface) {
         26,
         26,
         7,
-        0xDD2E104E,
-        0xFF9333EA,
+        aura_base_color,
+        aura_border_color,
     );
 
-    // Vector Stylized 'P' Glyph
+    // Vector Stylized 'P' Glyph (Emits subtle violet sheen when pulse peaks)
+    let glyph_color = if pulse_delta > 22 { 0xFFF3E8FF } else { 0xFFFFFFFF };
+
     // Vertical stem (2px wide)
     for py in (btn_y + 5)..(btn_y + 21) {
-        target.set_pixel((btn_x + 8) as usize, py as usize, 0xFFFFFFFF);
-        target.set_pixel((btn_x + 9) as usize, py as usize, 0xFFFFFFFF);
+        if py >= 0 && (py as usize) < target.height {
+            target.set_pixel((btn_x + 8) as usize, py as usize, glyph_color);
+            target.set_pixel((btn_x + 9) as usize, py as usize, glyph_color);
+        }
     }
     // Top loop horizontal bars (2px thick)
     for px in (btn_x + 8)..(btn_x + 16) {
-        target.set_pixel(px as usize, (btn_y + 5) as usize, 0xFFFFFFFF);
-        target.set_pixel(px as usize, (btn_y + 6) as usize, 0xFFFFFFFF);
-        target.set_pixel(px as usize, (btn_y + 12) as usize, 0xFFFFFFFF);
-        target.set_pixel(px as usize, (btn_y + 13) as usize, 0xFFFFFFFF);
+        if btn_y + 5 >= 0 && ((btn_y + 13) as usize) < target.height {
+            target.set_pixel(px as usize, (btn_y + 5) as usize, glyph_color);
+            target.set_pixel(px as usize, (btn_y + 6) as usize, glyph_color);
+            target.set_pixel(px as usize, (btn_y + 12) as usize, glyph_color);
+            target.set_pixel(px as usize, (btn_y + 13) as usize, glyph_color);
+        }
     }
     // Loop right vertical bar
     for py in (btn_y + 6)..(btn_y + 13) {
-        target.set_pixel((btn_x + 16) as usize, py as usize, 0xFFFFFFFF);
-        target.set_pixel((btn_x + 17) as usize, py as usize, 0xFFFFFFFF);
+        if py >= 0 && (py as usize) < target.height {
+            target.set_pixel((btn_x + 16) as usize, py as usize, glyph_color);
+            target.set_pixel((btn_x + 17) as usize, py as usize, glyph_color);
+        }
     }
 
-    // 3. Center Region: Dynamic digital clock from CMOS RTC
+    // 5. Center Region: Dynamic Digital Clock & Kernel Heartbeat Capsule
     let time = crate::drivers::rtc::get_time();
     let mut clock_buf = [0u8; 16];
     clock_buf[0] = b'0' + (time.hour / 10) % 10;
@@ -210,39 +250,139 @@ pub fn render_purple_bar(target: &mut Surface) {
     clock_buf[6] = b'U';
     clock_buf[7] = b'T';
     clock_buf[8] = b'C';
-    let clock_str = core::str::from_utf8(&clock_buf[..9]).unwrap_or("18:40 UTC");
 
-    let clock_x = (bar_x + (bar_w as i32 - 9 * 8) / 2).max(bar_x + 40);
-    let clock_y = bar_y + (bar_h as i32 - 16) / 2;
-    target.draw_text(clock_x as usize, clock_y as usize, clock_str, COLOR_TEXT_PRIMARY, 0, true);
+    // Center capsule width: 142px, height: 24px
+    let pill_w = 142;
+    let pill_h = 24;
+    let pill_x = (bar_x + (bar_w as i32 - pill_w as i32) / 2).max(bar_x + 40);
+    let pill_y = bar_y + 5;
 
-    // 4. Right Region: Minimalist System Tray Icons
-    let tray_x = bar_x + bar_w as i32 - 84;
-    let tray_y = bar_y + 10;
+    render_rounded_glass_rect(
+        target,
+        pill_x,
+        pill_y,
+        pill_w,
+        pill_h,
+        12,
+        0x90110722, // Frosted dark obsidian-violet glass
+        0x40A855F7, // Subtle neon violet ring
+    );
 
-    // Wi-Fi Icon (3-tier curved signal arcs in cyan)
-    target.draw_line(tray_x + 2, tray_y + 3, tray_x + 12, tray_y + 3, COLOR_CYAN_ACCENT);
-    target.draw_line(tray_x + 4, tray_y + 7, tray_x + 10, tray_y + 7, COLOR_CYAN_ACCENT);
-    target.set_pixel((tray_x + 7) as usize, (tray_y + 11) as usize, COLOR_CYAN_ACCENT);
-    target.set_pixel((tray_x + 6) as usize, (tray_y + 11) as usize, COLOR_CYAN_ACCENT);
+    // Heartbeat Activity Dot on left of time (Real ECG double-beat rhythm)
+    let hb_cycle = (frame_count % 60) as usize;
+    let is_systolic = hb_cycle < 4;
+    let is_diastolic = hb_cycle >= 7 && hb_cycle < 11;
+    let (dot_color, dot_radius) = if is_systolic {
+        (0xFF34D399, 3) // Bright Emerald Flash with halo
+    } else if is_diastolic {
+        (0xFF38BDF8, 2) // Cyan Secondary Pulse
+    } else {
+        (0xFF059669, 2) // Resting Emerald
+    };
 
-    // Audio/Volume Icon (Speaker cone + sound arcs)
-    let spk_x = tray_x + 24;
-    target.draw_line(spk_x + 1, tray_y + 5, spk_x + 4, tray_y + 5, 0xFFCBD5E1);
-    target.draw_line(spk_x + 1, tray_y + 9, spk_x + 4, tray_y + 9, 0xFFCBD5E1);
-    target.draw_line(spk_x + 1, tray_y + 5, spk_x + 1, tray_y + 9, 0xFFCBD5E1);
-    target.draw_line(spk_x + 4, tray_y + 5, spk_x + 8, tray_y + 2, 0xFFCBD5E1);
-    target.draw_line(spk_x + 4, tray_y + 9, spk_x + 8, tray_y + 12, 0xFFCBD5E1);
-    target.draw_line(spk_x + 8, tray_y + 2, spk_x + 8, tray_y + 12, 0xFFCBD5E1);
-    target.draw_line(spk_x + 11, tray_y + 4, spk_x + 13, tray_y + 7, COLOR_AMETHYST_ACCENT);
-    target.draw_line(spk_x + 13, tray_y + 7, spk_x + 11, tray_y + 10, COLOR_AMETHYST_ACCENT);
+    let dot_cx = pill_x + 16;
+    let dot_cy = pill_y + 12;
+    if is_systolic && dot_cy >= 3 && (dot_cy as usize + 3) < target.height {
+        // Subtle outer pulse glow ring
+        target.blend_pixel((dot_cx - 3) as usize, dot_cy as usize, 0x5034D399);
+        target.blend_pixel((dot_cx + 3) as usize, dot_cy as usize, 0x5034D399);
+        target.blend_pixel(dot_cx as usize, (dot_cy - 3) as usize, 0x5034D399);
+        target.blend_pixel(dot_cx as usize, (dot_cy + 3) as usize, 0x5034D399);
+    }
+    target.fill_rect(
+        Rect::new(dot_cx - dot_radius + 1, dot_cy - dot_radius + 1, (dot_radius * 2 - 1) as usize, (dot_radius * 2 - 1) as usize),
+        dot_color,
+    );
 
-    // Battery/Power Icon (Sleek emerald battery pill)
-    let bat_x = tray_x + 50;
-    target.fill_rect(Rect::new(bat_x, tray_y + 2, 18, 11), 0xFF475569);
-    target.fill_rect(Rect::new(bat_x + 1, tray_y + 3, 16, 9), 0xFF0F172A);
-    target.fill_rect(Rect::new(bat_x + 3, tray_y + 5, 12, 5), 0xFF10B981); // Emerald charge
-    target.fill_rect(Rect::new(bat_x + 18, tray_y + 5, 2, 5), 0xFF64748B); // Terminal pip
+    // Render Clock text with pulsing fading colon
+    let clock_text_x = (pill_x + 32) as usize;
+    let clock_text_y = (pill_y + 4) as usize;
+
+    let hr_str = core::str::from_utf8(&clock_buf[..2]).unwrap_or("12");
+    target.draw_text_bold(clock_text_x, clock_text_y, hr_str, COLOR_TEXT_PRIMARY, 0, true);
+
+    // Colon pulse: smoothly alternates alpha every half-second
+    let colon_bright = ((frame_count / 15) % 2) == 0;
+    let colon_color = if colon_bright { 0xFFFFFFFF } else { 0x50A855F7 };
+    target.draw_text_bold(clock_text_x + 16, clock_text_y, ":", colon_color, 0, true);
+
+    let min_str = core::str::from_utf8(&clock_buf[3..9]).unwrap_or("00 UTC");
+    target.draw_text_bold(clock_text_x + 24, clock_text_y, min_str, COLOR_TEXT_PRIMARY, 0, true);
+
+    // 6. Right Region: Modernized Status Tray with Scanning Wi-Fi, Resonant Audio, & Energy Flow
+    let tray_w = 98;
+    let tray_h = 24;
+    let tray_x = bar_x + bar_w as i32 - tray_w as i32 - 8;
+    let tray_y = bar_y + 5;
+
+    render_rounded_glass_rect(
+        target,
+        tray_x,
+        tray_y,
+        tray_w,
+        tray_h,
+        12,
+        0x80110722,
+        0x389333EA,
+    );
+
+    // Widget 1: Wi-Fi Radar Sweep (3-tier concentric cyan arcs in outward cascade)
+    let wifi_step = ((frame_count / 12) % 4) as usize;
+    let wifi_x = tray_x + 12;
+    let wifi_y = tray_y + 6;
+
+    // Anchor dot
+    target.set_pixel((wifi_x + 5) as usize, (wifi_y + 9) as usize, COLOR_CYAN_ACCENT);
+    target.set_pixel((wifi_x + 6) as usize, (wifi_y + 9) as usize, COLOR_CYAN_ACCENT);
+
+    // Arc 1 (inner)
+    let arc1_color = if wifi_step >= 1 { COLOR_CYAN_ACCENT } else { 0x4038BDF8 };
+    target.draw_line(wifi_x + 3, wifi_y + 6, wifi_x + 8, wifi_y + 6, arc1_color);
+
+    // Arc 2 (middle)
+    let arc2_color = if wifi_step >= 2 { COLOR_CYAN_ACCENT } else { 0x3038BDF8 };
+    target.draw_line(wifi_x + 2, wifi_y + 4, wifi_x + 9, wifi_y + 4, arc2_color);
+
+    // Arc 3 (outer)
+    let arc3_color = if wifi_step >= 3 { COLOR_CYAN_ACCENT } else { 0x2038BDF8 };
+    target.draw_line(wifi_x + 1, wifi_y + 2, wifi_x + 10, wifi_y + 2, arc3_color);
+
+    // Widget 2: Audio Speaker with Acoustic Wave Resonance
+    let spk_x = tray_x + 36;
+    let spk_y = tray_y + 6;
+    let spk_color = 0xFFCBD5E1;
+    target.draw_line(spk_x + 1, spk_y + 4, spk_x + 4, spk_y + 4, spk_color);
+    target.draw_line(spk_x + 1, spk_y + 8, spk_x + 4, spk_y + 8, spk_color);
+    target.draw_line(spk_x + 1, spk_y + 4, spk_x + 1, spk_y + 8, spk_color);
+    target.draw_line(spk_x + 4, spk_y + 4, spk_x + 8, spk_y + 1, spk_color);
+    target.draw_line(spk_x + 4, spk_y + 8, spk_x + 8, spk_y + 11, spk_color);
+    target.draw_line(spk_x + 8, spk_y + 1, spk_x + 8, spk_y + 11, spk_color);
+
+    // Acoustic wave vibration animation
+    let audio_vibe = ((frame_count / 10) % 2) == 0;
+    let wave1_color = if audio_vibe { 0xFFC084FC } else { 0x90A855F7 };
+    let wave2_color = if audio_vibe { 0x90A855F7 } else { 0xFFC084FC };
+    target.draw_line(spk_x + 10, spk_y + 3, spk_x + 12, spk_y + 6, wave1_color);
+    target.draw_line(spk_x + 12, spk_y + 6, spk_x + 10, spk_y + 9, wave1_color);
+    target.draw_line(spk_x + 13, spk_y + 1, spk_x + 15, spk_y + 6, wave2_color);
+    target.draw_line(spk_x + 15, spk_y + 6, spk_x + 13, spk_y + 11, wave2_color);
+
+    // Widget 3: Battery Pill with Live Energy Sheen Flow
+    let bat_x = tray_x + 64;
+    let bat_y = tray_y + 7;
+    target.fill_rect(Rect::new(bat_x, bat_y, 18, 10), 0xFF475569);
+    target.fill_rect(Rect::new(bat_x + 1, bat_y + 1, 16, 8), 0xFF0F172A);
+    target.fill_rect(Rect::new(bat_x + 3, bat_y + 3, 12, 4), 0xFF10B981); // Emerald base
+    target.fill_rect(Rect::new(bat_x + 18, bat_y + 3, 2, 4), 0xFF64748B); // Terminal pip
+
+    // Energy sheen flow: a 2px highlight sweeps across the 12px charge bar every 60 frames
+    let energy_pos = ((frame_count / 3) % 20) as i32;
+    if energy_pos >= 0 && energy_pos < 12 {
+        let sx = bat_x + 3 + energy_pos;
+        for sy in (bat_y + 3)..(bat_y + 7) {
+            target.blend_pixel(sx as usize, sy as usize, 0x80FFFFFF);
+        }
+    }
 }
 
 /// Render the refined Purple Dock at the bottom of the screen
@@ -336,8 +476,8 @@ pub fn render_purple_dock(target: &mut Surface, _windows: &[Option<Window>]) {
 }
 
 /// Render the complete desktop shell overlay in correct scene pass order
-pub fn render_desktop_shell(target: &mut Surface, windows: &[Option<Window>]) {
-    render_purple_bar(target);
+pub fn render_desktop_shell(target: &mut Surface, windows: &[Option<Window>], frame_count: u64) {
+    render_purple_bar(target, frame_count);
     render_purple_dock(target, windows);
 }
 

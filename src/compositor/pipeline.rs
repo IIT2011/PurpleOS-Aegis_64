@@ -20,7 +20,7 @@ impl CompositorPipeline {
         target: &mut Surface,
         windows: &[Option<Window>],
         cursor: &mut Cursor,
-        _fps_counter: u64,
+        frame_count: u64,
     ) {
         if !target.is_valid() {
             return;
@@ -33,7 +33,7 @@ impl CompositorPipeline {
         Self::render_windows(target, windows);
 
         // Pass 3: Desktop Shell Layers (Purple Bar & Purple Dock with mirror reflection)
-        super::desktop::render_desktop_shell(target, windows);
+        super::desktop::render_desktop_shell(target, windows, frame_count);
 
         // Pass 4: Render Cursor Overlay on Top
         cursor.draw(target);

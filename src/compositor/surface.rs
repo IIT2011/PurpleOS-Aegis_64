@@ -299,7 +299,7 @@ impl Surface {
         transparent_bg: bool,
         weight: crate::drivers::font::FontWeight,
     ) {
-        if !self.is_valid() || x + 8 > self.width || y + 16 > self.height {
+        if !self.is_valid() || x >= self.width || y >= self.height || x + 8 > self.width || y + 16 > self.height {
             return;
         }
 
@@ -343,11 +343,14 @@ impl Surface {
 
     /// Draw a text string onto the surface
     pub fn draw_text(&mut self, mut x: usize, y: usize, text: &str, fg: u32, bg: u32, transparent_bg: bool) {
+        if !self.is_valid() || y >= self.height || y + 16 > self.height {
+            return;
+        }
         for b in text.bytes() {
             if b == b'\n' {
                 break;
             }
-            if x + 8 > self.width {
+            if x >= self.width || x + 8 > self.width {
                 break;
             }
             self.draw_char(x, y, b, fg, bg, transparent_bg);
@@ -357,11 +360,14 @@ impl Surface {
 
     /// Draw a bold text string onto the surface
     pub fn draw_text_bold(&mut self, mut x: usize, y: usize, text: &str, fg: u32, bg: u32, transparent_bg: bool) {
+        if !self.is_valid() || y >= self.height || y + 16 > self.height {
+            return;
+        }
         for b in text.bytes() {
             if b == b'\n' {
                 break;
             }
-            if x + 8 > self.width {
+            if x >= self.width || x + 8 > self.width {
                 break;
             }
             self.draw_char_styled(x, y, b, fg, bg, transparent_bg, crate::drivers::font::FontWeight::Bold);

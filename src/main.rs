@@ -41,6 +41,7 @@ fn panic(info: &PanicInfo) -> ! {
         drivers::serial::print_u64(loc.line() as u64);
         drivers::serial::println("");
     }
+    kprintln!("Message: {}", info.message());
     loop {
         arch::x86_64::cpu::cli();
         arch::x86_64::cpu::hlt();
