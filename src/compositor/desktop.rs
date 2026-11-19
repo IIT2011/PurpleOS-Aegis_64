@@ -152,10 +152,13 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
     let bar_w = target.width - margin * 2;
     let bar_h = BAR_HEIGHT;
 
+    // Synchronize animation ticks with compositor frames or hardware PIT timer (60Hz equivalent)
+    let anim_tick = frame_count.max((crate::drivers::pit::get_ticks() * 60) / 100);
+
     // 1. Slick Animation: Boot Entrance Slide-Down (Quadratic Deceleration Ease-Out)
     // Starts flush with the screen top (y = 0) and smoothly glides down into resting floating position (y = 10)
-    let slide_offset = if frame_count < 20 {
-        let rem = 20 - frame_count as i32;
+    let slide_offset = if anim_tick < 20 {
+        let rem = 20 - anim_tick as i32;
         (rem * rem * 10) / 400
     } else {
         0
@@ -176,7 +179,7 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
 
     // 3. Slick Animation: Specular Horizon Light Ray (Gleam Shimmer Sweep)
     let shimmer_period = (bar_w as u64 + 200).max(1);
-    let shimmer_center = bar_x - 100 + ((frame_count * 6) % shimmer_period) as i32;
+    let shimmer_center = bar_x - 100 + ((anim_tick * 6) % shimmer_period) as i32;
     let shimmer_radius = 45;
 
     let sheen_x1 = (bar_x + 12).max(shimmer_center - shimmer_radius);
@@ -189,12 +192,13 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
         }
     }
 
-    // 4. Left Region: Glowing Purple 'P' Logo Button with Breathing Amethyst Aura
+    // 4. Left Region: Glowing Stylish Purple 'P' Brand Emblem with Breathing Amethyst Aura
     let btn_x = bar_x + 8;
     let btn_y = bar_y + 4;
+    let btn_size = 26;
 
     // Breathing aura pulse: alpha oscillates smoothly between 0x60 and 0xD0 (frequency ~0.5Hz)
-    let pulse_cycle = (frame_count % 60) as i32;
+    let pulse_cycle = (anim_tick % 60) as i32;
     let pulse_delta = if pulse_cycle < 30 { pulse_cycle } else { 60 - pulse_cycle }; // 0..30
     let aura_alpha = 0x60 + (pulse_delta * 0x70 / 30) as u32; // 0x60..0xD0
     let aura_border_color = (aura_alpha << 24) | 0x00C084FC; // Neon Violet pulsing border
@@ -204,55 +208,49 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
         target,
         btn_x,
         btn_y,
-        26,
-        26,
+        btn_size,
+        btn_size,
         7,
         aura_base_color,
         aura_border_color,
     );
 
-    // Vector Stylized 'P' Glyph (Emits subtle violet sheen when pulse peaks)
-    let glyph_color = if pulse_delta > 22 { 0xFFF3E8FF } else { 0xFFFFFFFF };
+    // Blit the Anti-Aliased Stylish 'Amethyst Prism P' Logo (18x18 ARGB)
+    let logo_x = btn_x + (btn_size as i32 - 18) / 2;
+    let logo_y = btn_y + (btn_size as i32 - 18) / 2;
+    let logo_alpha = if pulse_delta > 22 { 255 } else { 240 };
+    super::icons::render_logo_argb(target, logo_x, logo_y, &super::icons::STYLISH_P_LOGO, logo_alpha);
 
-    // Vertical stem (2px wide)
-    for py in (btn_y + 5)..(btn_y + 21) {
-        if py >= 0 && (py as usize) < target.height {
-            target.set_pixel((btn_x + 8) as usize, py as usize, glyph_color);
-            target.set_pixel((btn_x + 9) as usize, py as usize, glyph_color);
-        }
-    }
-    // Top loop horizontal bars (2px thick)
-    for px in (btn_x + 8)..(btn_x + 16) {
-        if btn_y + 5 >= 0 && ((btn_y + 13) as usize) < target.height {
-            target.set_pixel(px as usize, (btn_y + 5) as usize, glyph_color);
-            target.set_pixel(px as usize, (btn_y + 6) as usize, glyph_color);
-            target.set_pixel(px as usize, (btn_y + 12) as usize, glyph_color);
-            target.set_pixel(px as usize, (btn_y + 13) as usize, glyph_color);
-        }
-    }
-    // Loop right vertical bar
-    for py in (btn_y + 6)..(btn_y + 13) {
-        if py >= 0 && (py as usize) < target.height {
-            target.set_pixel((btn_x + 16) as usize, py as usize, glyph_color);
-            target.set_pixel((btn_x + 17) as usize, py as usize, glyph_color);
-        }
-    }
-
-    // 5. Center Region: Dynamic Digital Clock & Kernel Heartbeat Capsule
+    // 5. Center Region: Clean Centered Digital Clock Capsule (No green dot)
     let time = crate::drivers::rtc::get_time();
-    let mut clock_buf = [0u8; 16];
-    clock_buf[0] = b'0' + (time.hour / 10) % 10;
-    clock_buf[1] = b'0' + time.hour % 10;
-    clock_buf[2] = b':';
-    clock_buf[3] = b'0' + (time.minute / 10) % 10;
-    clock_buf[4] = b'0' + time.minute % 10;
-    clock_buf[5] = b' ';
-    clock_buf[6] = b'U';
-    clock_buf[7] = b'T';
-    clock_buf[8] = b'C';
+    let dow = day_of_week(time.year, time.month, time.day);
+    let mon = month_name(time.month);
 
-    // Center capsule width: 142px, height: 24px
-    let pill_w = 142;
+    let mut clock_buf = [0u8; 32];
+    let mut len = 0;
+
+    for b in dow.bytes() { clock_buf[len] = b; len += 1; }
+    clock_buf[len] = b' '; len += 1;
+    for b in mon.bytes() { clock_buf[len] = b; len += 1; }
+    clock_buf[len] = b' '; len += 1;
+
+    if time.day >= 10 {
+        clock_buf[len] = b'0' + (time.day / 10); len += 1;
+    }
+    clock_buf[len] = b'0' + (time.day % 10); len += 1;
+    clock_buf[len] = b' '; len += 1;
+    clock_buf[len] = b' '; len += 1;
+
+    let colon_idx = len + 2;
+    clock_buf[len] = b'0' + (time.hour / 10) % 10; len += 1;
+    clock_buf[len] = b'0' + (time.hour % 10); len += 1;
+    clock_buf[len] = b':'; len += 1;
+    clock_buf[len] = b'0' + (time.minute / 10) % 10; len += 1;
+    clock_buf[len] = b'0' + (time.minute % 10); len += 1;
+
+    let text_w = len * 8;
+    let pill_pad = 16;
+    let pill_w = (text_w + pill_pad * 2) as usize;
     let pill_h = 24;
     let pill_x = (bar_x + (bar_w as i32 - pill_w as i32) / 2).max(bar_x + 40);
     let pill_y = bar_y + 5;
@@ -265,52 +263,25 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
         pill_h,
         12,
         0x90110722, // Frosted dark obsidian-violet glass
-        0x40A855F7, // Subtle neon violet ring
+        0x40A855F7, // Neon violet ring
     );
 
-    // Heartbeat Activity Dot on left of time (Real ECG double-beat rhythm)
-    let hb_cycle = (frame_count % 60) as usize;
-    let is_systolic = hb_cycle < 4;
-    let is_diastolic = hb_cycle >= 7 && hb_cycle < 11;
-    let (dot_color, dot_radius) = if is_systolic {
-        (0xFF34D399, 3) // Bright Emerald Flash with halo
-    } else if is_diastolic {
-        (0xFF38BDF8, 2) // Cyan Secondary Pulse
-    } else {
-        (0xFF059669, 2) // Resting Emerald
-    };
-
-    let dot_cx = pill_x + 16;
-    let dot_cy = pill_y + 12;
-    if is_systolic && dot_cy >= 3 && (dot_cy as usize + 3) < target.height {
-        // Subtle outer pulse glow ring
-        target.blend_pixel((dot_cx - 3) as usize, dot_cy as usize, 0x5034D399);
-        target.blend_pixel((dot_cx + 3) as usize, dot_cy as usize, 0x5034D399);
-        target.blend_pixel(dot_cx as usize, (dot_cy - 3) as usize, 0x5034D399);
-        target.blend_pixel(dot_cx as usize, (dot_cy + 3) as usize, 0x5034D399);
-    }
-    target.fill_rect(
-        Rect::new(dot_cx - dot_radius + 1, dot_cy - dot_radius + 1, (dot_radius * 2 - 1) as usize, (dot_radius * 2 - 1) as usize),
-        dot_color,
-    );
-
-    // Render Clock text with pulsing fading colon
-    let clock_text_x = (pill_x + 32) as usize;
+    let clock_text_x = pill_x + pill_pad as i32;
     let clock_text_y = (pill_y + 4) as usize;
 
-    let hr_str = core::str::from_utf8(&clock_buf[..2]).unwrap_or("12");
-    target.draw_text_bold(clock_text_x, clock_text_y, hr_str, COLOR_TEXT_PRIMARY, 0, true);
+    if let Ok(full_text) = core::str::from_utf8(&clock_buf[..len]) {
+        target.draw_text_bold(clock_text_x as usize, clock_text_y, full_text, COLOR_TEXT_PRIMARY, 0, true);
 
-    // Colon pulse: smoothly alternates alpha every half-second
-    let colon_bright = ((frame_count / 15) % 2) == 0;
-    let colon_color = if colon_bright { 0xFFFFFFFF } else { 0x50A855F7 };
-    target.draw_text_bold(clock_text_x + 16, clock_text_y, ":", colon_color, 0, true);
+        // Colon pulse: smoothly alternates alpha every half-second
+        let colon_bright = ((anim_tick / 15) % 2) == 0;
+        if !colon_bright {
+            let colon_x = clock_text_x as usize + colon_idx * 8;
+            target.draw_text_bold(colon_x, clock_text_y, ":", 0x60A855F7, 0, true);
+        }
+    }
 
-    let min_str = core::str::from_utf8(&clock_buf[3..9]).unwrap_or("00 UTC");
-    target.draw_text_bold(clock_text_x + 24, clock_text_y, min_str, COLOR_TEXT_PRIMARY, 0, true);
-
-    // 6. Right Region: Modernized Status Tray with Scanning Wi-Fi, Resonant Audio, & Energy Flow
-    let tray_w = 98;
+    // 6. Right Region: Modernized Status Tray with Real Vector Icons from Lucide
+    let tray_w = 116;
     let tray_h = 24;
     let tray_x = bar_x + bar_w as i32 - tray_w as i32 - 8;
     let tray_y = bar_y + 5;
@@ -326,60 +297,44 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
         0x389333EA,
     );
 
-    // Widget 1: Wi-Fi Radar Sweep (3-tier concentric cyan arcs in outward cascade)
-    let wifi_step = ((frame_count / 12) % 4) as usize;
-    let wifi_x = tray_x + 12;
-    let wifi_y = tray_y + 6;
+    // Icon 1: Control Center Sliders (16x16)
+    let sld_x = tray_x + 10;
+    let sld_y = tray_y + 4;
+    super::icons::render_icon_mask(target, sld_x, sld_y, &super::icons::ICON_SLIDERS, 0xFFC084FC);
 
-    // Anchor dot
-    target.set_pixel((wifi_x + 5) as usize, (wifi_y + 9) as usize, COLOR_CYAN_ACCENT);
-    target.set_pixel((wifi_x + 6) as usize, (wifi_y + 9) as usize, COLOR_CYAN_ACCENT);
+    // Icon 2: Wi-Fi Radar Sweep (16x16) using Lucide vectors
+    let wifi_x = tray_x + 36;
+    let wifi_y = tray_y + 4;
+    let wifi_step = ((anim_tick / 12) % 4) as usize;
+    super::icons::render_icon_mask(target, wifi_x, wifi_y, &super::icons::ICON_WIFI_DOT, COLOR_CYAN_ACCENT);
+    let arc1_col = if wifi_step >= 1 { COLOR_CYAN_ACCENT } else { 0x4038BDF8 };
+    let arc2_col = if wifi_step >= 2 { COLOR_CYAN_ACCENT } else { 0x3038BDF8 };
+    let arc3_col = if wifi_step >= 3 { COLOR_CYAN_ACCENT } else { 0x2038BDF8 };
+    super::icons::render_icon_mask(target, wifi_x, wifi_y, &super::icons::ICON_WIFI_ARC1, arc1_col);
+    super::icons::render_icon_mask(target, wifi_x, wifi_y, &super::icons::ICON_WIFI_ARC2, arc2_col);
+    super::icons::render_icon_mask(target, wifi_x, wifi_y, &super::icons::ICON_WIFI_ARC3, arc3_col);
 
-    // Arc 1 (inner)
-    let arc1_color = if wifi_step >= 1 { COLOR_CYAN_ACCENT } else { 0x4038BDF8 };
-    target.draw_line(wifi_x + 3, wifi_y + 6, wifi_x + 8, wifi_y + 6, arc1_color);
-
-    // Arc 2 (middle)
-    let arc2_color = if wifi_step >= 2 { COLOR_CYAN_ACCENT } else { 0x3038BDF8 };
-    target.draw_line(wifi_x + 2, wifi_y + 4, wifi_x + 9, wifi_y + 4, arc2_color);
-
-    // Arc 3 (outer)
-    let arc3_color = if wifi_step >= 3 { COLOR_CYAN_ACCENT } else { 0x2038BDF8 };
-    target.draw_line(wifi_x + 1, wifi_y + 2, wifi_x + 10, wifi_y + 2, arc3_color);
-
-    // Widget 2: Audio Speaker with Acoustic Wave Resonance
-    let spk_x = tray_x + 36;
-    let spk_y = tray_y + 6;
-    let spk_color = 0xFFCBD5E1;
-    target.draw_line(spk_x + 1, spk_y + 4, spk_x + 4, spk_y + 4, spk_color);
-    target.draw_line(spk_x + 1, spk_y + 8, spk_x + 4, spk_y + 8, spk_color);
-    target.draw_line(spk_x + 1, spk_y + 4, spk_x + 1, spk_y + 8, spk_color);
-    target.draw_line(spk_x + 4, spk_y + 4, spk_x + 8, spk_y + 1, spk_color);
-    target.draw_line(spk_x + 4, spk_y + 8, spk_x + 8, spk_y + 11, spk_color);
-    target.draw_line(spk_x + 8, spk_y + 1, spk_x + 8, spk_y + 11, spk_color);
-
-    // Acoustic wave vibration animation
-    let audio_vibe = ((frame_count / 10) % 2) == 0;
+    // Icon 3: Volume / Audio Speaker (16x16) using Lucide vectors
+    let vol_x = tray_x + 60;
+    let vol_y = tray_y + 4;
+    super::icons::render_icon_mask(target, vol_x, vol_y, &super::icons::ICON_VOLUME_CONE, 0xFFCBD5E1);
+    let audio_vibe = ((anim_tick / 10) % 2) == 0;
     let wave1_color = if audio_vibe { 0xFFC084FC } else { 0x90A855F7 };
     let wave2_color = if audio_vibe { 0x90A855F7 } else { 0xFFC084FC };
-    target.draw_line(spk_x + 10, spk_y + 3, spk_x + 12, spk_y + 6, wave1_color);
-    target.draw_line(spk_x + 12, spk_y + 6, spk_x + 10, spk_y + 9, wave1_color);
-    target.draw_line(spk_x + 13, spk_y + 1, spk_x + 15, spk_y + 6, wave2_color);
-    target.draw_line(spk_x + 15, spk_y + 6, spk_x + 13, spk_y + 11, wave2_color);
+    super::icons::render_icon_mask(target, vol_x, vol_y, &super::icons::ICON_VOLUME_WAVE1, wave1_color);
+    super::icons::render_icon_mask(target, vol_x, vol_y, &super::icons::ICON_VOLUME_WAVE2, wave2_color);
 
-    // Widget 3: Battery Pill with Live Energy Sheen Flow
-    let bat_x = tray_x + 64;
-    let bat_y = tray_y + 7;
-    target.fill_rect(Rect::new(bat_x, bat_y, 18, 10), 0xFF475569);
-    target.fill_rect(Rect::new(bat_x + 1, bat_y + 1, 16, 8), 0xFF0F172A);
-    target.fill_rect(Rect::new(bat_x + 3, bat_y + 3, 12, 4), 0xFF10B981); // Emerald base
-    target.fill_rect(Rect::new(bat_x + 18, bat_y + 3, 2, 4), 0xFF64748B); // Terminal pip
+    // Icon 4: Battery Shell (20x12) using Lucide vectors + Live Emerald Charge & Flow
+    let bat_x = tray_x + 86;
+    let bat_y = tray_y + 6;
+    target.fill_rect(Rect::new(bat_x + 3, bat_y + 3, 11, 6), 0xFF10B981);
+    super::icons::render_icon_mask(target, bat_x, bat_y, &super::icons::ICON_BATTERY_SHELL, 0xFFE2E8F0);
 
-    // Energy sheen flow: a 2px highlight sweeps across the 12px charge bar every 60 frames
-    let energy_pos = ((frame_count / 3) % 20) as i32;
-    if energy_pos >= 0 && energy_pos < 12 {
+    // Energy sheen flow highlight
+    let energy_pos = ((anim_tick / 3) % 18) as i32;
+    if energy_pos >= 0 && energy_pos < 11 {
         let sx = bat_x + 3 + energy_pos;
-        for sy in (bat_y + 3)..(bat_y + 7) {
+        for sy in (bat_y + 3)..(bat_y + 9) {
             target.blend_pixel(sx as usize, sy as usize, 0x80FFFFFF);
         }
     }
@@ -510,4 +465,44 @@ pub fn hit_test(x: i32, y: i32, screen_w: usize, screen_h: usize) -> DesktopActi
     }
 
     DesktopAction::None
+}
+
+/// Compute 3-letter day of week for Gregorian date (Sakamoto algorithm)
+fn day_of_week(year: u16, month: u8, day: u8) -> &'static str {
+    let m = month as i32;
+    let mut y = (2000 + (year % 100)) as i32;
+    let d = day as i32;
+    let t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    if m < 3 {
+        y -= 1;
+    }
+    let idx = if m >= 1 && m <= 12 { (m - 1) as usize } else { 0 };
+    let dow = ((y + y / 4 - y / 100 + y / 400 + t[idx] + d) % 7 + 7) % 7;
+    match dow {
+        0 => "Sun",
+        1 => "Mon",
+        2 => "Tue",
+        3 => "Wed",
+        4 => "Thu",
+        5 => "Fri",
+        _ => "Sat",
+    }
+}
+
+/// Convert 1-based month integer to 3-letter month abbreviation
+fn month_name(month: u8) -> &'static str {
+    match month {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        _ => "Dec",
+    }
 }

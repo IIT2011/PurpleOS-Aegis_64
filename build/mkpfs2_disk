@@ -264,6 +264,14 @@ Library = libcompositor.a
         if os.path.exists(fpath):
             files[f"System/Resources/Fonts/{font_f}"] = open(fpath, "rb").read()
 
+    # Inject system vector icons into /System/Resources/Icons/
+    icon_dir = "assets/icons"
+    if os.path.exists(icon_dir):
+        for icon_f in sorted(os.listdir(icon_dir)):
+            if icon_f.endswith(".svg"):
+                ipath = os.path.join(icon_dir, icon_f)
+                files[f"System/Resources/Icons/{icon_f}"] = open(ipath, "rb").read()
+
     pfs_data = format_purplefs_v2(32768, "PurpleSystem", files)
     pfs_sectors = len(pfs_data) // 512
 

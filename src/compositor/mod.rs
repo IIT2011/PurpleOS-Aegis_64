@@ -13,6 +13,7 @@
 pub mod blend;
 pub mod cursor;
 pub mod desktop;
+pub mod icons;
 pub mod pipeline;
 pub mod surface;
 pub mod wallpaper;

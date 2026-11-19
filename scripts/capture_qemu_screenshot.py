@@ -128,6 +128,11 @@ def main():
     ppm_boot = "/data/data/com.termux/files/usr/tmp/qemu_screen_boot.ppm"
     ppm_windows = "/data/data/com.termux/files/usr/tmp/qemu_screen_windows.ppm"
 
+    # Refresh compositor frame with latest hardware timer state
+    proc.stdin.write("compositor render\n")
+    proc.stdin.flush()
+    time.sleep(0.3)
+
     # Capture 1: Boot Desktop
     print("Capturing 1: Native Desktop on Boot...")
     f.write(json.dumps({"execute": "screendump", "arguments": {"filename": ppm_boot}}) + "\r\n")
