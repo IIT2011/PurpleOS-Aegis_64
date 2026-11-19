@@ -3,8 +3,8 @@
 ## Repository & Subsystem State
 - Repository: `IIT2011/PurpleOS-Aegis_64`
 - Branch: `Aegis_Purple`
-- Architecture: `x86_64-unknown-none` (Pure Bare-Metal Rust, `#![no_std]`, `#![no_main]`)
-- Verification Status: **11/11 Test Suites Passing (100% Pass Rate)**
+- Architecture: `x86_64-unknown-none` (`#![no_std]`, `#![no_main]`)
+- Verification Status: The passing test results below are historical claims from the prior report. They were not rerun or independently verified during the current source review. Treat each subsystem state as requiring fresh implementation and runtime verification.
 
 ---
 
@@ -20,10 +20,9 @@
 
 ### B. Dedicated Storage Hierarchy & Virtual File System (VFS) (`src/fs/vfs.rs` & `src/drivers/block_dev.rs`)
 - **Root Filesystem (`/`):** Backed by PurpleFS v2 persistent journaled storage.
-- **Dedicated Solid State Drives (`/ssd`):** Nodes for `/ssd/ssd1`, `/ssd/ssd2` (NVMe PCIe & AHCI SATA SSD).
-- **Dedicated Hard Disk Drives (`/hdd`):** Nodes for `/hdd/hdd1`, `/hdd/hdd2` (ATA/IDE & SATA rotational HDDs).
-- **Dedicated USB Mass Storage (`/usb`):** Nodes for `/usb/usb1`, `/usb/usb2` (USB 3.x Flash pendrives).
-- **Dedicated Flash Cards (`/sdxc`, `/sdhc`):** Nodes for `/sdxc/card1` and `/sdhc/card1`.
+- **ATA PIO:** Detected ATA devices are registered under generated `/hdd/hddN` paths with LBA28 address limits.
+- **AHCI, NVMe, USB MSC, and SD:** Not registered; their capacity discovery and real media I/O are not implemented.
+- **Raw storage paths:** Sector-zero reads are available for inspection; writes are rejected to protect disk metadata.
 - **Character Device Filesystem (`/dev`):** Nodes for `null`, `zero`, and `console` (strictly non-storage devices).
 - **Process Information Filesystem (`/proc`):** Live kernel telemetry nodes (`version`, `meminfo`, `uptime`, `cpuinfo`, `tasks`).
 - **Temporary Filesystem (`/tmp`):** In-memory ephemeral volatile RAM disk.
@@ -45,11 +44,12 @@
 
 ### F. Pure Rust POSIX 2024 / IEEE Std 1003.1 Subsystem (`src/kernel/posix.rs` & `src/kernel/syscall.rs`)
 - **Syscall Calling Convention:** Linux x86_64 ABI MSR-based `SYSCALL`/`SYSRET` (`RAX`=vector, `RDI`, `RSI`, `RDX`, `R10`, `R8`, `R9`).
-- **Standard Syscalls:** `open`, `close`, `read`, `write`, `lseek`, `stat`, `fstat`, `pipe`, `dup`, `dup2`, `fork`, `execve`, `wait4`, `kill`, `mmap`, `munmap`, `brk`, `clock_gettime`, `nanosleep`, `getcwd`, `chdir`, `mkdir`, `rmdir`, `unlink`, `getpid`, `getppid`, `getuid`, `getgid`.
+- **Standard Syscalls:** `open`, `close`, `read`, `write`, `lseek`, `stat`, `fstat`, `pipe`, `dup`, `dup2`, `wait4`, `kill`, `mmap`, `munmap`, `brk`, `clock_gettime`, `nanosleep`, `getcwd`, `chdir`, `mkdir`, `rmdir`, `unlink`, `getpid`, `getppid`, `getuid`, `getgid`.
+- **Process creation:** `fork` and `execve` return `ENOSYS`.
 - **Per-Task File Descriptor Table:** 32 descriptors per task (0=stdin, 1=stdout, 2=stderr, 3..31=VFS/pipes).
 - **Dynamic RTC Epoch:** Dynamic astronomical leap-year Gregorian calendar to Unix epoch seconds calculation from CMOS hardware RTC.
 - **Signals:** 32 POSIX signals supported (`SIGHUP`..`SIGSTOP`) with pending vectors, masks, and handler addresses.
-- **Pure Rust Guarantee:** 100% Rust `no_std`, zero C/C++, zero hardcoded values, zero security vulnerabilities.
+- **Implementation Language:** Rust `no_std`; required platform and ABI constants are defined in code. Security and conformance claims require feature-specific verification.
 
 ---
 
@@ -62,9 +62,11 @@ The interactive shell provides a unified console combining MS-DOS commands, Linu
 
 ---
 
-## 3. Test Suite Pass Verification Matrix
+## 3. Previously Reported Test Results (Not Reverified)
 
-| Suite | Name | Result |
+The results in this table are preserved from the previous report and are not evidence of the current checkout passing. No test suite was run during the current review.
+
+| Suite | Name | Previously Reported Result |
 | :--- | :--- | :--- |
 | 1 | `test_qemu_shell.py` | **PASSED** (9/9) |
 | 2 | `test_qemu_smp.py` | **PASSED** (10/10) |

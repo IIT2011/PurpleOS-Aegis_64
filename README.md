@@ -8,7 +8,7 @@
 
 **Purple OS** is an independent, native-first 64-bit operating system engineered from scratch in **pure bare-metal Rust** (`#![no_std]`, `#![no_main]`, `target = "x86_64-unknown-none"`, with zero external crate dependencies and zero legacy C/C++ runtime code).
 
-Its core kernel is **Aegis64**, its multi-core scheduler is **AegisSched_64**, its native filesystem engine is **PurpleFS v3**, its modular driver package architecture is **APDRV v3**, its hardware discovery system is **PurpleDetect**, and its cryptographic boot verification system is **AegisDetect**.
+Its core kernel is **Aegis64**, its multi-core scheduler is **AegisSched_64**, its mounted native filesystem is **PurpleFS v2**, its modular driver package architecture is **APDRV v3**, its hardware discovery system is **PurpleDetect**, and its cryptographic boot verification system is **AegisDetect**.
 
 ---
 
@@ -18,7 +18,7 @@ Its core kernel is **Aegis64**, its multi-core scheduler is **AegisSched_64**, i
 +--------------------------------------------------------------------------+
 |                       AegisShell 2.0 (User Console)                      |
 +--------------------------------------------------------------------------+
-|          PurpleFS v3 (Filesystem)  |  APAPP Subsystem (Applications)     |
+|          PurpleFS v2 (Filesystem)  |  APAPP Subsystem (Applications)     |
 +--------------------------------------------------------------------------+
 |   APDRV v3 Dynamic Kernel Modules (W^X Enforced, Hardware PCI Matching)   |
 |  [e1000] [r8139] [xhci] [hdaudio] [bochs_gpu] [gpu-intel/amd/nvidia]     |
@@ -42,8 +42,8 @@ Its core kernel is **Aegis64**, its multi-core scheduler is **AegisSched_64**, i
 - **Virtual Memory Management (VMM):** 4-level paging (`PML4`, `PDPT`, `PD`, `PT`) supporting 2 MiB huge page splitting, canonical address validation, and strict $W \oplus X$ (Write XOR Execute) memory protection with supervisor `CR0.WP` enforcement.
 - **Symmetric Multiprocessing (SMP):** ACPI MADT topology discovery, real-mode AP trampoline bootstrap (`smp_trampoline.s`), INIT/SIPI inter-processor interrupts, and per-CPU runqueues across 4 concurrent cores.
 - **Preemptive Multi-Core Scheduler (AegisSched_64):** 5 priority tiers (`IDLE`, `LOW`, `NORMAL`, `HIGH`, `REALTIME`), per-CPU task queues, time-slice quantums driven by 100 Hz Local APIC timer ticks, and hardware context switching.
-- **Cryptographic Security (AegisDetect):** Hardware Root of Trust and boot integrity engine utilizing SHA-256 and HMAC-SHA256 baselines (12/12 system components verified).
-- **Native Filesystem (PurpleFS v3 & v2):** Hierarchical journaled filesystem supporting 4096-byte blocks, GPT partition layout, directory tables, direct/indirect data blocks, and transaction redo logging with crash recovery.
+- **Integrity Checks (AegisDetect):** RSA-2048 signature verification for supported signed payloads and SHA-256 checks for the configured storage manifest. Manifest coverage is limited to the entries defined in `src/security/aegis_detect.rs`.
+- **Native Filesystem (PurpleFS v2):** GPT-backed volumes with 4096-byte blocks, directory entries, direct-block writes, and reads through singly indirect blocks. PurpleFS v3 is a design in progress and has no mount support.
 - **Fast Hardware Syscalls:** MSR-based `SYSCALL`/`SYSRET` handler (`EFER.SCE`, `STAR`, `LSTAR`, `SFMASK`) with user pointer validation.
 
 ---
@@ -104,15 +104,24 @@ cargo build --target x86_64-unknown-none
 # Generate Multiboot-compliant 32-bit ELF bootstrap image
 rust-objcopy -O elf32-i386 target/x86_64-unknown-none/debug/aegis64 target/kernel.elf
 
-# Build APDRV driver modules
-python scripts/build_apdrv.py
+# Build loadable APDRV modules with the trusted signing key
+python scripts/build_apdrv.py build/drivers_apdrv --signing-key /path/to/trusted-private-key.pem
 ```
 
 ### Launch in QEMU
 ```bash
 # 4 vCPUs, 256 MiB RAM, serial console on stdio
-qemu-system-x86_64 -kernel target/kernel.elf -serial stdio -m 256M -smp 4
+qemu-system-x86_64 -kernel target/kernel.elf -serial stdio -vga std -m 256M -smp 4
 ```
+
+Purple Desktop starts automatically when the kernel finds an active framebuffer.
+The Purple Bar and Purple Dock render over the wallpaper, and AegisShell stays
+available over serial. Dock icons provide hover and click feedback for the shell
+design. To include the font files and filesystem diagnostics, generate and attach
+a disk with `python build/mkpfs2_disk build/purple_gpt.img` and
+`-drive file=build/purple_gpt.img,format=raw,index=0,media=disk`.
+The desktop uses compiled Inter Regular and Bold glyph coverage from the bundled
+font files. Regenerate the coverage with `python scripts/generate_inter_font.py`.
 
 ---
 
@@ -122,17 +131,14 @@ Storage devices in Aegis64 are decoupled from generic `/dev` character devices a
 
 | Storage Mount Path | Hardware Category | Supported Controllers & Protocols |
 | :--- | :--- | :--- |
-| `/ssd/ssd1`, `/ssd/ssd2`, ... | Solid State Drives | NVMe PCIe Gen3/4, AHCI SATA SSD |
-| `/hdd/hdd1`, `/hdd/hdd2`, ... | Hard Disk Drives | ATA / IDE PIO, SATA Rotational HDD |
-| `/usb/usb1`, `/usb/usb2`, ... | USB Mass Storage | USB 3.x xHCI Controller & MSC / BOT protocol |
-| `/sdxc/card1`, ... | SDXC Cards | High-Capacity SD Card Controllers |
-| `/sdhc/card1`, ... | SDHC Cards | Standard-Capacity SD Card Controllers |
+| `/hdd/hdd1`, ... | ATA devices | Legacy ATA PIO, addressable through LBA28 |
+| `/ssd`, `/usb`, `/sdxc`, `/sdhc` | — | No devices registered; AHCI, NVMe, USB MSC, and SD block I/O are not implemented |
 | `/dev` | Non-Storage Devices | Character & pseudo devices (`null`, `zero`, `console`) |
 | `/proc` | Introspection | Virtual procfs (`version`, `meminfo`, `uptime`, `cpuinfo`, `tasks`) |
 | `/tmp` | Volatile Storage | In-memory RAM disk (TmpFS) |
 | `/` | Root Storage | Mounted PurpleFS v2 volume from GPT partition |
 
-Direct block I/O and sector inspection (`hexdump`, `dump`) can be performed directly on storage paths (e.g., `dump /ssd/ssd1` or `cat /proc/version`).
+Storage paths expose read-only sector-zero inspection. Writes to raw device paths are rejected to protect partition metadata; persistent file writes are available only through the mounted filesystem.
 
 ---
 
@@ -181,12 +187,12 @@ AegisShell 2.5 provides a complete terminal environment combining the ergonomics
 
 ## 7. Native POSIX Subsystem (IEEE Std 1003.1-2024 / Linux x86_64 ABI)
 
-Aegis64 implements a 100% pure Rust POSIX subsystem designed strictly as a compatibility interface for future applications, retaining a completely native kernel implementation with **zero C/C++ code, zero hardcoded values, and zero security vulnerabilities**:
+Aegis64 contains a Rust POSIX compatibility layer for future applications. The kernel is written in Rust, while required CPU, device, and ABI constants remain part of the implementation. The project is under active development; security and conformance must be assessed feature by feature:
 
 - **Hardware Syscall Vector:** Standard x86_64 Linux ABI (`SYSCALL`/`SYSRET` with syscall ID in `RAX`, arguments in `RDI`, `RSI`, `RDX`, `R10`, `R8`, `R9`).
 - **Standard Syscalls Supported:**
   - File I/O: `open` (2), `close` (3), `read` (0), `write` (1), `lseek` (8), `stat` (4), `fstat` (5), `pipe` (22), `dup` (32), `dup2` (33).
-  - Process Control: `fork` (57), `execve` (59), `wait4` (61), `kill` (62), `getpid` (39), `getppid` (110), `getuid` (102), `getgid` (104).
+  - Process Control: `wait4` (61), `kill` (62), `getpid` (39), `getppid` (110), `getuid` (102), `getgid` (104). `fork` and `execve` currently return `ENOSYS`.
   - Virtual Memory: `brk` (12), `mmap` (9), `munmap` (11).
   - Time & Clock: `clock_gettime` (228), `nanosleep` (35) with astronomical Gregorian leap-year CMOS RTC epoch calculation.
   - Directories & Path: `getcwd` (79), `chdir` (80), `mkdir` (83), `rmdir` (84), `unlink` (87).

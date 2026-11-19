@@ -4,32 +4,21 @@ PurpleOS Creator Cryptographic Signing Tool for /System/CLI/cmd.dtbase.
 Authenticates the command database using the Creator's Offline RSA-2048 Private Key
 and AegisDetect Asymmetric Public Key Root of Trust Anchor.
 
-Mathematical Security:
+Signature format:
   - Algorithm: RSA-2048 PKCS#1 v1.5 with SHA-256
-  - Creator Private Key: keys/creator_private_key.pem (Offline, ignored by git)
-  - Public Key Modulus N: Embedded directly into src/security/aegis_detect.rs
-  - Signature Length: 256 bytes (512 hexadecimal characters)
-  - Unforgeable: Impossible to forge without factoring 2048-bit modulus N.
+  - Private key: supplied through --key or AEGIS_CREATOR_PRIVATE_KEY
+  - Signature length: 256 bytes (512 hexadecimal characters)
 """
 
 import subprocess
 import shutil
 import sys
 import os
+from pathlib import Path
 
-DEFAULT_KEY_PATHS = [
-    "keys/creator_private_key.pem",
-    "OS/keys/creator_private_key.pem",
-    "../keys/creator_private_key.pem",
-    "d:/OS Development/OS/keys/creator_private_key.pem",
-]
-
-OPENSSL_CANDIDATES = [
-    shutil.which("openssl"),
-    r"D:\OS Development\Dev Tools\Git\usr\bin\openssl.exe",
-    r"C:\Program Files\Git\usr\bin\openssl.exe",
-    r"C:\Program Files\OpenSSL-Win64\bin\openssl.exe",
-]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_KEY_PATHS = [REPOSITORY_ROOT / "keys" / "creator_private_key.pem"]
+OPENSSL_CANDIDATES = [shutil.which("openssl")]
 
 def get_openssl_bin() -> str:
     for cand in OPENSSL_CANDIDATES:
@@ -38,12 +27,13 @@ def get_openssl_bin() -> str:
     raise RuntimeError("OpenSSL executable not found.")
 
 def find_creator_private_key(cli_key_file: str = None) -> str:
-    if cli_key_file and os.path.exists(cli_key_file):
-        return os.path.abspath(cli_key_file)
+    configured_key = cli_key_file or os.environ.get("AEGIS_CREATOR_PRIVATE_KEY")
+    if configured_key and Path(configured_key).is_file():
+        return str(Path(configured_key).resolve())
 
     for kp in DEFAULT_KEY_PATHS:
-        if os.path.exists(kp):
-            return os.path.abspath(kp)
+        if kp.is_file():
+            return str(kp.resolve())
 
     raise FileNotFoundError(
         "Creator RSA private key not found.\n"

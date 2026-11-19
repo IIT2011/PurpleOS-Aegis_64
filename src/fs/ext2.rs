@@ -152,10 +152,18 @@ impl ExtDriver {
         let free_blocks = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
         let free_inodes = u32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
         let log_blk_sz = u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
-        let block_size = 1024u32.checked_shl(log_blk_sz).unwrap_or(1024);
+        let block_size = 1024u32.checked_shl(log_blk_sz)?;
+        if !(1024..=65536).contains(&block_size) || total_blocks == 0 || total_inodes == 0
+            || free_blocks > total_blocks || free_inodes > total_inodes
+        {
+            return None;
+        }
 
         let blocks_per_grp = u32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
         let inodes_per_grp = u32::from_le_bytes([buf[40], buf[41], buf[42], buf[43]]);
+        if blocks_per_grp == 0 || inodes_per_grp == 0 {
+            return None;
+        }
         let rev_level = u32::from_le_bytes([buf[76], buf[77], buf[78], buf[79]]);
 
         let inode_size = if rev_level >= 1 && buf.len() >= 90 {
@@ -163,6 +171,10 @@ impl ExtDriver {
         } else {
             128
         };
+
+        if inode_size < 128 || !inode_size.is_power_of_two() || inode_size as u32 > block_size {
+            return None;
+        }
 
         // Ext2 vs Ext3 vs Ext4 features
         let compat = if rev_level >= 1 && buf.len() >= 96 {
@@ -209,7 +221,9 @@ impl ExtDriver {
     pub fn probe(&mut self, dev: &mut dyn BlockDevice, start_lba: u64) -> Option<ExtType> {
         let mut buf = [0u8; 1024];
         // Superblock begins at byte 1024 (LBA start + 2)
-        if dev.read_blocks(start_lba + 2, 2, &mut buf) != 0 {
+        let superblock_lba = start_lba.checked_add(2)?;
+        if dev.block_size() != 512 || superblock_lba.checked_add(2)? > dev.total_blocks()
+            || dev.read_blocks(superblock_lba, 2, &mut buf) != 0 {
             return None;
         }
         let info = Self::probe_superblock(&buf)?;

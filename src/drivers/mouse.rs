@@ -21,6 +21,13 @@ pub static MOUSE: Spinlock<MouseState> = Spinlock::new(MouseState {
     packet: [0; 3],
 });
 
+/// Synchronize the PS/2 position with the software pointer when the display starts.
+pub fn set_position(x: i32, y: i32) {
+    let mut state = MOUSE.lock();
+    state.x = x;
+    state.y = y;
+}
+
 unsafe fn mouse_wait(a_type: u8) {
     let mut timeout = 100000;
     while timeout > 0 {
@@ -105,6 +112,12 @@ pub fn handle_byte(b: u8) {
             }
             if (flags & 0x20) != 0 {
                 dy |= !0xFF;
+            }
+            if flags & 0x40 != 0 {
+                dx = 0;
+            }
+            if flags & 0x80 != 0 {
+                dy = 0;
             }
 
             m.buttons = flags & 0x07;

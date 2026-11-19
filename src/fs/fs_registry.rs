@@ -50,22 +50,22 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
         name: "purplefs_v2",
         category: "NATIVE",
         vendor: "Purple OS",
-        description: "PurpleFS v2 64-bit Journaled Filesystem Engine",
+        description: "PurpleFS v2 read-only filesystem reader",
         version: "2.1.0",
         active: true,
-        supports_write: true,
-        supports_journal: true,
+        supports_write: false,
+        supports_journal: false,
     },
     FsDriverEntry {
         id: FsDriverId::PurpleFsV3,
         name: "purplefs_v3",
         category: "NATIVE",
         vendor: "Purple OS",
-        description: "PurpleFS v3 Hierarchical Extent-Based Filesystem",
+        description: "PurpleFS v3 is a design-only format; no mount implementation is available",
         version: "3.0.0",
-        active: true,
-        supports_write: true,
-        supports_journal: true,
+        active: false,
+        supports_write: false,
+        supports_journal: false,
     },
     FsDriverEntry {
         id: FsDriverId::Fat32,
@@ -74,7 +74,7 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
         vendor: "Microsoft/Std",
         description: "FAT32 / VFAT Removable Media & ESP Filesystem",
         version: "1.2.0",
-        active: true,
+        active: false,
         supports_write: true,
         supports_journal: false,
     },
@@ -85,7 +85,7 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
         vendor: "Microsoft/Std",
         description: "FAT16 Removable Flash Media Driver",
         version: "1.0.0",
-        active: true,
+        active: false,
         supports_write: true,
         supports_journal: false,
     },
@@ -96,7 +96,7 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
         vendor: "Microsoft/Std",
         description: "FAT12 Legacy Floppy & Small Flash Driver",
         version: "1.0.0",
-        active: true,
+        active: false,
         supports_write: false,
         supports_journal: false,
     },
@@ -107,7 +107,7 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
         vendor: "Linux Foundation",
         description: "Ext4 Extent-Based High-Capacity Linux Filesystem",
         version: "4.0.0",
-        active: true,
+        active: false,
         supports_write: true,
         supports_journal: true,
     },
@@ -118,7 +118,7 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
         vendor: "Linux Foundation",
         description: "Ext3 Journaled Linux Filesystem Driver",
         version: "3.0.0",
-        active: true,
+        active: false,
         supports_write: true,
         supports_journal: true,
     },
@@ -129,7 +129,7 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
         vendor: "Linux Foundation",
         description: "Ext2 Standard Second Extended Linux Filesystem",
         version: "2.0.0",
-        active: true,
+        active: false,
         supports_write: true,
         supports_journal: false,
     },
@@ -140,7 +140,7 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
         vendor: "ISO/ECMA",
         description: "ISO9660 / El Torito Optical CD-ROM & DVD Media",
         version: "1.0.0",
-        active: true,
+        active: false,
         supports_write: false,
         supports_journal: false,
     },
@@ -180,34 +180,33 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
 ];
 
 pub fn init() {
-    serial::println("FS: Filesystem Driver Registry initialized (12 core filesystem engines online)");
+    serial::println("FS: Filesystem driver registry initialized; unsupported formats remain inactive");
 }
 
 /// Link all registered filesystem drivers directly to the PurpleDetect device hierarchy
 pub fn register_with_purple_detect() {
-    for (i, drv) in FS_DRIVERS.iter().enumerate() {
-        let state = if drv.active { DeviceState::Active } else { DeviceState::Supported };
-        let addr = 0x1000 + (i as u64);
+    for drv in FS_DRIVERS.iter() {
+        let state = if drv.active { DeviceState::Active } else { DeviceState::Unsupported };
         purple_detect::register(
             DeviceCategory::Filesystem,
             drv.name,
             drv.vendor,
             drv.description,
             "VFS",
-            addr,
+            0,
             0,
             state,
         );
     }
 }
 
-/// Automatically probe a block device and detect the filesystem type
+/// Identify a filesystem format on a block device; this does not mount it.
 pub fn probe_filesystem(dev: &mut dyn BlockDevice, start_lba: u64) -> Option<&'static str> {
     // 1. Probe PurpleFS v2 / v3
     let mut sb = [0u8; 512];
     if dev.read_blocks(start_lba, 1, &mut sb) == 0 {
         if &sb[0..8] == b"PURPLEFS" {
-            let ver = u32::from_le_bytes([sb[8], sb[9], sb[10], sb[11]]);
+            let ver = u32::from_le_bytes([sb[16], sb[17], sb[18], sb[19]]);
             if ver == 2 {
                 return Some("purplefs_v2");
             } else if ver == 3 {
@@ -261,7 +260,9 @@ pub fn print_driver_table() {
             serial::print(" ");
         }
 
-        if drv.supports_write && drv.supports_journal {
+        if !drv.active {
+            serial::print("UNAVAILABLE             ");
+        } else if drv.supports_write && drv.supports_journal {
             serial::print("RW, JOURNAL, POSIX       ");
         } else if drv.supports_write {
             serial::print("RW, POSIX                ");

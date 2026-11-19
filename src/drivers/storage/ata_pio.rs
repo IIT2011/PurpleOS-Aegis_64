@@ -5,6 +5,7 @@ pub const ATA_PRIMARY_IO: u16 = 0x1F0;
 pub const ATA_PRIMARY_CTRL: u16 = 0x3F6;
 pub const ATA_SECONDARY_IO: u16 = 0x170;
 pub const ATA_SECONDARY_CTRL: u16 = 0x376;
+pub const ATA_LBA28_SECTOR_LIMIT: u64 = 1 << 28;
 
 pub struct AtaDevice {
     pub name: [u8; 8],
@@ -136,6 +137,10 @@ impl AtaDevice {
                 self.total_sectors = s0 | (s1 << 16);
             }
 
+            self.total_sectors = self.total_sectors.min(ATA_LBA28_SECTOR_LIMIT);
+            if self.total_sectors == 0 {
+                return Err("ATA device reported zero addressable sectors");
+            }
             self.is_present = true;
             Ok(())
         }
@@ -278,8 +283,13 @@ impl BlockDevice for AtaDevice {
             for _ in 0..4 { let _ = inb(self.ctrl_base); }
             outb(self.io_base + 7, 0xE7); // CACHE FLUSH
             for _ in 0..4 { let _ = inb(self.ctrl_base); }
-            let _ = self.wait_not_busy();
-            let _ = inb(self.io_base + 7);
+            if !self.wait_not_busy() {
+                return BLOCK_DEV_ERR_IO;
+            }
+            let status = inb(self.io_base + 7);
+            if (status & 0x01) != 0 || (status & 0x20) != 0 {
+                return BLOCK_DEV_ERR_IO;
+            }
         }
         BLOCK_DEV_OK
     }

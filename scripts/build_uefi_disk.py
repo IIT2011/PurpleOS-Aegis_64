@@ -261,7 +261,8 @@ def format_purplefs_v2(total_blocks, label, files):
     struct.pack_into("<I", inodes, 128 + 0x7C, root_icrc)
 
     # Free blocks/inodes in superblock
-    struct.pack_into("<II", sb, 16 + 8, total_blocks - allocated_blocks - 8, 256 - allocated_inodes)
+    struct.pack_into("<II", sb, 16 + 8, total_blocks, total_blocks - allocated_blocks - 8)
+    struct.pack_into("<I", sb, 16 + 20, 256 - allocated_inodes)
     sbcrc = zlib.crc32(sb[:0x80]) & 0xFFFFFFFF
     struct.pack_into("<I", sb, 0x80, sbcrc)
 

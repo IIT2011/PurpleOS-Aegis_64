@@ -77,7 +77,7 @@ def main():
         "[POSIX TEST 10/12] Signal Management (rt_sigaction / rt_sigprocmask)... [PASSED]",
         "[POSIX TEST 11/12] Directory & Path Operations (getcwd / chdir / access)... [PASSED]",
         "[POSIX TEST 12/12] User Memory Safety (rejection of null/kernel/unmapped)... [PASSED]",
-        ">>> ALL 12 POSIX SUBSYSTEM VALIDATION TESTS PASSED (100% PURE RUST)! <<<",
+        "POSIX self-test sequence complete; review each result above. fork and execve currently return ENOSYS.",
         "POSIX-SUITE-COMPLETED"
     ]
 

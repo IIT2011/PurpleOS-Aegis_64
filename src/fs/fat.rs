@@ -123,7 +123,9 @@ impl FatDriver {
         }
 
         let bytes_per_sec = u16::from_le_bytes([buf[11], buf[12]]);
-        if bytes_per_sec != 512 && bytes_per_sec != 1024 && bytes_per_sec != 2048 && bytes_per_sec != 4096 {
+        // The block-device API uses 512-byte logical sectors; reject BPBs
+        // whose sector geometry cannot be addressed by this probe/driver.
+        if bytes_per_sec != 512 {
             return None;
         }
 
@@ -158,8 +160,13 @@ impl FatDriver {
         if fat_sz == 0 {
             return None;
         }
-
-        let data_sec = total_sectors.saturating_sub(res_sec as u32 + (num_fats as u32 * fat_sz) + root_dir_sectors);
+        let overhead = (res_sec as u32)
+            .checked_add((num_fats as u32).checked_mul(fat_sz)?)?
+            .checked_add(root_dir_sectors)?;
+        if total_sectors <= overhead {
+            return None;
+        }
+        let data_sec = total_sectors - overhead;
         let cluster_count = data_sec / (sec_per_clus as u32);
 
         if cluster_count < 4085 {
@@ -174,7 +181,8 @@ impl FatDriver {
     /// Probe a block device for a FAT filesystem at start_lba
     pub fn probe(&mut self, dev: &mut dyn BlockDevice, start_lba: u64) -> Option<FatType> {
         let mut buf = [0u8; 512];
-        if dev.read_blocks(start_lba, 1, &mut buf) != 0 {
+        if dev.block_size() != 512 || start_lba >= dev.total_blocks()
+            || dev.read_blocks(start_lba, 1, &mut buf) != 0 {
             return None;
         }
         let fat_t = Self::probe_sector(&buf)?;

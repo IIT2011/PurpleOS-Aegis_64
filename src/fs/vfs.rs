@@ -11,6 +11,7 @@
 //!   - `/sdxc`   -> Dedicated SDXC Card storage devices (/sdxc/card1, ...)
 //!   - `/sdhc`   -> Dedicated SDHC Card storage devices (/sdhc/card1, ...)
 
+use crate::drivers::block_dev::BlockDevice;
 use crate::sync::Spinlock;
 
 pub const MAX_TMPFS_FILES: usize = 8;
@@ -45,6 +46,12 @@ impl TmpFs {
 }
 
 static TMPFS: Spinlock<TmpFs> = Spinlock::new(TmpFs::new());
+
+fn block_device_size(dev: &dyn BlockDevice) -> usize {
+    dev.total_blocks()
+        .saturating_mul(dev.block_size() as u64)
+        .min(usize::MAX as u64) as usize
+}
 
 #[derive(Clone, Copy)]
 pub struct VfsDir {
@@ -286,7 +293,7 @@ pub fn file_size(path: &str) -> Result<usize, &'static str> {
                 Ok(256)
             } else if sub == "fb0" {
                 let v = crate::drivers::video::VIDEO.lock();
-                Ok(v.pitch * v.height * 4)
+                Ok(v.pitch.saturating_mul(v.height).saturating_mul(v.bpp / 8))
             } else {
                 let mut sz = 0;
                 let mut found = false;
@@ -294,7 +301,7 @@ pub fn file_size(path: &str) -> Result<usize, &'static str> {
                     let dname = canon.trim_start_matches('/');
                     let base = dname.rsplit('/').next().unwrap_or(dname);
                     if base == sub {
-                        sz = (dev.total_blocks() * dev.block_size() as u64) as usize;
+                        sz = block_device_size(dev);
                         found = true;
                     }
                 });
@@ -328,7 +335,7 @@ pub fn file_size(path: &str) -> Result<usize, &'static str> {
             if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(path) {
                 let mut sz = 0;
                 let _ = crate::drivers::block_dev::with_dev(idx, |dev| {
-                    sz = (dev.total_blocks() * dev.block_size() as u64) as usize;
+                    sz = block_device_size(dev);
                 });
                 Ok(sz)
             } else {
@@ -510,6 +517,8 @@ pub fn delete(path: &str) -> Result<(), &'static str> {
                     if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
                         if n == sub {
                             entry.in_use = false;
+                            entry.name.fill(0);
+                            entry.data.fill(0);
                             entry.len = 0;
                             return Ok(());
                         }
@@ -550,22 +559,8 @@ fn read_storage_node(path: &str, buf: &mut [u8]) -> Result<usize, &'static str> 
     }
 }
 
-fn write_storage_node(path: &str, content: &[u8]) -> Result<usize, &'static str> {
-    if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(path) {
-        let mut blk = [0u8; 512];
-        let len = content.len().min(512);
-        blk[..len].copy_from_slice(&content[..len]);
-        let res = crate::drivers::block_dev::with_dev(idx, |dev| {
-            dev.write_blocks(0, 1, &blk)
-        });
-        if res == Some(crate::drivers::block_dev::BLOCK_DEV_OK) {
-            Ok(len)
-        } else {
-            Err("I/O error writing storage device sector 0")
-        }
-    } else {
-        Err("Storage device not found")
-    }
+fn write_storage_node(_path: &str, _content: &[u8]) -> Result<usize, &'static str> {
+    Err("Raw block device nodes are read-only; use authorized block I/O")
 }
 
 fn read_devfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
@@ -622,7 +617,9 @@ fn read_devfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
             append_u64(&mut info_buf, &mut pos, bpp as u64);
             append_str(&mut info_buf, &mut pos, ", pitch=");
             append_u64(&mut info_buf, &mut pos, pitch as u64);
-            append_str(&mut info_buf, &mut pos, ", format=ARGB8888, double_buffer=active\n");
+            append_str(&mut info_buf, &mut pos, ", format=");
+            append_u64(&mut info_buf, &mut pos, bpp as u64);
+            append_str(&mut info_buf, &mut pos, "bpp\n");
             let len = pos.min(buf.len());
             buf[..len].copy_from_slice(&info_buf[..len]);
             Ok(len)
@@ -803,6 +800,12 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
 }
 
 fn write_tmpfs_at(name: &str, offset: usize, content: &[u8]) -> Result<usize, &'static str> {
+    if name.is_empty() || name.len() > 31 || name.contains('/') || name.as_bytes().contains(&0) {
+        return Err("Invalid TmpFS file name");
+    }
+    if offset >= MAX_TMPFS_SIZE {
+        return Err("Write offset exceeds maximum TmpFS file size");
+    }
     let mut tmp = TMPFS.lock();
     let mut slot = None;
 
@@ -834,12 +837,9 @@ fn write_tmpfs_at(name: &str, offset: usize, content: &[u8]) -> Result<usize, &'
         let b = name.as_bytes();
         let len = b.len().min(31);
         entry.name[..len].copy_from_slice(&b[..len]);
+        entry.data.fill(0);
         entry.len = 0;
         entry.in_use = true;
-    }
-
-    if offset >= MAX_TMPFS_SIZE {
-        return Err("Write offset exceeds maximum TmpFS file size");
     }
 
     let avail = MAX_TMPFS_SIZE - offset;
@@ -859,11 +859,15 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
             cb("zero", 0, false);
             cb("console", 0, false);
             cb("compositor", 256, false);
-            cb("fb0", 800 * 600 * 4, false);
+            if let Some((_width, height, pitch, bits_per_pixel, _address)) = crate::drivers::video::get_fb_info() {
+                let bytes = pitch.saturating_mul(height).saturating_mul(bits_per_pixel / 8);
+                cb("fb0", bytes, false);
+            }
             crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
                 let name = canon.trim_start_matches('/');
                 let dev_name = name.rsplit('/').next().unwrap_or(name);
-                cb(dev_name, (dev.total_blocks() * 512) as usize, false);
+                let bytes = dev.total_blocks().saturating_mul(dev.block_size() as u64);
+                cb(dev_name, bytes.min(usize::MAX as u64) as usize, false);
             });
             Ok(())
         }

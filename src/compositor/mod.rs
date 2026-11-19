@@ -33,6 +33,14 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 pub static COMPOSITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
+// Retain button transitions while coalescing high-rate motion between frames.
+const POINTER_QUEUE_CAPACITY: usize = 32;
+type PointerEvent = (i32, i32, u8);
+
+static POINTER_EVENTS: Spinlock<([PointerEvent; POINTER_QUEUE_CAPACITY], usize)> =
+    Spinlock::new(([(0, 0, 0); POINTER_QUEUE_CAPACITY], 0));
+
+
 pub struct CompositorEngine {
     pub running: bool,
     pub width: usize,
@@ -52,6 +60,9 @@ pub struct CompositorEngine {
     pub focused_window_id: Option<usize>,
     pub highest_z: usize,
     pub frame_count: u64,
+    animation_start: u64,
+    rendered_tick: u64,
+    dock_lift: [u8; desktop::DOCK_NUM_ICONS],
 }
 
 unsafe impl Send for CompositorEngine {}
@@ -81,6 +92,9 @@ impl CompositorEngine {
             focused_window_id: None,
             highest_z: 0,
             frame_count: 0,
+            animation_start: 0,
+            rendered_tick: 0,
+            dock_lift: [0; desktop::DOCK_NUM_ICONS],
         }
     }
 
@@ -118,18 +132,19 @@ impl CompositorEngine {
             crate::drivers::serial::print_u64(h as u64);
             crate::drivers::serial::println(" ARGB8888");
         } else {
-            crate::drivers::serial::println("Compositor: WARNING - Failed to allocate back-buffer, using direct LFB");
+            crate::drivers::serial::println("Compositor: Failed to allocate offscreen back buffer");
         }
 
         self.cursor.x = (w / 2) as i32;
         self.cursor.y = (h / 2) as i32;
         self.mouse_x = self.cursor.x;
         self.mouse_y = self.cursor.y;
+        crate::drivers::mouse::set_position(self.mouse_x, self.mouse_y);
 
         crate::drivers::serial::println("Compositor: Aegis64 Window Server & Framebuffer Engine Initialized");
     }
 
-    /// Start the compositor, initialize demo windows, and render initial desktop scene
+    /// Start the compositor and present the initial desktop scene.
     pub fn start(&mut self) {
         if self.running {
             return;
@@ -148,6 +163,15 @@ impl CompositorEngine {
             }
         }
 
+        if !self.back_buffer.is_valid() {
+            crate::drivers::serial::println("Compositor: Cannot start without a back buffer");
+            return;
+        }
+
+        POINTER_EVENTS.lock().1 = 0;
+        self.last_mouse_buttons = 0;
+        self.dock_lift.fill(0);
+        self.animation_start = crate::drivers::pit::get_ticks();
         self.running = true;
         COMPOSITOR_RUNNING.store(true, Ordering::SeqCst);
         self.render_frame();
@@ -161,6 +185,7 @@ impl CompositorEngine {
         }
         self.running = false;
         COMPOSITOR_RUNNING.store(false, Ordering::SeqCst);
+        POINTER_EVENTS.lock().1 = 0;
         self.dragging_window_id = None;
 
         // Restore text mode top bar on console
@@ -325,31 +350,22 @@ impl CompositorEngine {
                     break;
                 }
             }
-            if self.running {
-                self.render_frame();
-            }
             return;
         }
 
         // Handle left click hit-testing
         if left_clicked {
             // 1. First hit-test the desktop shell UI (Purple Bar and Purple Dock)
-            let action = desktop::hit_test(x, y, self.width, self.height);
+            let action = desktop::hit_test(x, y, self.width, self.height, self.rendered_tick, &self.dock_lift);
             match action {
                 desktop::DesktopAction::PurpleLogoClick => {
                     crate::drivers::serial::println("Compositor: Purple logo clicked");
-                    if self.running {
-                        self.render_frame();
-                    }
                     return;
                 }
                 desktop::DesktopAction::DockIconClick(i) => {
                     crate::drivers::serial::print("Compositor: Dock launcher icon ");
                     crate::drivers::serial::print_u64(i as u64);
                     crate::drivers::serial::println(" clicked");
-                    if self.running {
-                        self.render_frame();
-                    }
                     return;
                 }
                 desktop::DesktopAction::None => {}
@@ -406,9 +422,6 @@ impl CompositorEngine {
                                 break;
                             }
                         }
-                        if self.running {
-                            self.render_frame();
-                        }
                     }
                     WindowHitArea::MinimizeButton => {
                         for win in self.windows.iter_mut().flatten() {
@@ -418,9 +431,6 @@ impl CompositorEngine {
                             }
                         }
                         self.focus_highest_window();
-                        if self.running {
-                            self.render_frame();
-                        }
                     }
                     WindowHitArea::Titlebar => {
                         self.dragging_window_id = Some(win_id);
@@ -431,68 +441,78 @@ impl CompositorEngine {
                 }
             }
         }
-
-        if self.running {
-            self.render_frame();
-        }
     }
 
-    /// Render scene onto back buffer and present to display
+    /// Render the complete scene after a window or compositor state change.
     pub fn render_frame(&mut self) {
+        self.draw(false);
+    }
+
+    fn draw(&mut self, desktop_only: bool) {
         if !self.running {
             return;
         }
 
-        self.frame_count = self.frame_count.wrapping_add(1);
+        let tick = self.animation_tick();
+        let elapsed = tick.saturating_sub(self.rendered_tick).min(desktop::DOCK_LIFT as u64) as u8;
+        desktop::update_dock_lift(self.width, self.height, &self.cursor, &mut self.dock_lift, elapsed);
+        self.rendered_tick = tick;
+        self.frame_count = self.frame_count.saturating_add(1);
 
-        // 1. Render complete scene into back-buffer
-        CompositorPipeline::render_scene(
-            &mut self.back_buffer,
-            &self.windows,
-            &mut self.cursor,
-            self.frame_count,
-        );
-
-        // 2. Present back-buffer to screen
-        self.present_frame();
+        if desktop_only && self.window_count() == 0 {
+            let [bar, dock] = desktop::animated_regions(self.width, self.height);
+            let previous_pointer = self.cursor.saved_bounds();
+            self.cursor.restore(&mut self.back_buffer);
+            Wallpaper::restore_regions(&mut self.back_buffer, &[bar, dock]);
+            desktop::render_desktop_shell(&mut self.back_buffer, tick, &self.dock_lift);
+            self.cursor.draw(&mut self.back_buffer);
+            self.present_frame(&[bar, dock, previous_pointer, self.cursor.bounds()]);
+        } else {
+            CompositorPipeline::render_scene(
+                &mut self.back_buffer,
+                &self.windows,
+                &mut self.cursor,
+                tick,
+                &self.dock_lift,
+            );
+            self.present_frame(&[Rect::new(0, 0, self.width, self.height)]);
+        }
     }
 
-    /// Blit or page-flip the back-buffer onto the visible linear framebuffer
-    fn present_frame(&mut self) {
+    fn animation_tick(&self) -> u64 {
+        let elapsed = crate::drivers::pit::get_ticks().wrapping_sub(self.animation_start);
+        crate::drivers::pit::ticks_to_millis(elapsed).saturating_mul(desktop::ANIMATION_HZ) / 1_000
+    }
+
+    /// Copy damaged rectangles from the back buffer to the linear framebuffer.
+    fn present_frame(&self, regions: &[Rect]) {
         if !self.back_buffer.is_valid() {
             return;
         }
 
-        // Hardware Bochs / VBE accelerated page-flip or direct blit
-        let gpu = GPU.lock();
-        if gpu.is_ready && !gpu.fb_ptr.is_null() {
-            let w = self.back_buffer.width.min(gpu.width);
-            let h = self.back_buffer.height.min(gpu.height);
-            let stride = self.back_buffer.stride;
-
-            unsafe {
-                for row in 0..h {
-                    let src = self.back_buffer.pixels.add(row * stride);
-                    let dst = gpu.fb_ptr.add(row * gpu.pitch);
-                    core::ptr::copy_nonoverlapping(src, dst, w);
+        let copy = |fb: *mut u32, width: usize, height: usize, pitch: usize| {
+            let screen = Rect::new(0, 0, self.back_buffer.width.min(width), self.back_buffer.height.min(height));
+            for rect in regions {
+                if let Some(rect) = rect.intersection(&screen) {
+                    let x = rect.x as usize;
+                    for row in rect.y as usize..rect.bottom() as usize {
+                        unsafe {
+                            let src = self.back_buffer.pixels.add(row * self.back_buffer.stride + x);
+                            let dst = fb.add(row * pitch + x);
+                            core::ptr::copy_nonoverlapping(src, dst, rect.w);
+                        }
+                    }
                 }
             }
-            return;
-        }
-
-        // Standard linear framebuffer copy
-        let v = VIDEO.lock();
-        if v.available && !v.fb_ptr.is_null() {
-            let w = self.back_buffer.width.min(v.width);
-            let h = self.back_buffer.height.min(v.height);
-            let stride = self.back_buffer.stride;
-
-            unsafe {
-                for row in 0..h {
-                    let src = self.back_buffer.pixels.add(row * stride);
-                    let dst = v.fb_ptr.add(row * v.pitch);
-                    core::ptr::copy_nonoverlapping(src, dst, w);
-                }
+        };
+        let gpu = GPU.lock();
+        if gpu.is_ready && !gpu.fb_ptr.is_null() {
+            copy(gpu.fb_ptr, gpu.width, gpu.height, gpu.pitch);
+        } else {
+            drop(gpu);
+            let v = VIDEO.lock();
+            if v.available && !v.fb_ptr.is_null() {
+                copy(v.fb_ptr, v.width, v.height, v.pitch);
             }
         }
     }
@@ -576,8 +596,8 @@ impl CompositorEngine {
         append_str(&mut temp, &mut pos, "@32bpp\n");
         append_str(&mut temp, &mut pos, "Windows:      ");
         append_u64(&mut temp, &mut pos, win_cnt as u64);
-        append_str(&mut temp, &mut pos, "\nDoubleBuffer: Hardware/Memory VBE\n");
-        append_str(&mut temp, &mut pos, "Cursor:       Flicker-Free Anti-Aliased\n");
+        append_str(&mut temp, &mut pos, "\nDoubleBuffer: RAM back buffer and linear framebuffer\n");
+        append_str(&mut temp, &mut pos, "Cursor:       Software overlay\n");
         append_str(&mut temp, &mut pos, "Desktop:      Purple Desktop UI (Purple Bar & Purple Dock)\n");
         append_str(&mut temp, &mut pos, "VFS Node:     /dev/compositor, /dev/fb0\n");
 
@@ -606,7 +626,42 @@ pub fn is_running() -> bool {
 }
 
 pub fn handle_mouse_event(x: i32, y: i32, buttons: u8) {
-    COMPOSITOR.lock().handle_mouse_event(x, y, buttons);
+    if !is_running() {
+        return;
+    }
+    let mut queue = POINTER_EVENTS.lock();
+    let (events, count) = &mut *queue;
+    let event = (x, y, buttons);
+    if *count > 0 && events[*count - 1].2 == buttons {
+        events[*count - 1] = event;
+    } else if *count < events.len() {
+        events[*count] = event;
+        *count += 1;
+    } else {
+        // Keep the final button state so overflow cannot leave a drag stuck.
+        events[*count - 1] = event;
+    }
+}
+
+/// Service pointer input and draw at most once per animation tick.
+pub fn service() {
+    if !is_running() {
+        return;
+    }
+    let mut compositor = COMPOSITOR.lock();
+    if !compositor.running || compositor.animation_tick() == compositor.rendered_tick {
+        return;
+    }
+    let (events, count) = {
+        let mut queue = POINTER_EVENTS.lock();
+        let snapshot = *queue;
+        queue.1 = 0;
+        snapshot
+    };
+    for &(x, y, buttons) in &events[..count] {
+        compositor.handle_mouse_event(x, y, buttons);
+    }
+    compositor.draw(true);
 }
 
 pub fn create_window(title: &str, x: i32, y: i32, w: usize, h: usize) -> Option<usize> {

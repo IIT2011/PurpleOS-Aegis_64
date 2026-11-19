@@ -18,10 +18,12 @@ import subprocess
 import time
 import sys
 import os
+import re
 
 def main():
     print("=== Launching Aegis64 QEMU Native Compositor Integration Test ===")
 
+    disk = os.environ.get("PURPLEOS_TEST_DISK", "build/purple_gpt.img")
     cmd = [
         "qemu-system-x86_64",
         "-kernel", "target/kernel.elf",
@@ -30,7 +32,8 @@ def main():
         "-vga", "std",
         "-m", "256M",
         "-smp", "4",
-        "-drive", "file=build/purple_gpt.img,format=raw,index=0,media=disk",
+        "-drive", f"file={disk},format=raw,index=0,media=disk",
+        "-snapshot",
         "-no-reboot"
     ]
 
@@ -53,6 +56,7 @@ def main():
         "cat /System/Configuration/desktop.cfg\n",
         "cat /System/Services/Compositor\n",
         "cat /System/Frameworks/Compositor.framework/compositor.conf\n",
+        "compositor\n",
         "compositor\n",
         "compositor demo\n",
         "window list\n",
@@ -83,7 +87,7 @@ def main():
     print(stdout)
 
     assertions = [
-        ("AegisDetect Trusted Baseline", "AegisDetect: Loaded and authenticated trusted baseline"),
+        ("AegisDetect Trusted Manifest", "AegisDetect: Verification summary: 3/3 components verified"),
         ("Creator cmd.dtbase Authentication", "Authenticated /System/CLI/cmd.dtbase — Cryptographically Signed by Creator!"),
         ("Compositor Engine Initialized", "Compositor: Aegis64 Window Server & Framebuffer Engine Initialized"),
         ("Direct Boot to Compositor", "Compositor: Native framebuffer compositor active"),
@@ -91,7 +95,7 @@ def main():
         ("/dev/compositor Device Node", "compositor"),
         ("/dev/fb0 Device Node", "fb0"),
         ("Compositor VFS Query", "PurpleOS Native Compositor Engine"),
-        ("FrameBuffer VFS Query", "format=ARGB8888, double_buffer=active"),
+        ("Framebuffer VFS Query", "format=32bpp"),
         ("Desktop Configuration Content", "wallpaper_gradient_top = 0x120722"),
         ("Compositor Service Descriptor", "Name = PurpleCompositor"),
         ("Compositor Framework Config", "Compositor.framework"),
@@ -112,6 +116,21 @@ def main():
         else:
             print(f"[FAIL] Missing: {name} ('{pattern}')")
             failed += 1
+
+    if not re.search(r"(?m)^fb0: [1-9]\d*x[1-9]\d*x32, pitch=[1-9]\d*, format=32bpp$", stdout):
+        print("[FAIL] Missing framebuffer device geometry")
+        failed += 1
+
+    statuses = stdout.split("=== Aegis64 Native Framebuffer Compositor Subsystem ===")
+    boot_statuses = statuses[1:3]
+    counters = [re.search(r"Frames Rendered:\s+(\d+)", status) for status in boot_statuses]
+    if (len(counters) != 2 or not all(counters)
+            or int(counters[1][1]) <= int(counters[0][1])
+            or not all(re.search(r"Windows Open:\s+0\b", status) for status in boot_statuses)):
+        print("[FAIL] Expected idle frame updates before opening diagnostic windows")
+        failed += 1
+    else:
+        print("[OK] Idle frames advance while the desktop has zero windows")
 
     if failed == 0:
         print("\n>>> ALL NATIVE COMPOSITOR INTEGRATION TESTS PASSED! <<<\n")

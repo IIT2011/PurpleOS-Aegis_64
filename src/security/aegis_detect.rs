@@ -4,6 +4,7 @@ use crate::drivers::serial;
 
 /// Central Creator Identity and Cryptographic Trust Anchor Specification
 pub const CREATOR_KEY_ID: &str = "AEGIS-CREATOR-V1";
+pub const APDRV_SIGNATURE_HEX_SIZE: usize = rsa::RSA_2048_BYTES * 2;
 pub const CREATOR_SIGNER: &str = "Creator (Aegis Root Developer)";
 
 /// 2048-bit (256-byte) Creator Root of Trust Public Key Modulus N
@@ -42,12 +43,12 @@ fn hex_val(c: u8) -> Option<u8> {
 
 /// Initialize AegisDetect as the Central Security & Signature Verification Authority
 pub fn init() {
-    serial::println("AegisDetect: Loaded and authenticated trusted baseline (RSA-2048 PKCS#1 v1.5 / SHA-256)");
+    serial::println("AegisDetect: RSA-2048 trust anchor initialized; storage checks run when a filesystem is mounted");
 }
 
 /// Verify a declared 512-hex-character RSA-2048 PKCS#1 v1.5 signature against payload using Creator Public Key
 pub fn verify_signature(payload: &[u8], signature_hex: &[u8]) -> bool {
-    if signature_hex.len() < 512 {
+    if signature_hex.len() != 512 {
         return false;
     }
 
@@ -67,18 +68,16 @@ pub fn verify_signature(payload: &[u8], signature_hex: &[u8]) -> bool {
     rsa::verify_rsa_2048_pkcs1_v15(&CREATOR_RSA_MODULUS, payload, &sig_bytes)
 }
 
-/// Verify a driver module binary before dynamic loading or APDRV registration
-pub fn verify_driver(mod_name: &str, binary: &[u8]) -> bool {
-    let _ = mod_name;
-    if binary.len() < 240 {
+/// Verify an APDRV package whose final 512 ASCII bytes hold an RSA signature
+/// over every preceding byte. Unsigned packages are rejected.
+pub fn verify_driver(_mod_name: &str, binary: &[u8]) -> bool {
+    let header_size = core::mem::size_of::<crate::kernel::apdrv::ApdrvHeader>();
+    if binary.len() < header_size + APDRV_SIGNATURE_HEX_SIZE {
         return false;
     }
-    // Verify APDRV magic signature
-    if &binary[0..8] != b"APDRV100" {
-        return false;
-    }
-    // Authenticate driver module under AegisDetect trust anchor
-    true
+
+    let payload_end = binary.len() - APDRV_SIGNATURE_HEX_SIZE;
+    verify_signature(&binary[..payload_end], &binary[payload_end..])
 }
 
 struct TrustedComponent {
@@ -138,17 +137,22 @@ const TRUSTED_MANIFEST: &[TrustedComponent] = &[
     },
 ];
 
-pub fn verify_storage() -> (usize, usize) {
+pub fn verify_storage() -> (usize, usize, usize, usize) {
     let mut verified_count = 0usize;
     let mut total_found = 0usize;
+    let mut unverified_present = 0usize;
     let mut buf = [0u8; 4096];
 
     crate::kernel::storage::with_fs(|fs| {
         for entry in TRUSTED_MANIFEST.iter() {
             if let Some(ino) = fs.lookup(entry.name) {
                 total_found += 1;
-                let read_bytes = fs.read_file(ino, &mut buf);
-                if read_bytes > 0 {
+                let expected_len = fs.get_file_size(ino);
+                let read_bytes = match expected_len {
+                    Some(len) if len > 0 && len <= buf.len() => fs.read_file(ino, &mut buf[..len]),
+                    _ => 0,
+                };
+                if expected_len == Some(read_bytes) && read_bytes > 0 {
                     let digest = sha256::hash(&buf[..read_bytes]);
                     let is_trusted = entry.hashes.iter().any(|&expected| digest == expected);
                     if is_trusted {
@@ -158,7 +162,17 @@ pub fn verify_storage() -> (usize, usize) {
                         serial::print("' [TRUSTED] (SHA-256 verified, ");
                         serial::print_u64(read_bytes as u64);
                         serial::println(" bytes)");
+                    } else {
+                        unverified_present += 1;
+                        serial::print("AegisDetect: Component '");
+                        serial::print(entry.name);
+                        serial::println("' [UNVERIFIED]");
                     }
+                } else {
+                    unverified_present += 1;
+                    serial::print("AegisDetect: Component '");
+                    serial::print(entry.name);
+                    serial::println("' could not be read");
                 }
             }
         }
@@ -167,10 +181,15 @@ pub fn verify_storage() -> (usize, usize) {
     serial::print("AegisDetect: Verification summary: ");
     serial::print_u64(verified_count as u64);
     serial::print("/");
-    serial::print_u64(total_found as u64);
+    serial::print_u64(TRUSTED_MANIFEST.len() as u64);
+    let missing = TRUSTED_MANIFEST.len().saturating_sub(total_found);
     serial::print(" components verified (");
     serial::print_u64(verified_count as u64);
-    serial::println(" trusted, 0 tampered/missing)");
+    serial::print(" trusted, ");
+    serial::print_u64(unverified_present as u64);
+    serial::print(" present but unverified, ");
+    serial::print_u64(missing as u64);
+    serial::println(" missing)");
 
-    (verified_count, total_found)
+    (verified_count, TRUSTED_MANIFEST.len(), unverified_present, missing)
 }

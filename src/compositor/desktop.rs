@@ -4,9 +4,10 @@
 //! (bottom floating shelf with Looking Glass-inspired floor reflection).
 //! Focuses exclusively on the desktop shell bars and visual refinement.
 
-use super::blend::scale_alpha;
+use super::blend::{interpolate_color, scale_alpha};
+use super::cursor::Cursor;
 use super::surface::{Rect, Surface};
-use super::window::Window;
+use crate::drivers::font::{FONT_HEIGHT, FONT_WIDTH};
 
 pub const COLOR_GLASS_BASE: u32 = 0xB8120724; // Sleek frosted acrylic glass
 pub const COLOR_GLASS_BORDER: u32 = 0x48A855F7; // Translucent neon violet border
@@ -19,10 +20,80 @@ pub const COLOR_TEXT_MUTED: u32 = 0xFF94A3B8;
 
 pub const DOCK_NUM_ICONS: usize = 5;
 pub const DOCK_ICON_SIZE: usize = 38;
-pub const DOCK_ICON_SPACING: usize = 16;
+pub const DOCK_ICON_SPACING: usize = 14;
 pub const DOCK_PADDING_H: usize = 18;
 pub const DOCK_HEIGHT: usize = 56;
 pub const BAR_HEIGHT: usize = 34;
+pub const ANIMATION_HZ: u64 = 60;
+pub const DOCK_LIFT: u8 = 8;
+const EDGE_MARGIN: usize = 16;
+const BAR_REST_Y: i32 = 10;
+const BAR_ENTRANCE_TICKS: u64 = ANIMATION_HZ / 3;
+const LOGO_SIZE: usize = 26;
+const LOGO_INSET: i32 = 8;
+const TRAY_WIDTH: usize = 116;
+const REFLECTION_HEIGHT: usize = 22;
+const DOCK_WIDTH: usize = DOCK_PADDING_H * 2
+    + DOCK_NUM_ICONS * DOCK_ICON_SIZE
+    + (DOCK_NUM_ICONS - 1) * DOCK_ICON_SPACING;
+
+fn bar_rect(width: usize, tick: u64) -> Rect {
+    let margin = EDGE_MARGIN.min(width / 10);
+    let remaining = BAR_ENTRANCE_TICKS.saturating_sub(tick);
+    let offset = remaining.pow(2) * BAR_REST_Y as u64 / BAR_ENTRANCE_TICKS.pow(2);
+    Rect::new(margin as i32, BAR_REST_Y - offset as i32, width - margin * 2, BAR_HEIGHT)
+}
+
+fn logo_rect(bar: Rect) -> Rect {
+    Rect::new(bar.x + LOGO_INSET, bar.y + (bar.h - LOGO_SIZE) as i32 / 2, LOGO_SIZE, LOGO_SIZE)
+}
+
+fn dock_rect(width: usize, height: usize) -> Option<Rect> {
+    if width < DOCK_WIDTH + EDGE_MARGIN * 2 || height < BAR_HEIGHT + DOCK_HEIGHT + REFLECTION_HEIGHT + EDGE_MARGIN * 2 {
+        return None;
+    }
+    Some(Rect::new(
+        ((width - DOCK_WIDTH) / 2) as i32,
+        (height - DOCK_HEIGHT - REFLECTION_HEIGHT) as i32,
+        DOCK_WIDTH,
+        DOCK_HEIGHT,
+    ))
+}
+
+fn dock_icon(dock: Rect, index: usize, lift: u8) -> Rect {
+    let x = DOCK_PADDING_H + index * (DOCK_ICON_SIZE + DOCK_ICON_SPACING);
+    let y = (dock.h - DOCK_ICON_SIZE) / 2;
+    Rect::new(dock.x + x as i32, dock.y + y as i32 - lift as i32, DOCK_ICON_SIZE, DOCK_ICON_SIZE)
+}
+
+/// Areas that can change when only desktop chrome is visible.
+pub fn animated_regions(width: usize, height: usize) -> [Rect; 2] {
+    let bar = bar_rect(width, 0);
+    let top = Rect::new(bar.x, 0, bar.w, BAR_HEIGHT + BAR_REST_Y as usize);
+    let bottom = dock_rect(width, height).map_or(Rect::new(0, 0, 0, 0), |dock| {
+        let margin = 2;
+        Rect::new(
+            dock.x - margin, dock.y - margin,
+            dock.w + margin as usize * 2, dock.h + REFLECTION_HEIGHT + margin as usize,
+        )
+    });
+    [top, bottom]
+}
+
+pub fn update_dock_lift(
+    width: usize, height: usize, cursor: &Cursor, lift: &mut [u8; DOCK_NUM_ICONS], elapsed: u8,
+) {
+    let Some(dock) = dock_rect(width, height) else { return };
+    for (index, offset) in lift.iter_mut().enumerate() {
+        let base = dock_icon(dock, index, 0);
+        let hover_area = Rect::new(base.x, base.y - DOCK_LIFT as i32, base.w, base.h + DOCK_LIFT as usize);
+        *offset = if cursor.visible && hover_area.contains(cursor.x, cursor.y) {
+            offset.saturating_add(elapsed).min(DOCK_LIFT)
+        } else {
+            offset.saturating_sub(elapsed)
+        };
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum DesktopAction {
@@ -57,6 +128,8 @@ pub fn render_rounded_glass_rect(
 
     let r = radius.min(w / 2).min(h / 2);
     let r_sq = r * r;
+    let top_fill = interpolate_color(fill_color, 0xB8AD85D2, 1, 3);
+    let bottom_fill = interpolate_color(fill_color, 0xDC080413, 1, 3);
 
     for row in 0..h {
         let py = y + row as i32;
@@ -64,106 +137,54 @@ pub fn render_rounded_glass_rect(
             continue;
         }
 
-        let (dx_left, dx_right) = if row < r {
-            let dy = r - 1 - row;
-            let dy_sq = dy * dy;
-            let span = if r_sq >= dy_sq { isqrt(r_sq - dy_sq) } else { 0 };
-            let cut = r.saturating_sub(span);
-            (cut, cut)
-        } else if row >= h - r {
-            let dy = row - (h - r);
-            let dy_sq = dy * dy;
-            let span = if r_sq >= dy_sq { isqrt(r_sq - dy_sq) } else { 0 };
-            let cut = r.saturating_sub(span);
-            (cut, cut)
-        } else {
-            (0, 0)
-        };
-
-        let start_x = dx_left;
-        let end_x = w.saturating_sub(dx_right);
-        if start_x >= end_x {
-            continue;
-        }
-
-        for col in start_x..end_x {
-            let px = x + col as i32;
-            if px < 0 || px as usize >= target.width {
-                continue;
+        let edge_distance = row.min(h - 1 - row);
+        let dy = r.saturating_sub(edge_distance + 1);
+        let cut = r.saturating_sub(isqrt(r_sq - dy * dy));
+        let fill = interpolate_color(top_fill, bottom_fill, row, h - 1);
+        let rim = interpolate_color(COLOR_GLASS_HIGHLIGHT, border_color, row, h - 1);
+        let start = cut.max(x.saturating_neg().max(0) as usize);
+        let end = (w - cut).min((target.width as i32 - x).max(0) as usize);
+        for col in start..end {
+            let px = (x + col as i32) as usize;
+            let on_side = col == cut || col + 1 == w - cut;
+            let body = if on_side && dy != 0 { scale_alpha(fill, 156) } else { fill };
+            target.blend_pixel(px, py as usize, body);
+            if on_side || edge_distance == 0 {
+                target.blend_pixel(px, py as usize, rim);
             }
-
-            let is_border = row == 0 || row == h - 1 || col == start_x || col == end_x - 1
-                || (row < r && col == start_x + 1)
-                || (row >= h - r && col == start_x + 1);
-
-            let color = if is_border {
-                border_color
-            } else if row == 1 {
-                COLOR_GLASS_HIGHLIGHT
-            } else {
-                fill_color
-            };
-
-            target.blend_pixel(px as usize, py as usize, color);
         }
     }
 }
 
 /// Inverted alpha-decaying reflection of the dock onto the wallpaper floor (Looking Glass heritage)
-pub fn render_dock_reflection(target: &mut Surface, dock_rect: Rect) {
-    let reflection_h = 16.min(target.height.saturating_sub(dock_rect.bottom() as usize));
+fn render_dock_reflection(target: &mut Surface, dock_rect: Rect) {
     let dock_bottom = dock_rect.bottom();
+    let reflection_h = REFLECTION_HEIGHT.min(target.height.saturating_sub(dock_bottom as usize));
 
     for row in 0..reflection_h {
+        let src_y = dock_bottom - 1 - (row * dock_rect.h / reflection_h) as i32;
         let dst_y = dock_bottom + row as i32;
-        let src_y = dock_bottom - 1 - (row as i32 * 2);
-        if src_y < dock_rect.y || dst_y < 0 || dst_y as usize >= target.height {
-            continue;
-        }
-
-        let alpha_factor = (0x34 as usize).saturating_sub(row * 3) as u8;
-        if alpha_factor == 0 {
-            break;
-        }
-
-        for col in 0..dock_rect.w {
-            let px = dock_rect.x + col as i32;
-            if px < 0 || px as usize >= target.width {
-                continue;
-            }
-
-            let src_px = target.get_pixel(px as usize, src_y as usize);
-            if (src_px >> 24) != 0 {
-                let faded_px = scale_alpha(src_px, alpha_factor);
-                target.blend_pixel(px as usize, dst_y as usize, faded_px);
-            }
+        let remaining = reflection_h - row;
+        let opacity = (105 * remaining * remaining / (reflection_h * reflection_h)) as u8;
+        let inset = row * dock_rect.w / (reflection_h * 16);
+        let width = dock_rect.w - 2 * inset;
+        for col in 0..width {
+            let src_x = dock_rect.x as usize + col * dock_rect.w / width;
+            let dst_x = dock_rect.x as usize + inset + col;
+            let source = target.get_pixel(src_x, src_y as usize);
+            target.blend_pixel(dst_x, dst_y as usize, scale_alpha(source, opacity));
         }
     }
 }
 
 /// Render the refined Purple Bar across the top of the display with slick animations
-pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
-    if !target.is_valid() || target.width < 120 || target.height < 100 {
+fn render_purple_bar(target: &mut Surface, anim_tick: u64) {
+    if !target.is_valid() || target.width < LOGO_SIZE + EDGE_MARGIN * 2 || target.height < BAR_HEIGHT + BAR_REST_Y as usize {
         return;
     }
 
-    let margin = 16.min(target.width / 10);
-    let bar_x = margin as i32;
-    let bar_w = target.width - margin * 2;
-    let bar_h = BAR_HEIGHT;
-
-    // Synchronize animation ticks with compositor frames or hardware PIT timer (60Hz equivalent)
-    let anim_tick = frame_count.max((crate::drivers::pit::get_ticks() * 60) / 100);
-
-    // 1. Slick Animation: Boot Entrance Slide-Down (Quadratic Deceleration Ease-Out)
-    // Starts flush with the screen top (y = 0) and smoothly glides down into resting floating position (y = 10)
-    let slide_offset = if anim_tick < 20 {
-        let rem = 20 - anim_tick as i32;
-        (rem * rem * 10) / 400
-    } else {
-        0
-    };
-    let bar_y = 10 - slide_offset;
+    let bar = bar_rect(target.width, anim_tick);
+    let (bar_x, bar_y, bar_w, bar_h) = (bar.x, bar.y, bar.w, bar.h);
 
     // 2. Frosted glass panel with specular top edge and subtle border
     render_rounded_glass_rect(
@@ -179,7 +200,7 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
 
     // 3. Slick Animation: Specular Horizon Light Ray (Gleam Shimmer Sweep)
     let shimmer_period = (bar_w as u64 + 200).max(1);
-    let shimmer_center = bar_x - 100 + ((anim_tick * 6) % shimmer_period) as i32;
+    let shimmer_center = bar_x - 100 + (anim_tick.wrapping_mul(6) % shimmer_period) as i32;
     let shimmer_radius = 45;
 
     let sheen_x1 = (bar_x + 12).max(shimmer_center - shimmer_radius);
@@ -193,14 +214,14 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
     }
 
     // 4. Left Region: Glowing Stylish Purple 'P' Brand Emblem with Breathing Amethyst Aura
-    let btn_x = bar_x + 8;
-    let btn_y = bar_y + 4;
-    let btn_size = 26;
+    let logo = logo_rect(bar);
+    let (btn_x, btn_y, btn_size) = (logo.x, logo.y, logo.w);
 
     // Breathing aura pulse: alpha oscillates smoothly between 0x60 and 0xD0 (frequency ~0.5Hz)
-    let pulse_cycle = (anim_tick % 60) as i32;
-    let pulse_delta = if pulse_cycle < 30 { pulse_cycle } else { 60 - pulse_cycle }; // 0..30
-    let aura_alpha = 0x60 + (pulse_delta * 0x70 / 30) as u32; // 0x60..0xD0
+    let half_cycle = ANIMATION_HZ;
+    let phase = (anim_tick % (half_cycle * 2)).abs_diff(half_cycle);
+    let pulse = phase * phase * (3 * half_cycle - 2 * phase) / half_cycle.pow(2);
+    let aura_alpha = 0x60 + (pulse * 0x70 / half_cycle) as u32;
     let aura_border_color = (aura_alpha << 24) | 0x00C084FC; // Neon Violet pulsing border
     let aura_base_color = 0xEE220C3A;
 
@@ -218,7 +239,7 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
     // Blit the Anti-Aliased Stylish 'Amethyst Prism P' Logo (18x18 ARGB)
     let logo_x = btn_x + (btn_size as i32 - 18) / 2;
     let logo_y = btn_y + (btn_size as i32 - 18) / 2;
-    let logo_alpha = if pulse_delta > 22 { 255 } else { 240 };
+    let logo_alpha = (232 + pulse * 23 / half_cycle) as u32;
     super::icons::render_logo_argb(target, logo_x, logo_y, &super::icons::STYLISH_P_LOGO, logo_alpha);
 
     // 5. Center Region: Clean Centered Digital Clock Capsule (No green dot)
@@ -248,125 +269,60 @@ pub fn render_purple_bar(target: &mut Surface, frame_count: u64) {
     clock_buf[len] = b'0' + (time.minute / 10) % 10; len += 1;
     clock_buf[len] = b'0' + (time.minute % 10); len += 1;
 
-    let text_w = len * 8;
-    let pill_pad = 16;
-    let pill_w = (text_w + pill_pad * 2) as usize;
-    let pill_h = 24;
-    let pill_x = (bar_x + (bar_w as i32 - pill_w as i32) / 2).max(bar_x + 40);
-    let pill_y = bar_y + 5;
+    let text_w = len * FONT_WIDTH;
+    let pill_pad = EDGE_MARGIN;
+    let pill_w = text_w + pill_pad * 2;
+    let pill_h = FONT_HEIGHT + 8;
+    let pill_x = bar_x + (bar_w as i32 - pill_w as i32) / 2;
+    let pill_y = bar_y + (bar_h - pill_h) as i32 / 2;
+    let tray_x = bar.right() - TRAY_WIDTH as i32 - LOGO_INSET;
+    let show_tray = tray_x >= pill_x + pill_w as i32 + LOGO_INSET;
 
-    render_rounded_glass_rect(
-        target,
-        pill_x,
-        pill_y,
-        pill_w,
-        pill_h,
-        12,
-        0x90110722, // Frosted dark obsidian-violet glass
-        0x40A855F7, // Neon violet ring
-    );
-
-    let clock_text_x = pill_x + pill_pad as i32;
-    let clock_text_y = (pill_y + 4) as usize;
-
-    if let Ok(full_text) = core::str::from_utf8(&clock_buf[..len]) {
-        target.draw_text_bold(clock_text_x as usize, clock_text_y, full_text, COLOR_TEXT_PRIMARY, 0, true);
-
-        // Colon pulse: smoothly alternates alpha every half-second
-        let colon_bright = ((anim_tick / 15) % 2) == 0;
-        if !colon_bright {
-            let colon_x = clock_text_x as usize + colon_idx * 8;
-            target.draw_text_bold(colon_x, clock_text_y, ":", 0x60A855F7, 0, true);
+    if pill_x >= logo.right() + LOGO_INSET {
+        render_rounded_glass_rect(
+            target, pill_x, pill_y, pill_w, pill_h, pill_h / 2, 0x90110722, 0x40A855F7,
+        );
+        let clock_text_x = pill_x as usize + pill_pad;
+        let clock_text_y = pill_y as usize + (pill_h - FONT_HEIGHT) / 2;
+        if let Ok(full_text) = core::str::from_utf8(&clock_buf[..len]) {
+            let blink = (anim_tick / (ANIMATION_HZ / 2)) % 2 != 0;
+            if blink {
+                target.draw_text_bold(clock_text_x, clock_text_y, &full_text[..colon_idx], COLOR_TEXT_PRIMARY, 0, true);
+                target.draw_text_bold(clock_text_x + (colon_idx + 1) * FONT_WIDTH, clock_text_y, &full_text[colon_idx + 1..], COLOR_TEXT_PRIMARY, 0, true);
+            } else {
+                target.draw_text_bold(clock_text_x, clock_text_y, full_text, COLOR_TEXT_PRIMARY, 0, true);
+            }
         }
     }
 
-    // 6. Right Region: Modernized Status Tray with Real Vector Icons from Lucide
-    let tray_w = 116;
-    let tray_h = 24;
-    let tray_x = bar_x + bar_w as i32 - tray_w as i32 - 8;
-    let tray_y = bar_y + 5;
-
-    render_rounded_glass_rect(
-        target,
-        tray_x,
-        tray_y,
-        tray_w,
-        tray_h,
-        12,
-        0x80110722,
-        0x389333EA,
-    );
-
-    // Icon 1: Control Center Sliders (16x16)
-    let sld_x = tray_x + 10;
-    let sld_y = tray_y + 4;
-    super::icons::render_icon_mask(target, sld_x, sld_y, &super::icons::ICON_SLIDERS, 0xFFC084FC);
-
-    // Icon 2: Wi-Fi Radar Sweep (16x16) using Lucide vectors
-    let wifi_x = tray_x + 36;
-    let wifi_y = tray_y + 4;
-    let wifi_step = ((anim_tick / 12) % 4) as usize;
-    super::icons::render_icon_mask(target, wifi_x, wifi_y, &super::icons::ICON_WIFI_DOT, COLOR_CYAN_ACCENT);
-    let arc1_col = if wifi_step >= 1 { COLOR_CYAN_ACCENT } else { 0x4038BDF8 };
-    let arc2_col = if wifi_step >= 2 { COLOR_CYAN_ACCENT } else { 0x3038BDF8 };
-    let arc3_col = if wifi_step >= 3 { COLOR_CYAN_ACCENT } else { 0x2038BDF8 };
-    super::icons::render_icon_mask(target, wifi_x, wifi_y, &super::icons::ICON_WIFI_ARC1, arc1_col);
-    super::icons::render_icon_mask(target, wifi_x, wifi_y, &super::icons::ICON_WIFI_ARC2, arc2_col);
-    super::icons::render_icon_mask(target, wifi_x, wifi_y, &super::icons::ICON_WIFI_ARC3, arc3_col);
-
-    // Icon 3: Volume / Audio Speaker (16x16) using Lucide vectors
-    let vol_x = tray_x + 60;
-    let vol_y = tray_y + 4;
-    super::icons::render_icon_mask(target, vol_x, vol_y, &super::icons::ICON_VOLUME_CONE, 0xFFCBD5E1);
-    let audio_vibe = ((anim_tick / 10) % 2) == 0;
-    let wave1_color = if audio_vibe { 0xFFC084FC } else { 0x90A855F7 };
-    let wave2_color = if audio_vibe { 0x90A855F7 } else { 0xFFC084FC };
-    super::icons::render_icon_mask(target, vol_x, vol_y, &super::icons::ICON_VOLUME_WAVE1, wave1_color);
-    super::icons::render_icon_mask(target, vol_x, vol_y, &super::icons::ICON_VOLUME_WAVE2, wave2_color);
-
-    // Icon 4: Battery Shell (20x12) using Lucide vectors + Live Emerald Charge & Flow
-    let bat_x = tray_x + 86;
-    let bat_y = tray_y + 6;
-    target.fill_rect(Rect::new(bat_x + 3, bat_y + 3, 11, 6), 0xFF10B981);
-    super::icons::render_icon_mask(target, bat_x, bat_y, &super::icons::ICON_BATTERY_SHELL, 0xFFE2E8F0);
-
-    // Energy sheen flow highlight
-    let energy_pos = ((anim_tick / 3) % 18) as i32;
-    if energy_pos >= 0 && energy_pos < 11 {
-        let sx = bat_x + 3 + energy_pos;
-        for sy in (bat_y + 3)..(bat_y + 9) {
-            target.blend_pixel(sx as usize, sy as usize, 0x80FFFFFF);
-        }
+    if show_tray {
+        // These glyphs are shell affordances. Their colors do not report hardware state.
+        render_rounded_glass_rect(target, tray_x, pill_y, TRAY_WIDTH, pill_h, pill_h / 2, 0x80110722, 0x389333EA);
+        let icon_y = pill_y + 4;
+        use super::icons::{render_icon_mask, ICON_BATTERY_SHELL, ICON_SLIDERS, ICON_VOLUME_FULL, ICON_WIFI_FULL};
+        render_icon_mask(target, tray_x + 10, icon_y, &ICON_SLIDERS, COLOR_NEON_VIOLET);
+        render_icon_mask(target, tray_x + 36, icon_y, &ICON_WIFI_FULL, COLOR_TEXT_MUTED);
+        render_icon_mask(target, tray_x + 60, icon_y, &ICON_VOLUME_FULL, COLOR_TEXT_MUTED);
+        render_icon_mask(target, tray_x + 86, pill_y + 6, &ICON_BATTERY_SHELL, COLOR_TEXT_MUTED);
     }
 }
 
 /// Render the refined Purple Dock at the bottom of the screen
-pub fn render_purple_dock(target: &mut Surface, _windows: &[Option<Window>]) {
-    if !target.is_valid() || target.width < 320 || target.height < 140 {
+fn render_purple_dock(target: &mut Surface, lift: &[u8; DOCK_NUM_ICONS]) {
+    if !target.is_valid() {
         return;
     }
-
-    let dock_w = 288;
-    let dock_h = DOCK_HEIGHT;
-    let dock_x = (target.width as i32 - dock_w as i32) / 2;
-    let dock_y = target.height as i32 - dock_h as i32 - 16;
-
-    // 1. Frosted glass dock shelf with smooth 22px rounded caps
+    let Some(dock) = dock_rect(target.width, target.height) else { return };
     render_rounded_glass_rect(
-        target,
-        dock_x,
-        dock_y,
-        dock_w,
-        dock_h,
-        22,
-        COLOR_GLASS_BASE,
-        COLOR_GLASS_BORDER,
+        target, dock.x, dock.y, dock.w, dock.h, 22, COLOR_GLASS_BASE, COLOR_GLASS_BORDER,
     );
-
-    // 2. Render 5 dock launcher cards with high-fidelity vector glyphs
-    for i in 0..DOCK_NUM_ICONS {
-        let ix = dock_x + 18 + (i as i32 * 52);
-        let iy = dock_y + 9;
+    for (i, offset) in lift.iter().copied().enumerate() {
+        let icon = dock_icon(dock, i, offset);
+        let (ix, iy) = (icon.x, icon.y);
+        if offset != 0 {
+            let glow = scale_alpha(COLOR_NEON_VIOLET, offset * 12);
+            render_rounded_glass_rect(target, ix - 2, iy - 2, icon.w + 4, icon.h + 4, 12, scale_alpha(glow, 64), glow);
+        }
 
         match i {
             0 => {
@@ -427,39 +383,28 @@ pub fn render_purple_dock(target: &mut Surface, _windows: &[Option<Window>]) {
     }
 
     // 4. Inverted mirror reflection pass below dock (Looking Glass heritage)
-    render_dock_reflection(target, Rect::new(dock_x, dock_y, dock_w, dock_h));
+    render_dock_reflection(target, dock);
 }
 
 /// Render the complete desktop shell overlay in correct scene pass order
-pub fn render_desktop_shell(target: &mut Surface, windows: &[Option<Window>], frame_count: u64) {
-    render_purple_bar(target, frame_count);
-    render_purple_dock(target, windows);
+pub fn render_desktop_shell(target: &mut Surface, tick: u64, lift: &[u8; DOCK_NUM_ICONS]) {
+    render_purple_bar(target, tick);
+    render_purple_dock(target, lift);
 }
 
-/// Hit test pointer coordinate against the desktop shell UI
-pub fn hit_test(x: i32, y: i32, screen_w: usize, screen_h: usize) -> DesktopAction {
-    // 1. Check Purple Bar 'P' Button
-    let margin = 16.min(screen_w / 10);
-    let bar_x = margin as i32;
-    let bar_y = 10;
-    let btn_rect = Rect::new(bar_x + 8, bar_y + 4, 26, 26);
-    if btn_rect.contains(x, y) {
+/// Decode pointer input using the geometry shown in the last presented frame.
+pub fn hit_test(
+    x: i32, y: i32, width: usize, height: usize, tick: u64, lift: &[u8; DOCK_NUM_ICONS],
+) -> DesktopAction {
+    if width >= LOGO_SIZE + EDGE_MARGIN * 2 && height >= BAR_HEIGHT + BAR_REST_Y as usize
+        && logo_rect(bar_rect(width, tick)).contains(x, y)
+    {
         return DesktopAction::PurpleLogoClick;
     }
-
-    // 2. Check Purple Dock Icons
-    let dock_w = 288;
-    let dock_x = (screen_w as i32 - dock_w as i32) / 2;
-    let dock_y = screen_h as i32 - 56 - 16;
-    let dock_rect = Rect::new(dock_x, dock_y, dock_w, 56);
-
-    if dock_rect.contains(x, y) {
-        for i in 0..DOCK_NUM_ICONS {
-            let ix = dock_x + 18 + (i as i32 * 52);
-            let iy = dock_y + 9;
-            let icon_rect = Rect::new(ix, iy, DOCK_ICON_SIZE, DOCK_ICON_SIZE);
-            if icon_rect.contains(x, y) {
-                return DesktopAction::DockIconClick(i);
+    if let Some(dock) = dock_rect(width, height) {
+        for (index, offset) in lift.iter().copied().enumerate() {
+            if dock_icon(dock, index, offset).contains(x, y) {
+                return DesktopAction::DockIconClick(index);
             }
         }
     }
@@ -470,7 +415,7 @@ pub fn hit_test(x: i32, y: i32, screen_w: usize, screen_h: usize) -> DesktopActi
 /// Compute 3-letter day of week for Gregorian date (Sakamoto algorithm)
 fn day_of_week(year: u16, month: u8, day: u8) -> &'static str {
     let m = month as i32;
-    let mut y = (2000 + (year % 100)) as i32;
+    let mut y = year as i32;
     let d = day as i32;
     let t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
     if m < 3 {
@@ -503,6 +448,7 @@ fn month_name(month: u8) -> &'static str {
         9 => "Sep",
         10 => "Oct",
         11 => "Nov",
-        _ => "Dec",
+        12 => "Dec",
+        _ => "---",
     }
 }

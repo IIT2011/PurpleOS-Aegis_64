@@ -20,7 +20,11 @@ impl UdpHeader {
         let length = u16::from_be_bytes([data[4], data[5]]);
         let checksum = u16::from_be_bytes([data[6], data[7]]);
 
-        let payload_len = (length as usize).saturating_sub(UDP_HEADER_LEN).min(data.len() - UDP_HEADER_LEN);
+        let packet_len = length as usize;
+        if packet_len < UDP_HEADER_LEN || packet_len > data.len() {
+            return None;
+        }
+        let payload_len = packet_len - UDP_HEADER_LEN;
         Some((
             Self {
                 src_port,
@@ -33,8 +37,10 @@ impl UdpHeader {
     }
 
     pub fn write_to(&self, payload: &[u8], out: &mut [u8]) -> usize {
-        let total_len = UDP_HEADER_LEN + payload.len();
-        if out.len() < total_len {
+        let Some(total_len) = UDP_HEADER_LEN.checked_add(payload.len()) else {
+            return 0;
+        };
+        if total_len > u16::MAX as usize || out.len() < total_len {
             return 0;
         }
         out[0..2].copy_from_slice(&self.src_port.to_be_bytes());

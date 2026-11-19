@@ -168,7 +168,7 @@ def main():
 
             # Native Features assertions
             ("Theme Applied", "[Theme applied: matrix]"),
-            ("Benchmark Completed", "PurpleMarks"),
+            ("Benchmark Completed", "No comparative score is available"),
             ("Top Monitor", "Real-Time System Monitor"),
             ("File Pager View", "=== Viewing: '/tmp/edtest.txt'"),
             ("Prompt Customized", "[Prompt set to: '[testos]$ ']"),

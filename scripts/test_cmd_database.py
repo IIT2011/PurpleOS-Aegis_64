@@ -90,7 +90,7 @@ def main():
         ("Boot Path Database Loaded", "search path(s) from /System/CLI/path.dtbase (Unrestricted User Configuration)"),
         ("cmd info Database Path", "Database Path:     /System/CLI/cmd.dtbase"),
         ("cmd info Creator Signed", "Creator Signed:    YES (Cryptographically Signed by Creator)"),
-        ("cmd verify Status", "/System/CLI/cmd.dtbase Creator Signature: 100% VERIFIED"),
+        ("cmd verify Status", "/System/CLI/cmd.dtbase signature and payload integrity VERIFIED"),
         ("path Command Execution", "PurpleOS Search Path Database (/System/CLI/path.dtbase)"),
         ("path Search Hierarchy", "Active Search Hierarchy:"),
         ("path System Applications", "/System/Applications"),

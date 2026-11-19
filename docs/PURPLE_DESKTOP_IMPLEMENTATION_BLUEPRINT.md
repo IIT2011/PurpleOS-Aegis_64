@@ -18,13 +18,13 @@ Purple Desktop is the native 2D graphical session for PurpleOS. It runs inside t
 
 The visual identity is deep violet space, restrained translucent panels, clear window hierarchy, and a small amount of spatial motion and reflection. Looking Glass is a source of high-level interaction ideas only. Purple Desktop is an original, simple, pixel-based system suited to a `no_std` kernel.
 
-### Current implementation status (reviewed 2026-11-18)
+### Current implementation status (2026-11-19)
 
-Implemented: boot-time framebuffer discovery where supplied by the boot protocol; a compositor engine; a compiled RAW nebula wallpaper rendered with aspect-preserving center crop to the active surface; basic ARGB8888 window surfaces and titlebars; basic z-order, focus, move, minimize, maximize, close, and software cursor handling; framebuffer presentation; a shell command path for compositor demonstration windows.
+The kernel boots directly into the framebuffer compositor when a display is available. The desktop layers are the aspect-preserving nebula wallpaper, diagnostic windows when opened, the Purple Bar and Purple Dock, and the software pointer. The bar uses translucent bevels, a sweeping specular highlight, and an Inter date and clock. The dock responds to pointer hover with a lifting animation and reflects onto the wallpaper below.
 
-Not implemented: the Aegis Bar, Flow Dock, launcher, desktop session model, managed application lifecycle, GUI client event dispatch, app surface protocol, drag-to-resize, animated transitions, real tray integration, a periodic compositor frame loop, configured desktop theme loading, true synchronized page flipping, or a 60 Hz guarantee. `DamageTracker` exists but is not connected to partial redraw. The current compositor starts without demo windows; the demo is opt-in through the shell/VFS command.
+The PS/2 interrupt path queues pointer events and coalesces movement between button transitions. The kernel shell's main loop services queued input and schedules redraws from elapsed PIT time. Animation targets 60 updates per second where the timer and rendering throughput permit it. With an empty window stack only the bar, dock, and pointer regions are copied to the framebuffer. Presentation uses a RAM back buffer and linear framebuffer copy.
 
-`src/kernel/apexec.rs` currently only announces the dynamic execution engine; it is not an application loader. `docs/APAPPLICATION_SPECIFICATION.md` is a proposed contract, not an implemented API. `build/mkpfs2_disk` seeds desktop and compositor configuration files, but the compositor does not currently consume them. The shell currently checks keyboard characters before serial input, despite journal descriptions of a serial-only shell. Reconcile that behavior when the desktop takes keyboard input. Existing journal and UI-spec statements about double buffering, VSync, anti-aliased fonts, damage rendering, and completed desktop features are design intent unless verified against the code.
+Dock and logo clicks report diagnostics. App launching, client input dispatch, hardware tray telemetry, theme configuration loading, and synchronized page flips remain future work. The boot session begins with zero windows. Diagnostic windows are available through the existing shell and VFS commands. The sections below describe the broader design.
 
 ## 2. Clean-room use of Looking Glass and licensing
 

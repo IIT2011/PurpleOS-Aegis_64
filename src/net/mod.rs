@@ -17,6 +17,8 @@ pub mod tcp;
 
 use crate::sync::Spinlock;
 
+pub const IPV4_DEFAULT_MTU: usize = 1500;
+
 pub struct NetConfig {
     pub ip: [u8; 4],
     pub gateway: [u8; 4],
@@ -38,7 +40,17 @@ pub struct PendingPing {
 }
 
 static PENDING_PING: Spinlock<Option<PendingPing>> = Spinlock::new(None);
+static PING_ACTIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static PING_SEQ: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(1);
+
+struct PingGuard;
+
+impl Drop for PingGuard {
+    fn drop(&mut self) {
+        *PENDING_PING.lock() = None;
+        PING_ACTIVE.store(false, core::sync::atomic::Ordering::Release);
+    }
+}
 
 pub fn init() {
     crate::drivers::serial::println("Network: Pure Rust L2/L3/L4 TCP/IP Stack initialized");
@@ -102,7 +114,9 @@ pub fn process_packet(data: &[u8]) {
     match eth_hdr.ether_type {
         eth::ETHERTYPE_ARP => {
             if let Some(arp_pkt) = arp::ArpPacket::parse(payload) {
-                arp::update_arp_cache(arp_pkt.sender_ip, arp_pkt.sender_mac);
+                if arp_pkt.sender_ip != [0; 4] {
+                    arp::update_arp_cache(arp_pkt.sender_ip, arp_pkt.sender_mac);
+                }
 
                 let my_ip = get_ip();
                 if arp_pkt.opcode == arp::ARP_OP_REQUEST && arp_pkt.target_ip == my_ip {
@@ -154,6 +168,7 @@ pub fn process_packet(data: &[u8]) {
                             let mut pending = PENDING_PING.lock();
                             if let Some(ref mut p) = *pending {
                                 if !p.received
+                                    && p.target_ip == ip_hdr.src_ip
                                     && p.identifier == icmp_pkt.identifier
                                     && p.seq_no == icmp_pkt.seq_no
                                 {
@@ -181,7 +196,7 @@ pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
         None => return,
     };
 
-    let mut buf = [0u8; 1500];
+    let mut buf = [0u8; IPV4_DEFAULT_MTU];
     let eth_hdr = eth::EthHeader {
         dst_mac,
         src_mac: my_mac,
@@ -205,7 +220,7 @@ pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
     }
 
     let ip_hdr = ipv4::Ipv4Header {
-        version_ihl: 0x45,
+        version_ihl: ipv4::IPV4_VERSION_IHL_MIN,
         dscp_ecn: 0,
         total_len: (20 + icmp_len) as u16,
         id: seq,
@@ -226,12 +241,18 @@ pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
 }
 
 pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
+    if PING_ACTIVE.compare_exchange(
+        false,
+        true,
+        core::sync::atomic::Ordering::Acquire,
+        core::sync::atomic::Ordering::Relaxed,
+    ).is_err() {
+        return Err("Another ping is already in progress");
+    }
+    let _ping_guard = PingGuard;
     let my_ip = get_ip();
-    let is_loopback = target_ip == [127, 0, 0, 1] || target_ip == my_ip;
-
-    if is_loopback {
-        // Immediate local loopback round trip
-        return Ok(1);
+    if target_ip == [127, 0, 0, 1] || target_ip == my_ip {
+        return Err("Loopback routing is not implemented");
     }
 
     let my_mac = match get_my_mac() {
@@ -271,6 +292,7 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
     };
 
     let ident: u16 = 0xAE64;
+    let start_ticks = crate::drivers::pit::get_ticks();
     let seq = PING_SEQ.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
 
     // Register pending ping before sending
@@ -285,7 +307,7 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         });
     }
 
-    let mut buf = [0u8; 1500];
+    let mut buf = [0u8; IPV4_DEFAULT_MTU];
     let eth_hdr = eth::EthHeader {
         dst_mac,
         src_mac: my_mac,
@@ -305,7 +327,7 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
     let icmp_len = icmp_echo.write_to(payload, &mut icmp_buf);
 
     let ip_hdr = ipv4::Ipv4Header {
-        version_ihl: 0x45,
+        version_ihl: ipv4::IPV4_VERSION_IHL_MIN,
         dscp_ecn: 0,
         total_len: (20 + icmp_len) as u16,
         id: seq,
@@ -326,25 +348,21 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
     let mut reply_received = false;
     let mut elapsed_ms: u64 = 0;
 
-    for i in 1..=60 {
+    for _ in 0..60 {
         poll();
         {
             let pending = PENDING_PING.lock();
             if let Some(ref p) = *pending {
                 if p.received {
                     reply_received = true;
-                    elapsed_ms = (i * 2).max(1);
+                    elapsed_ms = crate::drivers::pit::ticks_to_millis(
+                        p.reply_time_ticks.saturating_sub(start_ticks),
+                    ).max(1);
                     break;
                 }
             }
         }
         crate::drivers::pit::delay_ms(2);
-    }
-
-    // Clear pending state
-    {
-        let mut pending = PENDING_PING.lock();
-        *pending = None;
     }
 
     if reply_received {

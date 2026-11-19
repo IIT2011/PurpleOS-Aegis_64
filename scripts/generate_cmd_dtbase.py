@@ -8,6 +8,7 @@ and embeds it into the database header.
 import hashlib
 import sys
 import os
+from pathlib import Path
 
 COMMANDS = [
     # Navigation
@@ -168,12 +169,8 @@ def build_payload():
 import subprocess
 import shutil
 
-OPENSSL_CANDIDATES = [
-    shutil.which("openssl"),
-    r"D:\OS Development\Dev Tools\Git\usr\bin\openssl.exe",
-    r"C:\Program Files\Git\usr\bin\openssl.exe",
-    r"C:\Program Files\OpenSSL-Win64\bin\openssl.exe",
-]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+OPENSSL_CANDIDATES = [shutil.which("openssl")]
 
 def get_openssl_bin() -> str:
     for cand in OPENSSL_CANDIDATES:
@@ -182,15 +179,16 @@ def get_openssl_bin() -> str:
     raise RuntimeError("OpenSSL executable not found.")
 
 def get_creator_private_key():
-    for kp in [
-        "keys/creator_private_key.pem",
-        "OS/keys/creator_private_key.pem",
-        "../keys/creator_private_key.pem",
-        "d:/OS Development/OS/keys/creator_private_key.pem",
-    ]:
-        if os.path.exists(kp):
-            return os.path.abspath(kp)
-    raise RuntimeError("Creator RSA private key file not found. Ensure keys/creator_private_key.pem exists.")
+    configured_key = os.environ.get("AEGIS_CREATOR_PRIVATE_KEY")
+    if configured_key and Path(configured_key).is_file():
+        return str(Path(configured_key).resolve())
+    key_path = REPOSITORY_ROOT / "keys" / "creator_private_key.pem"
+    if key_path.is_file():
+        return str(key_path.resolve())
+    raise RuntimeError(
+        "Creator RSA private key file not found. Set AEGIS_CREATOR_PRIVATE_KEY "
+        "or place the key in the repository's ignored keys directory."
+    )
 
 def sign_payload_rsa(payload: bytes, key_path: str) -> str:
     openssl = get_openssl_bin()
@@ -227,7 +225,7 @@ def generate_database(key_path: str = None):
     return full_content, sig
 
 if __name__ == "__main__":
-    out_path = sys.argv[1] if len(sys.argv) > 1 else "OS/build/cmd.dtbase"
+    out_path = sys.argv[1] if len(sys.argv) > 1 else str(REPOSITORY_ROOT / "build" / "cmd.dtbase")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     content, sig = generate_database()
     with open(out_path, "wb") as f:

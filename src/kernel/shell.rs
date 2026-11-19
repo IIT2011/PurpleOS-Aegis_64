@@ -1691,22 +1691,11 @@ impl Shell {
                 serial::println(" cores online and active\n");
             }
             "smptest" => {
-                serial::println("Spawning SMP multi-core concurrent test tasks...");
                 let online = crate::kernel::smp::get_online_count();
-                for cpu in 1..online {
-                    for pass in 1..=3 {
-                        serial::print("  SMP Worker (bound to CPU ");
-                        serial::print_u64(cpu as u64);
-                        serial::print(") executing on actual CPU ");
-                        serial::print_u64(cpu as u64);
-                        serial::print(" [pass ");
-                        serial::print_u64(pass as u64);
-                        serial::println("/3]");
-                    }
-                }
-                serial::print("SMP multi-core execution verified across ");
+                serial::print("SMP topology reports ");
                 serial::print_u64(online as u64);
-                serial::println(" cores.");
+                serial::println(" online cores.");
+                serial::println("Concurrent worker validation is not implemented.");
             }
 
             // Multitasking
@@ -1871,7 +1860,7 @@ impl Shell {
                     serial::println("  Signals:         POSIX.1-2024 Signals 1..64 supported");
                     serial::println("  Epoch:           Real-Time Dynamic Gregorian Epoch from CMOS RTC");
                     serial::println("  Memory:          Hardware-enforced ring 3 memory isolation & user brk/mmap");
-                    serial::println("  Pure Rust:       100% Rust no_std (Zero C, Zero C++, Zero Hardcoded values)\n");
+                    serial::println("  Pure Rust:       Rust no_std kernel implementation (platform and ABI constants are defined in code)\n");
                     serial::println("Use 'posix test' to run the in-kernel 12-test validation suite.");
                 }
             }
@@ -1945,7 +1934,7 @@ impl Shell {
                     }
                     "verify" => {
                         if crate::kernel::cmddb::verify_integrity() {
-                            serial::println("[CMDDB] /System/CLI/cmd.dtbase Creator Signature: 100% VERIFIED.");
+                            serial::println("[CMDDB] /System/CLI/cmd.dtbase signature and payload integrity VERIFIED.");
                         } else {
                             serial::println("[CMDDB] /System/CLI/cmd.dtbase Creator Signature: COMPROMISED / MISMATCH.");
                         }
@@ -2812,32 +2801,47 @@ impl Shell {
         for i in 0..500_000 {
             acc = acc.wrapping_mul(6364136223846793005).wrapping_add(i as u64);
         }
-        con::println("[PASSED] (500k ops, verified)");
+        con::print("completed operations; accumulator = 0x");
+        con::print_hex(acc);
+        con::println("");
 
         con::print("  [2/4] Memory Copy & Block Transfer (64 KiB)... ");
         let mut src_buf = [0x5Au8; 4096];
         let mut dst_buf = [0u8; 4096];
-        for _ in 0..16 {
+        for pass in 0..16 {
             dst_buf.copy_from_slice(&src_buf);
-            src_buf[0] = src_buf[0].wrapping_add(1);
+            if pass < 15 {
+                src_buf[0] = src_buf[0].wrapping_add(1);
+            }
         }
-        con::println("[PASSED] (64 KiB transfer)");
+        if dst_buf == src_buf {
+            con::println("copy contents match");
+        } else {
+            con::println("copy contents differ");
+        }
 
         con::print("  [3/4] Dual-Bitmap PMM Allocation & Deallocation... ");
         if let Some(frame) = crate::mm::pmm::alloc_frame() {
-            let _ = crate::mm::pmm::free_frame(frame);
-            con::println("[PASSED] (Physical frame verified)");
+            match crate::mm::pmm::free_frame(frame) {
+                Ok(()) => con::println("allocation released"),
+                Err(err) => {
+                    con::print("release failed: ");
+                    con::println(err);
+                }
+            }
         } else {
-            con::println("[SKIPPED] (Out of frames)");
+            con::println("skipped: no free frames");
         }
 
         con::print("  [4/4] Native SHA-256 Digest Throughput... ");
         let test_block = b"PurpleOS Aegis64 Pure Rust Bare-Metal OS Kernel Integrity";
-        let _digest = crate::crypto::sha256::hash(test_block);
-        con::println("[PASSED] (SHA-256 engine)");
+        let digest = crate::crypto::sha256::hash(test_block);
+        con::print("digest generated; leading word = 0x");
+        con::print_hex(u64::from_be_bytes(digest[..8].try_into().unwrap_or([0; 8])));
+        con::println("");
 
         con::println("-------------------------------------------------------");
-        con::println("  Benchmark Score: 9850 PurpleMarks (Workstation-Grade)");
+        con::println("  No comparative score is available for this run.");
         con::println("=======================================================\n");
     }
 
@@ -3016,10 +3020,8 @@ impl Shell {
 
     fn do_fortune(&self) {
         let tips = [
-            "Aegis64 is written in 100% pure bare-metal Rust with zero C runtime dependencies.",
-            "Use 'native test' to exercise the 68 native system calls designed for high-load 3D GPU and audio DSP.",
-            "All APDRV modules enforce hardware W^X page protection via the 4-level PML4 paging tables.",
-            "The Dual-Bitmap PMM manages physical memory frames in O(1) allocation time with zero fragmentation.",
+            "Aegis64 is a no_std bare-metal Rust operating system under active development.",
+            "Use 'native test' to inspect the native syscall checks currently implemented by the kernel.",
             "You can pipe command outputs! Try: 'help | grep file' or 'list files | grep apdrv'.",
             "Press Up and Down arrow keys to navigate command history, and Tab to auto-complete.",
             "Use 'edit <filename>' to launch the in-terminal text editor directly from the shell.",
@@ -3867,10 +3869,10 @@ impl Shell {
                 serial::print("x");
                 serial::print_u64(comp.height as u64);
                 serial::println("@32bpp ARGB8888");
-                serial::println("  Double Buffer:   Hardware VBE Offset / Coherent RAM Back-Buffer");
+                serial::println("  Double Buffer:   RAM back buffer and linear framebuffer");
                 serial::println("  Alpha Blending:  Porter-Duff SourceOver (Translucent Shadows & Borders)");
-                serial::println("  Cursor Engine:   Anti-Aliased Flicker-Free Pointer Overlay");
-                serial::println("  Window Server:   Active (Z-Ordered Scene Graph & Damage Rect Tracking)");
+                serial::println("  Cursor Engine:   Software pointer overlay");
+                serial::println("  Window Server:   Z-ordered windows with desktop-region updates");
                 serial::println("  Desktop Shell:   Purple Desktop UI (Purple Bar & Purple Dock Active)");
                 serial::println("  VFS Device Node: /dev/compositor, /dev/fb0");
                 serial::println("  Service Daemon:  /System/Services/Compositor");
@@ -4569,17 +4571,19 @@ impl Shell {
 
     fn do_aegisdetect(&self) {
         serial::println("\nAegisDetect Boot Integrity & System Protection Subsystem:");
-        serial::println("  Status:        ONLINE (Enforcing Cryptographic W^X)");
-        serial::println("  Hash Engine:   SHA-256 / HMAC-SHA256");
+        serial::println("  Status:        ONLINE (storage integrity checks available)");
+        serial::println("  Hash Engine:   SHA-256");
         if crate::kernel::storage::is_mounted() {
-            let (verified, total) = crate::security::aegis_detect::verify_storage();
+            let (verified, total, unverified, missing) = crate::security::aegis_detect::verify_storage();
             serial::print("  Verification:  ");
-            serial::print_u64(total as u64);
-            serial::print(" total, ");
             serial::print_u64(verified as u64);
+            serial::print("/");
+            serial::print_u64(total as u64);
             serial::print(" trusted, ");
-            serial::print_u64(total.saturating_sub(verified) as u64);
-            serial::println(" tampered/missing\n");
+            serial::print_u64(unverified as u64);
+            serial::print(" present but unverified, ");
+            serial::print_u64(missing as u64);
+            serial::println(" missing\n");
         } else {
             serial::println("  Verification:  Storage not mounted; standby mode.\n");
         }
@@ -4638,6 +4642,7 @@ impl Shell {
     pub fn run(&mut self) -> ! {
         self.init();
         loop {
+            crate::compositor::service();
             self.step();
             crate::kernel::task::yield_now();
         }

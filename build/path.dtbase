@@ -8,6 +8,5 @@ path = /System/Services
 path = /System/CLI/scripts
 path = /System/Drivers
 path = /System/Frameworks
-path = /System/Users/aegis/Applications
 path = /tmp
 path = /

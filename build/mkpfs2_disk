@@ -119,7 +119,8 @@ def format_purplefs_v2(total_blocks, label, files):
     struct.pack_into("<I", inodes, 128 + 0x7C, root_icrc)
 
     # Free blocks/inodes in superblock
-    struct.pack_into("<II", sb, 16 + 8, total_blocks - allocated_blocks - 8, 256 - allocated_inodes)
+    struct.pack_into("<I", sb, 28, total_blocks - allocated_blocks - 8)
+    struct.pack_into("<I", sb, 36, 256 - allocated_inodes)
     sbcrc = zlib.crc32(sb[:0x80]) & 0xFFFFFFFF
     struct.pack_into("<I", sb, 0x80, sbcrc)
 
@@ -278,7 +279,8 @@ Library = libcompositor.a
     p1_start = 2048
     p1_end = p1_start + pfs_sectors - 1
 
-    disk = bytearray(total_disk_sectors * 512)
+    if p1_end > total_disk_sectors - 34:
+        raise ValueError("Disk is too small for PurpleFS and backup GPT")
 
     # Protective MBR at LBA 0
     mbr = bytearray(512)
@@ -286,10 +288,6 @@ Library = libcompositor.a
     struct.pack_into("<I", mbr, 446 + 8, 1)
     struct.pack_into("<I", mbr, 446 + 12, total_disk_sectors - 1)
     mbr[510:512] = b"\x55\xAA"
-    disk[0:512] = mbr
-
-    # Write PurpleFS into partition 1
-    disk[p1_start * 512 : (p1_start + pfs_sectors) * 512] = pfs_data
 
     # Generate Partition Entries
     entries = bytearray(128 * 128)
@@ -322,9 +320,6 @@ Library = libcompositor.a
     hdr_crc = crc32_gpt(gpt_hdr[:92])
     struct.pack_into("<I", gpt_hdr, 16, hdr_crc)
 
-    disk[512:1024] = gpt_hdr
-    disk[1024:1024 + len(entries)] = entries
-
     # Backup GPT
     backup_hdr = bytearray(gpt_hdr)
     struct.pack_into("<Q", backup_hdr, 24, total_disk_sectors - 1)
@@ -335,11 +330,17 @@ Library = libcompositor.a
     struct.pack_into("<I", backup_hdr, 16, backup_crc)
 
     backup_entries_lba = total_disk_sectors - 33
-    disk[backup_entries_lba * 512 : (backup_entries_lba + 32) * 512] = entries
-    disk[(total_disk_sectors - 1) * 512 : total_disk_sectors * 512] = backup_hdr
 
     with open(disk_path, "wb") as f:
-        f.write(disk)
+        f.truncate(total_disk_sectors * 512)
+        f.write(mbr)
+        f.write(gpt_hdr)
+        f.write(entries)
+        f.seek(p1_start * 512)
+        f.write(pfs_data)
+        f.seek(backup_entries_lba * 512)
+        f.write(entries)
+        f.write(backup_hdr)
     print(f"[OK] Formatted GPT disk with PurpleFS v2 at {disk_path}")
 
 if __name__ == "__main__":

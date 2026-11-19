@@ -17,7 +17,7 @@
 //!   - Strictly Native PurpleOS ABI: Range 0x1000..0x10AF (Zero POSIX/Linux overlaps).
 //!   - Safe memory validation: Strict separation of user and kernel virtual address spaces.
 
-use crate::drivers::pit::{self, get_ticks, delay_us, play_tone};
+use crate::drivers::pit::{self, get_ticks, play_tone};
 use crate::drivers::rtc::{self, get_time, WallTime};
 use crate::drivers::video;
 use crate::drivers::audio;
@@ -28,7 +28,7 @@ use crate::drivers::mouse;
 use crate::drivers::pci;
 use crate::drivers::serial;
 use crate::kernel::posix::{
-    self, E2BIG, EAGAIN, EBADF, EBUSY, EFAULT, EINVAL, EIO, ENODEV, ENOMEM, ENOSYS, EOVERFLOW, EPERM, ESRCH,
+    self, E2BIG, EAGAIN, EBADF, EBUSY, EFAULT, EINVAL, EIO, ENODEV, ENOMEM, ENOSYS, EOPNOTSUPP, EOVERFLOW, EPERM, ESRCH,
 };
 use crate::kernel::smp;
 use crate::kernel::task::{self, SCHED, TaskPriority, TaskState, MAX_TASKS};
@@ -142,6 +142,14 @@ pub const PURPLE_CAP_DIRECT_AUDIO: u64 = 1 << 4;
 pub const PURPLE_CAP_MULTI_CORE: u64  = 1 << 5;
 pub const PURPLE_CAP_SYS_ADMIN: u64   = 1 << 6;
 pub const PURPLE_CAP_ALL: u64         = !0;
+const MAX_STORAGE_BLOCKS_PER_SYSCALL: u64 = 32;
+const MAX_FRAMEBUFFER_RETRACE_POLLS: u32 = 100_000;
+const MAX_TASK_SLICE_TICKS: u64 = 1_000;
+const MAX_SPIN_PAUSE_CYCLES: u64 = 100_000;
+const MAX_MICRO_SLEEP_US: u64 = 5_000_000;
+const MAX_TONE_DURATION_MS: u64 = 5_000;
+const AUDIO_RATE_MASK_44100: u32 = 1 << 0;
+const AUDIO_DEPTH_MASK_16: u32 = 1 << 0;
 
 /* =========================================================================
  * 3. USER-FACING C-COMPATIBLE DATA STRUCTURES
@@ -211,11 +219,8 @@ pub const PURPLE_CHAN_QUEUE_CAP: usize = 16;
 pub const PURPLE_MAX_CHANNELS: usize = 32;
 pub const PURPLE_MAX_SHM_REGIONS: usize = 16;
 pub const PURPLE_SHM_MAX_PAGES: usize = 256;
-pub const MAX_USER_TIMERS: usize = 16;
 pub const ETH_MIN_FRAME_LEN: usize = 14;
 pub const ETH_MAX_FRAME_LEN: usize = 1518;
-pub const PIT_HERTZ: u64 = 100;
-pub const NANOS_PER_TICK: u64 = 1_000_000_000 / PIT_HERTZ;
 pub const VGA_INPUT_STATUS_1: u16 = 0x03DA;
 pub const KERNEL_VERSION_MAJOR: u16 = 0;
 pub const KERNEL_VERSION_MINOR: u16 = 5;
@@ -449,60 +454,6 @@ static CHANNELS: Spinlock<[PurpleChannel; PURPLE_MAX_CHANNELS]> = Spinlock::new(
     PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
 ]);
 
-// Shared Memory Regions
-struct PurpleShmRegion {
-    active: bool,
-    phys_addr: usize,
-    page_count: usize,
-    creator_tid: u32,
-    ref_count: u32,
-}
-
-impl PurpleShmRegion {
-    const fn empty() -> Self {
-        Self {
-            active: false,
-            phys_addr: 0,
-            page_count: 0,
-            creator_tid: 0,
-            ref_count: 0,
-        }
-    }
-}
-
-static SHM_REGIONS: Spinlock<[PurpleShmRegion; PURPLE_MAX_SHM_REGIONS]> = Spinlock::new([
-    PurpleShmRegion::empty(), PurpleShmRegion::empty(), PurpleShmRegion::empty(), PurpleShmRegion::empty(),
-    PurpleShmRegion::empty(), PurpleShmRegion::empty(), PurpleShmRegion::empty(), PurpleShmRegion::empty(),
-    PurpleShmRegion::empty(), PurpleShmRegion::empty(), PurpleShmRegion::empty(), PurpleShmRegion::empty(),
-    PurpleShmRegion::empty(), PurpleShmRegion::empty(), PurpleShmRegion::empty(), PurpleShmRegion::empty(),
-]);
-
-// Software Timers
-struct PurpleUserTimer {
-    active: bool,
-    task_id: u32,
-    expire_ticks: u64,
-    interval_ticks: u64,
-}
-
-impl PurpleUserTimer {
-    const fn empty() -> Self {
-        Self {
-            active: false,
-            task_id: 0,
-            expire_ticks: 0,
-            interval_ticks: 0,
-        }
-    }
-}
-
-static USER_TIMERS: Spinlock<[PurpleUserTimer; MAX_USER_TIMERS]> = Spinlock::new([
-    PurpleUserTimer::empty(), PurpleUserTimer::empty(), PurpleUserTimer::empty(), PurpleUserTimer::empty(),
-    PurpleUserTimer::empty(), PurpleUserTimer::empty(), PurpleUserTimer::empty(), PurpleUserTimer::empty(),
-    PurpleUserTimer::empty(), PurpleUserTimer::empty(), PurpleUserTimer::empty(), PurpleUserTimer::empty(),
-    PurpleUserTimer::empty(), PurpleUserTimer::empty(), PurpleUserTimer::empty(), PurpleUserTimer::empty(),
-]);
-
 // Network Telemetry
 static NET_STATS: Spinlock<PurpleNetStats> = Spinlock::new(PurpleNetStats {
     tx_packets: 0,
@@ -521,11 +472,10 @@ static FB_ACQUIRED_BY: Spinlock<Option<u32>> = Spinlock::new(None);
  * ========================================================================= */
 
 fn is_caller_user() -> bool {
-    task::get_current_task_index()
-        .and_then(|idx| {
-            let s = SCHED.lock();
-            Some(s.tasks[idx].is_user)
-        })
+    let cpu_id = task::get_current_cpu();
+    let s = SCHED.lock();
+    s.current[cpu_id]
+        .map(|idx| s.tasks[idx].is_user)
         .unwrap_or(false)
 }
 
@@ -534,12 +484,14 @@ fn current_task_id() -> u32 {
 }
 
 fn current_task_has_cap(cap: u64) -> bool {
-    if let Some(idx) = task::get_current_task_index() {
-        let s = SCHED.lock();
-        (s.tasks[idx].cap_mask & cap) != 0
-    } else {
-        true // Kernel thread has full privileges
-    }
+    let cpu_id = task::get_current_cpu();
+    let s = SCHED.lock();
+    let idx = match s.current[cpu_id] {
+        Some(idx) => idx,
+        None => return false,
+    };
+    let current = &s.tasks[idx];
+    (current.cap_mask & cap) == cap
 }
 
 pub fn safe_copy_to_user(kernel_src: &[u8], user_dst: u64) -> Result<(), i64> {
@@ -655,9 +607,14 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_FB_FLIP => {
-            // Wait for vertical blank retrace if requested
+            if !current_task_has_cap(PURPLE_CAP_DIRECT_GPU) {
+                return -EPERM;
+            }
+            if !crate::drivers::gpu::GPU.lock().double_buffered {
+                return -EOPNOTSUPP;
+            }
             if a1 != 0 {
-                let mut timeout = 100000;
+                let mut timeout = MAX_FRAMEBUFFER_RETRACE_POLLS;
                 while timeout > 0 {
                     let status = unsafe { crate::arch::x86_64::io::inb(VGA_INPUT_STATUS_1) };
                     if (status & 0x08) != 0 {
@@ -666,7 +623,11 @@ pub fn dispatch_native_syscall(
                     timeout -= 1;
                     core::hint::spin_loop();
                 }
+                if timeout == 0 {
+                    return -EAGAIN;
+                }
             }
+            crate::drivers::gpu::GPU.lock().flip_page();
             0
         }
 
@@ -713,50 +674,55 @@ pub fn dispatch_native_syscall(
             if let Err(e) = safe_copy_from_user(a1, slice) {
                 return e;
             }
-            if blit.width == 0 || blit.height == 0 || blit.src_pitch == 0 {
+            let width = blit.width as usize;
+            let height = blit.height as usize;
+            let pitch = blit.src_pitch as usize;
+            let row_bytes = match width.checked_mul(core::mem::size_of::<u32>()) {
+                Some(bytes) => bytes,
+                None => return -EOVERFLOW,
+            };
+            if width == 0 || height == 0 || pitch < row_bytes {
                 return -EINVAL;
             }
-            let total_pixels = match (blit.width as usize).checked_mul(blit.height as usize) {
-                Some(p) => p,
+            let source_span = match (height - 1).checked_mul(pitch).and_then(|offset| offset.checked_add(row_bytes)) {
+                Some(bytes) => bytes,
                 None => return -EOVERFLOW,
             };
-            let max_allowed_pixels = (video::get_width().max(3840)).saturating_mul(video::get_height().max(2160));
-            if total_pixels > max_allowed_pixels {
+            if source_span > isize::MAX as usize {
                 return -E2BIG;
             }
-            let _total_bytes = match total_pixels.checked_mul(4) {
-                Some(b) => b,
-                None => return -EOVERFLOW,
-            };
-
-            // Temporary stack buffer for blit scanlines
-            let mut chunk_buf = [0u32; 1024];
-            let chunk_pixels = chunk_buf.len();
-            let mut rem_pixels = total_pixels;
-            let mut cur_src = blit.src_ptr;
-            let mut cur_y = blit.dst_y as usize;
-
-            while rem_pixels > 0 {
-                let this_pixels = rem_pixels.min(chunk_pixels);
-                let byte_count = this_pixels * 4;
-                let u8_slice = unsafe {
-                    core::slice::from_raw_parts_mut(chunk_buf.as_mut_ptr() as *mut u8, byte_count)
+            let mut copied = 0usize;
+            let mut row_buffer = [0u32; 1024];
+            for row in 0..height {
+                let source_row = match (row as u64)
+                    .checked_mul(pitch as u64)
+                    .and_then(|offset| blit.src_ptr.checked_add(offset))
+                {
+                    Some(address) => address,
+                    None => return -EOVERFLOW,
                 };
-                if let Err(e) = safe_copy_from_user(cur_src, u8_slice) {
-                    return e;
+                let mut column = 0usize;
+                while column < width {
+                    let count = (width - column).min(row_buffer.len());
+                    let byte_count = count * core::mem::size_of::<u32>();
+                    let source = match source_row.checked_add((column * 4) as u64) {
+                        Some(address) => address,
+                        None => return -EOVERFLOW,
+                    };
+                    let bytes = unsafe {
+                        core::slice::from_raw_parts_mut(row_buffer.as_mut_ptr() as *mut u8, byte_count)
+                    };
+                    if let Err(e) = safe_copy_from_user(source, bytes) {
+                        return e;
+                    }
+                    let draw_x = (blit.dst_x as usize).saturating_add(column);
+                    let draw_y = (blit.dst_y as usize).saturating_add(row);
+                    let drawn = video::blit_rect(&row_buffer[..count], draw_x, draw_y, count, 1, count);
+                    copied = copied.saturating_add(drawn);
+                    column += count;
                 }
-                let blitted = video::blit_rect(&chunk_buf[..this_pixels], blit.dst_x as usize, cur_y, this_pixels, 1, this_pixels);
-                if blitted == 0 {
-                    break;
-                }
-                rem_pixels -= this_pixels;
-                cur_src = match cur_src.checked_add(byte_count as u64) {
-                    Some(s) => s,
-                    None => break,
-                };
-                cur_y += 1;
             }
-            total_pixels as i64
+            copied as i64
         }
 
         SYS_PURPLE_GPU_DRAW_LINE => {
@@ -770,47 +736,32 @@ pub fn dispatch_native_syscall(
             let y0 = a2 as usize;
             let x1 = a3 as usize;
             let y1 = a4 as usize;
+            if x0 >= video::get_width() || x1 >= video::get_width()
+                || y0 >= video::get_height() || y1 >= video::get_height()
+            {
+                return -EINVAL;
+            }
             let color = a5 as u32;
             video::draw_line(x0, y0, x1, y1, color);
             0
         }
 
-        SYS_PURPLE_GPU_SUBMIT_3D => {
-            if !current_task_has_cap(PURPLE_CAP_DIRECT_GPU) {
-                return -EPERM;
-            }
-            let cmd_count = a2 as usize;
-            if cmd_count == 0 || cmd_count > 4096 {
-                return -EINVAL;
-            }
-            // Execute batch command stream validation
-            let mut cmd_buf = [0u32; 64];
-            let batch = cmd_count.min(cmd_buf.len());
-            let byte_len = batch * 4;
-            let u8_slice = unsafe {
-                core::slice::from_raw_parts_mut(cmd_buf.as_mut_ptr() as *mut u8, byte_len)
-            };
-            if let Err(e) = safe_copy_from_user(a1, u8_slice) {
-                return e;
-            }
-            batch as i64
-        }
+        SYS_PURPLE_GPU_SUBMIT_3D => -EOPNOTSUPP,
 
         SYS_PURPLE_GPU_GET_CAPS => {
             let gpu = crate::drivers::gpu::GPU.lock();
-            let mut caps = PurpleGpuCaps {
-                vendor_id: if gpu.vendor_id != 0 { gpu.vendor_id } else { crate::drivers::gpu::GPU_VENDOR_BOCHS },
-                device_id: if gpu.device_id != 0 { gpu.device_id } else { crate::drivers::gpu::GPU_DEV_BOCHS_VGA },
-                flags: if gpu.is_ready { 0x07 } else { 0x01 }, // 2D accel, 3D command stream, VBE LFB
-                max_texture_dim: 4096,
-                vram_bytes: if gpu.fb_size != 0 { gpu.fb_size as u64 } else { 16 * 1024 * 1024 },
+            let caps = PurpleGpuCaps {
+                vendor_id: gpu.vendor_id,
+                device_id: gpu.device_id,
+                flags: if gpu.is_ready { 0x01 } else { 0 }, // linear framebuffer only
+                max_texture_dim: 0,
+                vram_bytes: 0, // Total VRAM is not exposed by this driver.
                 name: [0; 32],
             };
             drop(gpu);
-
-            let dev_name = b"PurpleOS Aegis GPU Engine";
+            let mut caps = caps;
+            let dev_name = b"PurpleOS framebuffer";
             caps.name[..dev_name.len()].copy_from_slice(dev_name);
-
             let slice = unsafe {
                 core::slice::from_raw_parts(&caps as *const PurpleGpuCaps as *const u8, core::mem::size_of::<PurpleGpuCaps>())
             };
@@ -830,12 +781,12 @@ pub fn dispatch_native_syscall(
             drop(hda);
 
             let caps = PurpleAudioCaps {
-                sample_rates_mask: 0x03, // 44.1kHz, 48kHz
-                bit_depths_mask: 0x03,   // 16-bit, 24-bit
-                channels: 2,             // Stereo
+                sample_rates_mask: if is_ready { AUDIO_RATE_MASK_44100 } else { 0 },
+                bit_depths_mask: if is_ready { AUDIO_DEPTH_MASK_16 } else { 0 },
+                channels: if is_ready { 2 } else { 0 },
                 current_volume: audio::get_volume() as u32,
-                is_hardware_ready: if is_ready { 1 } else { 0 },
-                codecs_count: num_codecs.max(1),
+                is_hardware_ready: if is_ready && num_codecs > 0 { 1 } else { 0 },
+                codecs_count: num_codecs,
                 dma_ring_bytes: crate::drivers::audio::HDA_DMA_BUFFER_SIZE as u32,
                 _reserved: 0,
             };
@@ -848,36 +799,9 @@ pub fn dispatch_native_syscall(
             }
         }
 
-        SYS_PURPLE_AUDIO_STREAM_START => {
-            if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
-                return -EPERM;
-            }
-            0
-        }
+        SYS_PURPLE_AUDIO_STREAM_START | SYS_PURPLE_AUDIO_STREAM_STOP => -EOPNOTSUPP,
 
-        SYS_PURPLE_AUDIO_STREAM_STOP => {
-            if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
-                return -EPERM;
-            }
-            0
-        }
-
-        SYS_PURPLE_AUDIO_SUBMIT_PCM => {
-            if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
-                return -EPERM;
-            }
-            let len = a2 as usize;
-            if len == 0 {
-                return 0;
-            }
-            let chunk_len = len.min(4096);
-            let mut kbuf = [0u8; 4096];
-            if let Err(e) = safe_copy_from_user(a1, &mut kbuf[..chunk_len]) {
-                return e;
-            }
-            let written = audio::submit_pcm(&kbuf[..chunk_len]);
-            written as i64
-        }
+        SYS_PURPLE_AUDIO_SUBMIT_PCM => -EOPNOTSUPP,
 
         SYS_PURPLE_AUDIO_SET_VOLUME => {
             if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
@@ -896,9 +820,10 @@ pub fn dispatch_native_syscall(
             if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
                 return -EPERM;
             }
-            let freq = a1 as u32;
-            let dur = (a2 as u32).min(5000); // Max 5 seconds
-            play_tone(freq, dur);
+            if a1 == 0 || a1 > crate::drivers::pit::PIT_MAX_TONE_FREQUENCY_HZ as u64 || a2 > MAX_TONE_DURATION_MS {
+                return -EINVAL;
+            }
+            play_tone(a1 as u32, a2 as u32);
             0
         }
 
@@ -1041,68 +966,7 @@ pub fn dispatch_native_syscall(
             }
         }
 
-        SYS_PURPLE_SHM_CREATE => {
-            let size = a1 as usize;
-            if size == 0 {
-                return -EINVAL;
-            }
-            let pages = match size.checked_add(PAGE_SIZE - 1) {
-                Some(p) => p / PAGE_SIZE,
-                None => return -EOVERFLOW,
-            };
-            if pages > PURPLE_SHM_MAX_PAGES {
-                return -E2BIG;
-            }
-
-            let mut shms = SHM_REGIONS.lock();
-            for (i, slot) in shms.iter_mut().enumerate() {
-                if !slot.active {
-                    if let Some(phys) = pmm::alloc_frames(pages) {
-                        slot.active = true;
-                        slot.phys_addr = phys;
-                        slot.page_count = pages;
-                        slot.creator_tid = current_task_id();
-                        slot.ref_count = 1;
-                        return (i as i64) + 1; // 1-based shm_id
-                    } else {
-                        return -ENOMEM;
-                    }
-                }
-            }
-            -ENOMEM
-        }
-
-        SYS_PURPLE_SHM_MAP => {
-            let shm_id = a1 as usize;
-            if shm_id == 0 || shm_id > PURPLE_MAX_SHM_REGIONS {
-                return -EINVAL;
-            }
-            let mut shms = SHM_REGIONS.lock();
-            let slot = &mut shms[shm_id - 1];
-            if !slot.active {
-                return -EINVAL;
-            }
-            slot.ref_count = slot.ref_count.saturating_add(1);
-            slot.phys_addr as i64
-        }
-
-        SYS_PURPLE_SHM_UNMAP => {
-            let shm_id = a1 as usize;
-            if shm_id == 0 || shm_id > PURPLE_MAX_SHM_REGIONS {
-                return -EINVAL;
-            }
-            let mut shms = SHM_REGIONS.lock();
-            let slot = &mut shms[shm_id - 1];
-            if !slot.active {
-                return -EINVAL;
-            }
-            slot.ref_count = slot.ref_count.saturating_sub(1);
-            if slot.ref_count == 0 {
-                let _ = pmm::free_frames(slot.phys_addr, slot.page_count);
-                slot.active = false;
-            }
-            0
-        }
+        SYS_PURPLE_SHM_CREATE | SYS_PURPLE_SHM_MAP | SYS_PURPLE_SHM_UNMAP => -EOPNOTSUPP,
 
         /* =====================================================================
          * Category 4: Multi-Core SMP Parallelism, Affinity & Execution Control
@@ -1119,17 +983,28 @@ pub fn dispatch_native_syscall(
             if !current_task_has_cap(PURPLE_CAP_MULTI_CORE) {
                 return -EPERM;
             }
-            let target_tid = a1 as u32;
-            let mask = a2;
-            if mask == 0 {
+            if a1 > u32::MAX as u64 {
                 return -EINVAL;
             }
+            let target_tid = a1 as u32;
+            let mask = a2;
+            let online = smp::get_online_count() as usize;
+            let online_mask = if online >= u64::BITS as usize { u64::MAX } else { (1u64 << online) - 1 };
+            if mask == 0 || mask & !online_mask != 0 {
+                return -EINVAL;
+            }
+            let is_admin = current_task_has_cap(PURPLE_CAP_SYS_ADMIN);
 
             let mut s = SCHED.lock();
             let cpu_id = task::get_current_cpu();
             let cur_tid = s.current[cpu_id].map(|idx| s.tasks[idx].id).unwrap_or(0);
             let tid = if target_tid == 0 { cur_tid } else { target_tid };
-
+            if tid != cur_tid && !is_admin {
+                return -EPERM;
+            }
+            if tid == cur_tid && mask & (1u64 << cpu_id) == 0 {
+                return -EINVAL;
+            }
             for t in s.tasks.iter_mut() {
                 if t.id == tid && t.state != TaskState::Unused {
                     t.cpu_affinity = mask;
@@ -1140,6 +1015,7 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_CPU_GET_AFFINITY => {
+            if a1 > u32::MAX as u64 { return -EINVAL; }
             let target_tid = a1 as u32;
             let s = SCHED.lock();
             let cpu_id = task::get_current_cpu();
@@ -1155,17 +1031,21 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_TASK_SET_PRIORITY => {
+            if a1 > u32::MAX as u64 || a2 > 3 { return -EINVAL; }
             let target_tid = a1 as u32;
             let prio_val = a2 as u32;
             let prio = TaskPriority::from_u32(prio_val);
-            if prio == TaskPriority::High && !current_task_has_cap(PURPLE_CAP_SYS_ADMIN) {
+            let is_admin = current_task_has_cap(PURPLE_CAP_SYS_ADMIN);
+            if prio == TaskPriority::High && !is_admin {
                 return -EPERM;
             }
             let mut s = SCHED.lock();
             let cpu_id = task::get_current_cpu();
             let cur_tid = s.current[cpu_id].map(|idx| s.tasks[idx].id).unwrap_or(0);
             let tid = if target_tid == 0 { cur_tid } else { target_tid };
-
+            if tid != cur_tid && !is_admin {
+                return -EPERM;
+            }
             for t in s.tasks.iter_mut() {
                 if t.id == tid && t.state != TaskState::Unused {
                     t.priority = prio;
@@ -1176,6 +1056,7 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_TASK_GET_PRIORITY => {
+            if a1 > u32::MAX as u64 { return -EINVAL; }
             let target_tid = a1 as u32;
             let s = SCHED.lock();
             let cpu_id = task::get_current_cpu();
@@ -1194,8 +1075,9 @@ pub fn dispatch_native_syscall(
             if !current_task_has_cap(PURPLE_CAP_SYS_ADMIN) {
                 return -EPERM;
             }
+            if a1 > u32::MAX as u64 || a2 == 0 || a2 > MAX_TASK_SLICE_TICKS { return -EINVAL; }
             let target_tid = a1 as u32;
-            let slice_ticks = (a2 as u32).clamp(1, 1000);
+            let slice_ticks = a2 as u32;
             let mut s = SCHED.lock();
             let cpu_id = task::get_current_cpu();
             let cur_tid = s.current[cpu_id].map(|idx| s.tasks[idx].id).unwrap_or(0);
@@ -1210,13 +1092,10 @@ pub fn dispatch_native_syscall(
             -ESRCH
         }
 
-        SYS_PURPLE_CORE_YIELD_TO => {
-            task::yield_now();
-            0
-        }
+        SYS_PURPLE_CORE_YIELD_TO => -EOPNOTSUPP,
 
         SYS_PURPLE_SPIN_PAUSE => {
-            let cycles = (a1 as u32).min(100_000);
+            let cycles = a1.min(MAX_SPIN_PAUSE_CYCLES) as u32;
             for _ in 0..cycles {
                 core::hint::spin_loop();
             }
@@ -1254,8 +1133,8 @@ pub fn dispatch_native_syscall(
 
         SYS_PURPLE_CLOCK_NANOS => {
             let ticks = pit::get_ticks();
-            match ticks.checked_mul(NANOS_PER_TICK) {
-                Some(ns) => ns as i64,
+            match i64::try_from(pit::ticks_to_nanos(ticks)).ok() {
+                Some(ns) => ns,
                 None => i64::MAX,
             }
         }
@@ -1265,43 +1144,11 @@ pub fn dispatch_native_syscall(
             tsc as i64
         }
 
-        SYS_PURPLE_TIMER_CREATE => {
-            let delay_ticks = a1;
-            let periodic_ticks = a2;
-            if delay_ticks == 0 {
-                return -EINVAL;
-            }
-            let mut timers = USER_TIMERS.lock();
-            let now = pit::get_ticks();
-            for (i, t) in timers.iter_mut().enumerate() {
-                if !t.active {
-                    t.active = true;
-                    t.task_id = current_task_id();
-                    t.expire_ticks = now.saturating_add(delay_ticks);
-                    t.interval_ticks = periodic_ticks;
-                    return (i as i64) + 1;
-                }
-            }
-            -ENOMEM
-        }
-
-        SYS_PURPLE_TIMER_CANCEL => {
-            let timer_id = a1 as usize;
-            if timer_id == 0 || timer_id > MAX_USER_TIMERS {
-                return -EINVAL;
-            }
-            let mut timers = USER_TIMERS.lock();
-            let t = &mut timers[timer_id - 1];
-            if !t.active {
-                return -EINVAL;
-            }
-            t.active = false;
-            0
-        }
+        SYS_PURPLE_TIMER_CREATE | SYS_PURPLE_TIMER_CANCEL => -EOPNOTSUPP,
 
         SYS_PURPLE_MICRO_SLEEP => {
-            let us = (a1 as u32).min(5_000_000); // Max 5 seconds
-            delay_us(us);
+            let us = a1.min(MAX_MICRO_SLEEP_US); // Maximum blocking delay
+            crate::drivers::pit::delay_us_long(us);
             0
         }
 
@@ -1312,22 +1159,15 @@ pub fn dispatch_native_syscall(
             let mut dev_info = PurpleNetDevInfo::default();
             if let Some(mac) = crate::net::get_my_mac() {
                 dev_info.mac = mac;
-                dev_info.link_up = 1;
-                dev_info.link_speed_mbps = if crate::drivers::e1000::is_ready() {
-                    1000
-                } else if crate::drivers::rtl8139::is_ready() {
-                    100
-                } else {
-                    10
-                };
             }
             dev_info.ip = crate::net::get_ip();
             dev_info.gateway = crate::net::get_gateway();
             dev_info.subnet = crate::net::get_subnet();
-            dev_info.mtu = 1500;
             dev_info.driver_type = if crate::drivers::e1000::is_ready() {
+                dev_info.mtu = crate::net::IPV4_DEFAULT_MTU as u16;
                 1
             } else if crate::drivers::rtl8139::is_ready() {
+                dev_info.mtu = crate::net::IPV4_DEFAULT_MTU as u16;
                 2
             } else {
                 0
@@ -1345,6 +1185,9 @@ pub fn dispatch_native_syscall(
         SYS_PURPLE_NET_SEND_RAW => {
             if !current_task_has_cap(PURPLE_CAP_RAW_NET) {
                 return -EPERM;
+            }
+            if a2 < ETH_MIN_FRAME_LEN as u64 || a2 > ETH_MAX_FRAME_LEN as u64 {
+                return -EINVAL;
             }
             let len = a2 as usize;
             if len < ETH_MIN_FRAME_LEN || len > ETH_MAX_FRAME_LEN {
@@ -1373,10 +1216,10 @@ pub fn dispatch_native_syscall(
             if !current_task_has_cap(PURPLE_CAP_RAW_NET) {
                 return -EPERM;
             }
-            let max_len = (a2 as usize).min(ETH_MAX_FRAME_LEN);
-            if max_len == 0 {
+            if a2 == 0 || a2 > ETH_MAX_FRAME_LEN as u64 {
                 return -EINVAL;
             }
+            let max_len = a2 as usize;
             let mut frame = [0u8; ETH_MAX_FRAME_LEN];
             let read_bytes = if crate::drivers::e1000::is_ready() {
                 crate::drivers::e1000::recv(&mut frame[..max_len])
@@ -1410,6 +1253,9 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_NET_PING => {
+            if [a1, a2, a3, a4].iter().any(|octet| *octet > u8::MAX as u64) {
+                return -EINVAL;
+            }
             let ip0 = a1 as u8;
             let ip1 = a2 as u8;
             let ip2 = a3 as u8;
@@ -1423,6 +1269,9 @@ pub fn dispatch_native_syscall(
         SYS_PURPLE_NET_SET_CONFIG => {
             if !current_task_has_cap(PURPLE_CAP_SYS_ADMIN) {
                 return -EPERM;
+            }
+            if [a1, a2, a3].iter().any(|value| *value > u32::MAX as u64) {
+                return -EINVAL;
             }
             let ip_u32 = a1 as u32;
             let gw_u32 = a2 as u32;
@@ -1518,13 +1367,13 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_SEC_INTEGRITY_CHECK => {
-            let (verified, total) = crate::security::aegis_detect::verify_storage();
+            let (verified, total, unverified, missing) = crate::security::aegis_detect::verify_storage();
             let wt = rtc::get_time();
             let rep = PurpleIntegrityReport {
                 verified_components: verified as u32,
                 total_components: total as u32,
-                tampered_components: (total.saturating_sub(verified)) as u32,
-                is_trusted: if verified == total { 1 } else { 0 },
+                tampered_components: unverified as u32,
+                is_trusted: if total > 0 && verified == total && unverified == 0 && missing == 0 { 1 } else { 0 },
                 timestamp_epoch: posix::rtc_to_unix_epoch(&wt) as u64,
             };
             let slice = unsafe {
@@ -1618,7 +1467,10 @@ pub fn dispatch_native_syscall(
             }
             let dev_idx = a1 as usize;
             let lba = a2;
-            let count = (a3 as u32).min(32); // Max 32 sectors per call
+            if a3 > MAX_STORAGE_BLOCKS_PER_SYSCALL {
+                return -EINVAL;
+            }
+            let count = a3 as u32;
             if count == 0 {
                 return 0;
             }
@@ -1658,7 +1510,10 @@ pub fn dispatch_native_syscall(
             }
             let dev_idx = a1 as usize;
             let lba = a2;
-            let count = (a3 as u32).min(32);
+            if a3 > MAX_STORAGE_BLOCKS_PER_SYSCALL {
+                return -EINVAL;
+            }
+            let count = a3 as u32;
             if count == 0 {
                 return 0;
             }
@@ -1788,25 +1643,13 @@ pub fn dispatch_native_syscall(
         /* =====================================================================
          * Category 10: Process Management & Native Sandbox Security
          * ===================================================================== */
-        SYS_PURPLE_TASK_SPAWN => {
-            if !current_task_has_cap(PURPLE_CAP_MULTI_CORE) {
-                return -EPERM;
-            }
-            let entry_fn = unsafe { core::mem::transmute::<u64, extern "C" fn(*mut u8)>(a1) };
-            let arg = a2 as *mut u8;
-            let prio = TaskPriority::from_u32(a3 as u32);
-            let affinity = if a4 != 0 { a4 } else { !0 };
-
-            match task::spawn_affined("purple_worker", entry_fn, arg, prio, affinity) {
-                Some(tid) => tid as i64,
-                None => -ENOMEM,
-            }
-        }
+        SYS_PURPLE_TASK_SPAWN => -EOPNOTSUPP,
 
         SYS_PURPLE_TASK_KILL => {
             if !current_task_has_cap(PURPLE_CAP_SYS_ADMIN) {
                 return -EPERM;
             }
+            if a1 > u32::MAX as u64 { return -EINVAL; }
             let tid = a1 as u32;
             match task::kill(tid) {
                 Ok(()) => 0,
@@ -1815,6 +1658,7 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_TASK_GET_INFO => {
+            if a1 > u32::MAX as u64 { return -EINVAL; }
             let tid = a1 as u32;
             let s = SCHED.lock();
             for t in s.tasks.iter() {
@@ -1868,10 +1712,10 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_SEC_CAP_DROP => {
-            let drop_mask = a1;
-            if let Some(idx) = task::get_current_task_index() {
-                let mut s = SCHED.lock();
-                s.tasks[idx].cap_mask &= !drop_mask;
+            let cpu_id = task::get_current_cpu();
+            let mut s = SCHED.lock();
+            if let Some(idx) = s.current[cpu_id] {
+                s.tasks[idx].cap_mask &= !a1;
                 0
             } else {
                 -ESRCH
@@ -1879,11 +1723,12 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_SEC_CAP_GET => {
-            if let Some(idx) = task::get_current_task_index() {
-                let s = SCHED.lock();
+            let cpu_id = task::get_current_cpu();
+            let s = SCHED.lock();
+            if let Some(idx) = s.current[cpu_id] {
                 s.tasks[idx].cap_mask as i64
             } else {
-                PURPLE_CAP_ALL as i64
+                -ESRCH
             }
         }
 
@@ -1898,10 +1743,11 @@ pub fn dispatch_native_syscall(
 pub fn run_native_syscall_self_test() -> (usize, usize) {
     serial::println("\n=======================================================");
     serial::println("  Aegis64 / PurpleOS Native System Call Validation Suite");
-    serial::println("  (68 Native Syscalls: GPU, Audio, IPC, SMP, Clocks, Net)");
+    serial::println("  Native syscall subsystem smoke checks");
     serial::println("=======================================================");
 
     let mut passed = 0usize;
+    let mut skipped = 0usize;
     let mut total = 0usize;
 
     // Test 1: Category 1 - Framebuffer & 2D Rasterization
@@ -1922,13 +1768,13 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
 
     // Test 2: Category 2 - Audio DSP & Volume Control
     total += 1;
-    serial::print("[NATIVE TEST 2/10] Audio Capabilities & Mixer Volume Control... ");
+    serial::print("[NATIVE TEST 2/10] Audio capability query and volume state... ");
     let mut audio_caps = PurpleAudioCaps::default();
     let res = dispatch_native_syscall(SYS_PURPLE_AUDIO_GET_CAPS, &raw mut audio_caps as u64, 0, 0, 0, 0, 0);
     let _ = dispatch_native_syscall(SYS_PURPLE_AUDIO_SET_VOLUME, 75, 0, 0, 0, 0, 0);
     let cur_vol = dispatch_native_syscall(SYS_PURPLE_AUDIO_GET_VOLUME, 0, 0, 0, 0, 0, 0);
     if res == 0 && cur_vol == 75 {
-        serial::println("[PASSED] (Volume set/get verified 75%)");
+        serial::println("[PASSED] (Volume state set/get returned 75%)");
         passed += 1;
     } else {
         serial::println("[FAILED: Audio Caps mismatch]");
@@ -1995,7 +1841,7 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     let res = dispatch_native_syscall(SYS_PURPLE_NET_GET_DEV_INFO, &raw mut net_info as u64, 0, 0, 0, 0, 0);
     let mut stats = PurpleNetStats::default();
     let _ = dispatch_native_syscall(SYS_PURPLE_NET_GET_STATS, &raw mut stats as u64, 0, 0, 0, 0, 0);
-    if res == 0 && net_info.mtu == 1500 {
+    if res == 0 && net_info.driver_type != 0 {
         serial::print("[PASSED] (IP: ");
         serial::print_u64(net_info.ip[0] as u64);
         serial::print(".");
@@ -2045,8 +1891,8 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
             serial::println("[FAILED: Storage geometry error]");
         }
     } else {
-        serial::println("[PASSED] (Storage controller ready)");
-        passed += 1;
+        serial::println("[SKIPPED: No storage device detected]");
+        skipped += 1;
     }
 
     // Test 9: Category 9 - Real-Time Input Subsystem (Mouse & Keyboard)
@@ -2055,7 +1901,7 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     let mut m_state = PurpleMouseState::default();
     let res = dispatch_native_syscall(SYS_PURPLE_INPUT_MOUSE_STATE, &raw mut m_state as u64, 0, 0, 0, 0, 0);
     if res == 0 {
-        serial::println("[PASSED] (Mouse and keyboard pollers ready)");
+        serial::println("[PASSED] (Mouse state query returned)");
         passed += 1;
     } else {
         serial::println("[FAILED: Input subsystem error]");
@@ -2068,12 +1914,14 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     let _ = dispatch_native_syscall(SYS_PURPLE_SEC_CAP_DROP, PURPLE_CAP_RAW_STORAGE, 0, 0, 0, 0, 0);
     let dropped_caps = dispatch_native_syscall(SYS_PURPLE_SEC_CAP_GET, 0, 0, 0, 0, 0, 0);
     // Restore capability
-    if let Some(idx) = task::get_current_task_index() {
-        let mut s = SCHED.lock();
-        s.tasks[idx].cap_mask = !0;
+    let cpu_id = task::get_current_cpu();
+    let mut s = SCHED.lock();
+    if let Some(idx) = s.current[cpu_id] {
+        s.tasks[idx].cap_mask = PURPLE_CAP_ALL;
     }
+    drop(s);
     if caps != 0 && (dropped_caps & PURPLE_CAP_RAW_STORAGE as i64) == 0 {
-        serial::println("[PASSED] (Sandbox capability drop verified)");
+        serial::println("[PASSED] (Capability mask drop/get verified)");
         passed += 1;
     } else {
         serial::println("[FAILED: Sandbox capability failure]");
@@ -2084,7 +1932,9 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     serial::print_u64(passed as u64);
     serial::print("/");
     serial::print_u64(total as u64);
-    serial::println(" Subsystem Categories PASSED (100% Conformance)");
+    serial::print(" Subsystem checks passed; skipped: ");
+    serial::print_u64(skipped as u64);
+    serial::println(" (not a conformance result)");
     serial::println("=======================================================\n");
 
     (passed, total)

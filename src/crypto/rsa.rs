@@ -1,9 +1,11 @@
 //! Pure Rust (#![no_std]) RSA-2048 PKCS#1 v1.5 Cryptographic Signature Verifier
 //!
-//! Provides mathematically unbreakable asymmetric public-key signature verification
-//! against 2048-bit RSA keys with public exponent e = 65537 (0x10001) and SHA-256.
+//! Provides RSA-2048 PKCS#1 v1.5 signature verification with public exponent
+//! e = 65537 (0x10001) and SHA-256.
 //!
-//! Zero heap allocations, constant-time comparisons, pure bare-metal Rust.
+//! This implementation uses no heap allocation and is written for bare-metal
+//! Rust. Signature verification processes public inputs; this is not a claim of
+//! constant-time behavior or a guarantee against every implementation attack.
 
 use crate::crypto::sha256;
 

@@ -61,6 +61,18 @@ impl Cursor {
         }
     }
 
+    pub fn bounds(&self) -> Rect {
+        Rect::new(self.x, self.y, CURSOR_WIDTH, CURSOR_HEIGHT)
+    }
+
+    pub fn saved_bounds(&self) -> Rect {
+        if self.is_saved {
+            Rect::new(self.saved_x, self.saved_y, self.saved_w, self.saved_h)
+        } else {
+            Rect::new(0, 0, 0, 0)
+        }
+    }
+
     /// Restore previously saved background underneath cursor
     pub fn restore(&mut self, dst: &mut Surface) {
         if !self.is_saved || !dst.is_valid() || self.saved_w == 0 || self.saved_h == 0 {

@@ -29,9 +29,10 @@ This matrix reflects the current repository state as verified from the GitHub br
 | --- | --- | --- |
 | PurpleFS v2 | Implemented | `src/fs/purplefs_v2.c` |
 | GPT / partition logic | Implemented | `src/fs/gpt.c`, `src/fs/partition_dev.c` |
-| ATA PIO | Implemented | `src/drivers/storage/ata_pio.c` |
-| AHCI | Implemented | `src/drivers/storage/ahci.c` |
-| NVMe | Implemented | `src/drivers/storage/nvme.c` |
+| ATA PIO | Implemented with LBA28 limits | `src/drivers/storage/ata_pio.rs` |
+| AHCI | Unavailable: probing and IDENTIFY are not implemented | `src/drivers/storage/ahci.rs` |
+| NVMe | Unavailable: queue and namespace initialization are not implemented | `src/drivers/storage/nvme.rs` |
+| USB MSC and SD block I/O | Unavailable | Drivers do not perform real media I/O and are not registered |
 | PurpleFS v3 design | Missing / blocked | `docs/PURPLEFS_DESIGN.md` is v2, not v3 |
 | Bootable-image architecture plan | Missing / blocked | not found in `docs/` |
 

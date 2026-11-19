@@ -14,28 +14,12 @@ pub struct PurpleFsV3<'a> {
 }
 
 impl<'a> PurpleFsV3<'a> {
-    pub fn mount(dev: &'a mut dyn BlockDevice, start_lba: u64, sector_count: u64) -> Result<Self, &'static str> {
-        let mut sb = [0u8; 512];
-        if dev.read_blocks(start_lba, 1, &mut sb) != 0 {
-            return Err("Failed to read superblock");
-        }
-
-        let mut label = [0u8; 32];
-        label.copy_from_slice(&sb[0x70..0x70 + 32]);
-
-        let sb_total = u32::from_le_bytes(sb[24..28].try_into().unwrap_or([0; 4])) as u64;
-        let sb_free = u32::from_le_bytes(sb[28..32].try_into().unwrap_or([0; 4])) as u64;
-        let total = if sector_count >= 8 { sector_count / 8 } else { sb_total };
-        let free = if sb_free > 0 { sb_free } else { total };
-
-        Ok(Self {
-            dev,
-            start_lba,
-            sector_count,
-            volume_label: label,
-            total_blocks: total,
-            free_blocks: free,
-        })
+    pub fn mount(
+        _dev: &'a mut dyn BlockDevice,
+        _start_lba: u64,
+        _sector_count: u64,
+    ) -> Result<Self, &'static str> {
+        Err("PurpleFS v3 has no implemented mount format")
     }
 
     pub fn read_fs_block(&mut self, block_idx: u64, buf: &mut [u8; 4096]) -> Result<(), &'static str> {

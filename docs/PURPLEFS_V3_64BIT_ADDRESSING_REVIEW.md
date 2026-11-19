@@ -2,7 +2,7 @@
 
 **Document:** `docs/PURPLEFS_V3_64BIT_ADDRESSING_REVIEW.md`  
 **Classification:** Technical Architecture Review & Verification Report (Planning Only)  
-**Target Repository:** `/home/saptanshu-ganguly/OS`  
+**Target Repository:** `<repository-root>`
 **Target Branch:** `Aegis_Purple`  
 **Revision Date:** 2026-10-22  
 **Status:** COMPLETE — FINAL REVISED SPECIFICATION — AWAITING HUMAN REVIEW (Zero implementation code modified)

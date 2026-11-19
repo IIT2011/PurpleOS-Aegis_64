@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 """
 APDRV v3 Native Module Package Builder for Purple OS / Aegis64.
-Constructs valid, non-simulated APDRV100 v3 binary packages with authentic
-x86-64 machine code, relocation tables, and hardware probe routines.
+Constructs APDRV100 v3 package fixtures with demo x86-64 entrypoints and
+relocation tables. These packages are signed only when an external key is supplied;
+the generated entrypoints are not production hardware drivers.
 """
 
 import struct
 import sys
 import os
+import subprocess
+import zlib
 
 HEADER_FMT = "<8sII8s32s64s32s" + ("I" * 18) + "HHIII"
 HEADER_SIZE = struct.calcsize(HEADER_FMT) # 240 bytes
+CHECKSUM_OFFSET = 232
 
 RELOC_FMT = "<IIIq" # offset: uint32, type: uint32, sym_index: uint32, addend: int64 (20 bytes)
 RELOC_SIZE = struct.calcsize(RELOC_FMT)
 
 SYM_FMT = "<32sQ" # name: 32s, address: uint64 (40 bytes)
 SYM_SIZE = struct.calcsize(SYM_FMT)
+SIGNING_KEY = None
 
 def assemble_text(vendor, device):
     """
@@ -77,7 +82,10 @@ def assemble_text(vendor, device):
 
     return text
 
-def build_module(filename, name, desc, author, vendor, device, imports):
+def build_module(filename, name, desc, author, vendor, device, imports, signing_key=None):
+    if signing_key is None:
+        signing_key = SIGNING_KEY
+
     # Align helper
     def align4k(val):
         return (val + 4095) & ~4095
@@ -142,17 +150,32 @@ def build_module(filename, name, desc, author, vendor, device, imports):
         reloc_offset, reloc_count,
         import_offset, import_count,
         0, 0,                  # exports
-        0,                     # entry_init (offset 0)
+        0,                     # entry_init (offset 0 is a valid text entry point)
         4,                     # entry_fini (offset 4)
         8,                     # entry_probe (offset 8)
         32,                    # entry_ioctl (offset 32)
         vendor, device,
         0x0001 | 0x0002,       # flags (ENFORCE_WX | AUTO_PROBE)
-        0,                     # checksum
+        0,                     # CRC-32 is written after assembling the payload
         0                      # reserved
     )
 
-    full_binary = hdr + import_bytes + relocs + text_code + rodata + data
+    full_binary = bytearray(hdr + import_bytes + relocs + text_code + rodata + data)
+    checksum = zlib.crc32(full_binary) & 0xFFFFFFFF
+    struct.pack_into("<I", full_binary, CHECKSUM_OFFSET, checksum)
+    full_binary = bytes(full_binary)
+    if signing_key:
+        signed = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-sign", signing_key],
+            input=full_binary,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        signature_hex = signed.stdout.hex().encode("ascii")
+        if len(signature_hex) != 512:
+            raise ValueError("Signing key must produce an RSA-2048 signature")
+        full_binary += signature_hex
 
     os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
     with open(filename, "wb") as f:
@@ -161,9 +184,23 @@ def build_module(filename, name, desc, author, vendor, device, imports):
     print(f"[OK] Generated APDRV module: {filename} ({len(full_binary)} bytes)")
 
 def main():
+    global SIGNING_KEY
     out_dir = "build/drivers_apdrv"
-    if len(sys.argv) > 1:
-        out_dir = sys.argv[1]
+    signing_key = None
+    args = iter(sys.argv[1:])
+    for arg in args:
+        if arg == "--signing-key":
+            try:
+                signing_key = next(args)
+            except StopIteration as exc:
+                raise SystemExit("--signing-key requires a private-key path") from exc
+        elif arg.startswith("-"):
+            raise SystemExit(f"unknown option: {arg}")
+        else:
+            out_dir = arg
+    SIGNING_KEY = signing_key
+    if not signing_key:
+        print("[WARN] No signing key supplied; generated unsigned modules will be rejected by the kernel.")
 
     # =========================================================================
     # CORE UNIFIED HARDWARE DRIVER CATEGORIES
@@ -176,7 +213,7 @@ def main():
         "Unified CPU, SMP Multi-Core & APIC Subsystem",
         "Purple OS Hardware Group",
         0x0000, 0x0000,
-        ["kinfo", "smp_core_count"]
+        ["kinfo", "smp_core_count"], signing_key
     )
 
     # 2. ram.apdrv (Unified Memory Management Subsystem: PMM, VMM, Heap)
@@ -186,7 +223,7 @@ def main():
         "Unified Memory Management Driver (PMM, VMM, Dynamic Heap)",
         "Purple OS Hardware Group",
         0x0000, 0x0000,
-        ["kinfo", "pmm_stats"]
+        ["kinfo", "pmm_stats"], signing_key
     )
 
     # 3. gpu.apdrv (Unified GPU Driver Stack: Bochs VBE 2D, igd, radeongd, nvgd 3D)
@@ -196,7 +233,7 @@ def main():
         "Unified GPU Driver Stack (Bochs VBE 2D, igd, radeongd, nvgd 3D)",
         "Purple OS Hardware Group",
         0x1234, 0x1111,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # 4. storage.apdrv (Unified AHCI / NVMe / ATA / SD Block Storage Stack)
@@ -206,7 +243,7 @@ def main():
         "Unified Block Storage Driver (AHCI SATA, NVMe, ATA, SDXC)",
         "Purple OS Hardware Group",
         0x8086, 0x2922,
-        ["kinfo", "block_dev_register"]
+        ["kinfo", "block_dev_register"], signing_key
     )
 
     # 5. network.apdrv (Unified Intel E1000 / Realtek RTL8139 / TCP-IP Network Driver)
@@ -216,7 +253,7 @@ def main():
         "Unified Network Driver (Intel E1000, RTL8139, TCP/IP L2)",
         "Purple OS Hardware Group",
         0x8086, 0x100E,
-        ["kinfo", "netdev_register", "pci_enable_bus_mastering"]
+        ["kinfo", "netdev_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # 6. audio.apdrv (Unified Intel HD Audio & AC97 Sound Pipeline)
@@ -226,7 +263,7 @@ def main():
         "Unified HD Audio Driver and PCM Streaming Pipeline",
         "Purple OS Hardware Group",
         0x8086, 0x2668,
-        ["kinfo", "audio_dump_devices"]
+        ["kinfo", "audio_dump_devices"], signing_key
     )
 
     # 7. usb.apdrv (Unified xHCI / EHCI USB Host Controller Driver)
@@ -236,7 +273,7 @@ def main():
         "Unified USB 3.0 / 2.0 Host Controller Subsystem",
         "Purple OS Hardware Group",
         0x1B36, 0x000D,
-        ["kinfo", "usb_dump_controllers"]
+        ["kinfo", "usb_dump_controllers"], signing_key
     )
 
     # 8. input.apdrv (Unified PS/2 & USB HID Keyboard and Mouse Driver)
@@ -270,7 +307,7 @@ def main():
         "Intel 82540EM PCIe Gigabit Ethernet Driver",
         "Purple OS Hardware Group",
         0x8086, 0x100E,
-        ["kinfo", "netdev_register", "pci_enable_bus_mastering"]
+        ["kinfo", "netdev_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # r8139.apdrv (Realtek RTL8139 Fast Ethernet NIC)
@@ -280,7 +317,7 @@ def main():
         "Realtek RTL8139 Fast Ethernet Controller Driver",
         "Purple OS Hardware Group",
         0x10EC, 0x8139,
-        ["kinfo", "netdev_register", "pci_enable_bus_mastering"]
+        ["kinfo", "netdev_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # xhci.apdrv (Extensible Host Controller Interface USB 3.0)
@@ -290,7 +327,7 @@ def main():
         "Extensible Host Controller Interface (USB 3.0)",
         "Purple OS Hardware Group",
         0xFFFF, 0xFFFF,
-        ["kinfo", "usb_dump_controllers"]
+        ["kinfo", "usb_dump_controllers"], signing_key
     )
 
     # hdaudio.apdrv (Intel High Definition Audio Controller)
@@ -300,7 +337,7 @@ def main():
         "Intel High Definition Audio Controller",
         "Purple OS Hardware Group",
         0x8086, 0x2668,
-        ["kinfo", "audio_dump_devices"]
+        ["kinfo", "audio_dump_devices"], signing_key
     )
 
     # Legacy & sub-driver aliases
@@ -310,7 +347,7 @@ def main():
         "Bochs / QEMU DRM VBE Framebuffer Video Accelerator",
         "Purple OS Hardware Group",
         0x1234, 0x1111,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # 10. igd.apdrv (Intel Graphics Driver - Hardware Accelerator)
@@ -320,7 +357,7 @@ def main():
         "Intel Graphics Driver (igd) Gen9/Gen11 Ring Buffer Accelerator (Ref: i915 specs)",
         "Purple OS Hardware Group",
         0x8086, 0x5912,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
     # Also write legacy alias gpu-intel.apdrv
     build_module(
@@ -329,7 +366,7 @@ def main():
         "Intel Graphics Driver (igd) Gen9/Gen11 Ring Buffer Accelerator (Ref: i915 specs)",
         "Purple OS Hardware Group",
         0x8086, 0x5912,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # 11. radeongd.apdrv (AMD Radeon Graphics Driver - Hardware Accelerator)
@@ -339,7 +376,7 @@ def main():
         "AMD Radeon Graphics Driver (radeongd) PM4 3D Command Processor (Ref: amdgpu specs)",
         "Purple OS Hardware Group",
         0x1002, 0x67DF,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
     # Also write legacy alias gpu-amd.apdrv
     build_module(
@@ -348,7 +385,7 @@ def main():
         "AMD Radeon Graphics Driver (radeongd) PM4 3D Command Processor (Ref: amdgpu specs)",
         "Purple OS Hardware Group",
         0x1002, 0x67DF,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # 12. nvgd.apdrv (NVIDIA Graphics Driver - Daily 3D Accelerator)
@@ -358,7 +395,7 @@ def main():
         "NVIDIA Graphics Driver (nvgd) FIFO 3D Accelerator (Daily 3D Accel - Ref: nouveau specs)",
         "Purple OS Hardware Group",
         0x10DE, 0x1B80,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
     # Also write legacy alias gpu-nvidia.apdrv
     build_module(
@@ -367,7 +404,7 @@ def main():
         "NVIDIA Graphics Driver (nvgd) FIFO 3D Accelerator (Daily 3D Accel - Ref: nouveau specs)",
         "Purple OS Hardware Group",
         0x10DE, 0x1B80,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # 13. wifi.apdrv (802.11 Wireless Network Adapter Driver Family)
@@ -387,7 +424,7 @@ def main():
         "Bluetooth HCI USB / UART Controller Driver",
         "Purple OS Hardware Group",
         0x8087, 0x07DA,
-        ["kinfo", "usb_dump_controllers"]
+        ["kinfo", "usb_dump_controllers"], signing_key
     )
 
     # 15. camera.apdrv (UVC USB Video Class Driver)
@@ -397,7 +434,7 @@ def main():
         "USB Video Class (UVC) Camera Subsystem Driver",
         "Purple OS Hardware Group",
         0xFFFF, 0xFFFF,
-        ["kinfo", "usb_dump_controllers"]
+        ["kinfo", "usb_dump_controllers"], signing_key
     )
 
     # 16. Graphics.apdrv (Unified Graphics Driver Package)
@@ -407,7 +444,7 @@ def main():
         "Unified Hardware Graphics and Compositor Accelerator",
         "Purple OS Hardware Group",
         0x8086, 0x1912,
-        ["kinfo", "gpu_register", "pci_enable_bus_mastering"]
+        ["kinfo", "gpu_register", "pci_enable_bus_mastering"], signing_key
     )
 
     # 17. purplefs.apdrv (PurpleFS v2/v3 Native Journaled Filesystem Driver)

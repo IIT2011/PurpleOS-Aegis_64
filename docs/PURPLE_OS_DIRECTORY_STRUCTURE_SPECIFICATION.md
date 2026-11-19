@@ -14,7 +14,7 @@ Purple OS establishes a secure, human-readable, single-root hierarchical directo
 ### Fundamental Rules:
 1. **Core Applications:** All built-in system applications reside strictly in `/System/Applications/`.
 2. **Prohibited Path:** `/System/Kernel/Applications/` is **strictly prohibited and must not exist**. The kernel core is isolated in `/System/Kernel/` and does not house application packages.
-3. **User-Installed Applications:** Third-party and user-installed applications reside strictly in `/System/Users/<user>/Applications/` (e.g. `/System/Users/aegis/Applications/`).
+3. **User-Installed Applications:** Third-party and user-installed applications reside strictly in `/System/Users/<user>/Applications/`.
 4. **Subsystem Drivers:** All `.apdrv` driver modules reside in `/System/Drivers/`.
 
 ---

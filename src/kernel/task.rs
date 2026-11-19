@@ -104,7 +104,7 @@ impl Task {
             sig_pending: 0,
             sig_mask: 0,
             sig_handlers: [0; 64],
-            cap_mask: !0,
+            cap_mask: 0,
         }
     }
 }
@@ -168,6 +168,7 @@ pub fn init() {
     t.ticks_remaining = 10;
     t.cpu_affinity = 1;
     t.last_cpu = 0;
+    t.cap_mask = crate::kernel::purple_abi::PURPLE_CAP_ALL;
     s.current[0] = Some(main_idx);
     drop(s);
 
@@ -201,6 +202,7 @@ pub fn init_ap(cpu_id: usize) {
         t.name = name;
         t.state = TaskState::Running;
         t.priority = TaskPriority::Idle;
+        t.cap_mask = crate::kernel::purple_abi::PURPLE_CAP_ALL;
         t.cpu_affinity = 1 << cpu_id;
         t.last_cpu = cpu_id as u32;
         s.current[cpu_id] = Some(idx);
@@ -212,7 +214,11 @@ pub(crate) fn alloc_task_slot(s: &mut SchedState) -> Option<usize> {
         if s.tasks[i].state == TaskState::Unused {
             return Some(i);
         } else if s.tasks[i].state == TaskState::Terminated {
-            // Safely reclaim terminated task's stack frames now that it has completely stopped running
+            // A task killed from another CPU can remain on its old stack until
+            // that CPU switches away. Never reclaim resources while it's current.
+            if s.current.iter().any(|current| *current == Some(i)) {
+                continue;
+            }
             if s.tasks[i].stack_base != 0 {
                 let _ = free_frames(s.tasks[i].stack_base as usize, 4);
                 s.tasks[i].stack_base = 0;
@@ -237,7 +243,15 @@ pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8
     let stack_top = stack_phys + TASK_STACK_SIZE;
 
     let mut s = SCHED.lock();
-    let idx = alloc_task_slot(&mut s)?;
+    let idx = match alloc_task_slot(&mut s) {
+        Some(idx) => idx,
+        None => {
+            drop(s);
+            let _ = free_frames(stack_phys, 4);
+            return None;
+        }
+    };
+    s.tasks[idx] = Task::empty();
 
     let tid = s.next_id;
     s.next_id += 1;
@@ -262,6 +276,7 @@ pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8
     t.ticks_remaining = t.time_slice_ticks;
     t.cpu_affinity = affinity;
     t.is_user = false;
+    t.cap_mask = crate::kernel::purple_abi::PURPLE_CAP_ALL;
 
     // Setup initial kernel stack frame for switch_context:
     // [stack layout for task_trampoline]: entry function pointer, arg pointer
@@ -329,16 +344,35 @@ pub fn spawn_user_program(
     if code.is_empty() {
         return None;
     }
+    let code_len = u64::try_from(code.len()).ok()?;
+    let user_stack_bottom = USER_STACK_TOP.checked_sub((USER_STACK_PAGES * 4096) as u64)?;
+    let max_code_len = user_stack_bottom.checked_sub(USER_CODE_BASE)?;
+    if code_len > max_code_len {
+        return None;
+    }
+    let code_pages = code.len().checked_add(4095)?.checked_div(4096)?;
 
     let kernel_stack_phys = alloc_frames(4)?;
     let kernel_stack_top = kernel_stack_phys + TASK_STACK_SIZE;
 
-    let pml4 = crate::mm::vmm::create_pml4()?;
+    let pml4 = match crate::mm::vmm::create_pml4() {
+        Some(pml4) => pml4,
+        None => {
+            let _ = free_frames(kernel_stack_phys, 4);
+            return None;
+        }
+    };
 
     // Map user code pages
-    let code_pages = (code.len() + 4095) / 4096;
     for i in 0..code_pages {
-        let code_frame = alloc_frames(1)?;
+        let code_frame = match alloc_frames(1) {
+            Some(frame) => frame,
+            None => {
+                crate::mm::vmm::destroy_pml4(pml4);
+                let _ = free_frames(kernel_stack_phys, 4);
+                return None;
+            }
+        };
         let frame_ptr = code_frame as *mut u8;
         unsafe {
             frame_ptr.write_bytes(0, 4096);
@@ -351,8 +385,9 @@ pub fn spawn_user_program(
             pml4,
             vaddr,
             code_frame as u64,
-            crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_WRITABLE,
+            crate::mm::vmm::PAGE_USER,
         ) {
+            let _ = free_frames(code_frame, 1);
             crate::mm::vmm::destroy_pml4(pml4);
             let _ = free_frames(kernel_stack_phys, 4);
             return None;
@@ -361,7 +396,14 @@ pub fn spawn_user_program(
 
     // Map user stack pages
     for i in 0..USER_STACK_PAGES {
-        let stack_frame = alloc_frames(1)?;
+        let stack_frame = match alloc_frames(1) {
+            Some(frame) => frame,
+            None => {
+                crate::mm::vmm::destroy_pml4(pml4);
+                let _ = free_frames(kernel_stack_phys, 4);
+                return None;
+            }
+        };
         unsafe {
             (stack_frame as *mut u8).write_bytes(0, 4096);
         }
@@ -370,8 +412,9 @@ pub fn spawn_user_program(
             pml4,
             vaddr,
             stack_frame as u64,
-            crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_WRITABLE,
+            crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_WRITABLE | crate::mm::vmm::PAGE_NO_EXECUTE,
         ) {
+            let _ = free_frames(stack_frame, 1);
             crate::mm::vmm::destroy_pml4(pml4);
             let _ = free_frames(kernel_stack_phys, 4);
             return None;
@@ -379,7 +422,16 @@ pub fn spawn_user_program(
     }
 
     let mut s = SCHED.lock();
-    let idx = alloc_task_slot(&mut s)?;
+    let idx = match alloc_task_slot(&mut s) {
+        Some(idx) => idx,
+        None => {
+            drop(s);
+            crate::mm::vmm::destroy_pml4(pml4);
+            let _ = free_frames(kernel_stack_phys, 4);
+            return None;
+        }
+    };
+    s.tasks[idx] = Task::empty();
 
     let tid = s.next_id;
     s.next_id += 1;
@@ -404,6 +456,7 @@ pub fn spawn_user_program(
     t.ticks_remaining = t.time_slice_ticks;
     t.cpu_affinity = 1 << get_current_cpu();
     t.is_user = true;
+    t.cap_mask = 0;
     t.cr3 = pml4 as u64;
 
     let user_rsp = USER_STACK_TOP - 16;

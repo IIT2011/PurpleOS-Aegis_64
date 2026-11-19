@@ -20,7 +20,8 @@ impl CompositorPipeline {
         target: &mut Surface,
         windows: &[Option<Window>],
         cursor: &mut Cursor,
-        frame_count: u64,
+        animation_tick: u64,
+        dock_lift: &[u8; super::desktop::DOCK_NUM_ICONS],
     ) {
         if !target.is_valid() {
             return;
@@ -33,7 +34,7 @@ impl CompositorPipeline {
         Self::render_windows(target, windows);
 
         // Pass 3: Desktop Shell Layers (Purple Bar & Purple Dock with mirror reflection)
-        super::desktop::render_desktop_shell(target, windows, frame_count);
+        super::desktop::render_desktop_shell(target, animation_tick, dock_lift);
 
         // Pass 4: Render Cursor Overlay on Top
         cursor.draw(target);
@@ -41,10 +42,10 @@ impl CompositorPipeline {
 
     /// Sort and render visible windows in ascending Z-order
     fn render_windows(target: &mut Surface, windows: &[Option<Window>]) {
-        let mut indices: [usize; 16] = [0; 16];
+        let mut indices = [0; super::window::MAX_WINDOWS];
         let mut count = 0;
 
-        for (i, win_opt) in windows.iter().enumerate() {
+        for (i, win_opt) in windows.iter().take(indices.len()).enumerate() {
             if let Some(win) = win_opt {
                 if win.is_visible && !win.is_minimized {
                     indices[count] = i;

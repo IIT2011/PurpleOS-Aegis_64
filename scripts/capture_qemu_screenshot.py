@@ -14,6 +14,8 @@ import json
 import time
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 def ppm_to_png(ppm_path, png_path):
     with open(ppm_path, "rb") as f:
@@ -125,8 +127,9 @@ def main():
     print("QMP Connected. Waiting for kernel boot & compositor initialization (3.5s)...")
     time.sleep(3.5)
 
-    ppm_boot = "/data/data/com.termux/files/usr/tmp/qemu_screen_boot.ppm"
-    ppm_windows = "/data/data/com.termux/files/usr/tmp/qemu_screen_windows.ppm"
+    temp_dir = tempfile.gettempdir()
+    ppm_boot = os.path.join(temp_dir, "qemu_screen_boot.ppm")
+    ppm_windows = os.path.join(temp_dir, "qemu_screen_windows.ppm")
 
     # Refresh compositor frame with latest hardware timer state
     proc.stdin.write("compositor render\n")
@@ -158,7 +161,9 @@ def main():
     f.flush()
     proc.wait(timeout=3)
 
-    out_dir = "/data/data/com.termux/files/home/.gemini/antigravity-cli/brain/352e5877-a9d7-49e4-ab09-5d00ef99fd0a"
+    repository_root = Path(__file__).resolve().parents[1]
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else str(repository_root / "build" / "screenshots")
+    os.makedirs(out_dir, exist_ok=True)
     png_boot = os.path.join(out_dir, "purple_desktop_actual_boot.png")
     png_bar_dock = os.path.join(out_dir, "purple_bar_and_purple_dock.png")
     png_windows = os.path.join(out_dir, "purple_desktop_actual_windows.png")
@@ -175,8 +180,8 @@ def main():
         except: pass
 
     # Also copy to phone internal storage
-    phone_dir = "/sdcard/Pictures/Purple_Desktop_UI"
-    if os.path.exists(phone_dir):
+    phone_dir = os.environ.get("PURPLEOS_SCREENSHOT_PHONE_DIR")
+    if phone_dir and os.path.exists(phone_dir):
         import shutil
         if os.path.exists(png_boot):
             dst = os.path.join(phone_dir, "Purple_Desktop_Actual_Boot.png")

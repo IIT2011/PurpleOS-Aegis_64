@@ -15,7 +15,7 @@ pub struct IcmpEcho {
 
 impl IcmpEcho {
     pub fn parse(data: &[u8]) -> Option<(Self, &[u8])> {
-        if data.len() < ICMP_HEADER_LEN {
+        if data.len() < ICMP_HEADER_LEN || crate::net::ipv4::compute_checksum(data) != 0 {
             return None;
         }
         let msg_type = data[0];

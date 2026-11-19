@@ -46,8 +46,8 @@
 | **POS-021** | `nanosleep` | IEEE Std 1003.1-2024 §nanosleep | Fully Compliant | `src/kernel/posix.rs:1268`, `src/kernel/syscall.rs:448` | High-precision sleep derived from APIC/PIT hardware ticks; validates bounds (`tv_nsec < 1_000_000_000`). | `EINVAL`, `EFAULT`, `EINTR` | `TEST-8` |
 | **POS-022** | `getpid` | IEEE Std 1003.1-2024 §getpid | Fully Compliant | `src/kernel/posix.rs:1278`, `src/kernel/syscall.rs:462` | Retrieves unique process identifier of current task. | None | `TEST-9` |
 | **POS-023** | `getppid` | IEEE Std 1003.1-2024 §getppid | Fully Compliant | `src/kernel/posix.rs:1285`, `src/kernel/syscall.rs:564` | Retrieves parent process identifier. | None | `TEST-9` |
-| **POS-024** | `fork` | IEEE Std 1003.1-2024 §fork | Fully Compliant | `src/kernel/posix.rs:1016`, `src/kernel/syscall.rs:465` | Duplicates task context; clones user address space pages into fresh PML4; inherits descriptor table with incremented reference counts; returns 0 to child, PID to parent. | `ENOMEM`, `EAGAIN` | `TEST-9` |
-| **POS-025** | `execve` | IEEE Std 1003.1-2024 §execve | Fully Compliant | `src/kernel/posix.rs:1072`, `src/kernel/syscall.rs:473` | Validates ELF64 binary header; replaces address space with fresh PML4; maps PT_LOAD segments; initializes ABI user stack; closes `FD_CLOEXEC` descriptors. | `ENOENT`, `ENOEXEC`, `ENOMEM`, `EFAULT` | `TEST-9` |
+| **POS-024** | `fork` | IEEE Std 1003.1-2024 §fork | Not implemented | `src/kernel/posix.rs`, `src/kernel/syscall.rs` | Returns `ENOSYS` because the kernel cannot resume a child with a cloned user register frame. | `ENOSYS` | None |
+| **POS-025** | `execve` | IEEE Std 1003.1-2024 §execve | Not implemented | `src/kernel/posix.rs`, `src/kernel/syscall.rs` | Returns `ENOSYS`; ELF segments, arguments, environment, stack, and user-mode transfer are not implemented. | `ENOSYS` | None |
 | **POS-026** | `exit` | IEEE Std 1003.1-2024 §_Exit | Fully Compliant | `src/kernel/task.rs:322`, `src/kernel/syscall.rs:491` | Transitions task state to `Terminated` / zombie; stores exit status; closes all open descriptors; triggers parent notification. | None | `TEST-9` |
 | **POS-027** | `wait4` | IEEE Std 1003.1-2024 §waitpid | Fully Compliant | `src/kernel/posix.rs:1100`, `src/kernel/syscall.rs:496` | Waits for child process termination; copies exit status via `copy_to_user`; reclaims child PML4, stack, and PCB resources; supports `WNOHANG`. | `ECHILD`, `EINTR`, `EFAULT` | `TEST-9` |
 | **POS-028** | `kill` | IEEE Std 1003.1-2024 §kill | Fully Compliant | `src/kernel/posix.rs:1132`, `src/kernel/syscall.rs:506` | Signal delivery: `sig == 0` probes existence; `SIGKILL/SIGTERM` terminates target; other signals set pending mask. | `ESRCH`, `EINVAL` | `TEST-9` |
@@ -132,7 +132,7 @@ Automated execution via `python scripts/test_qemu_posix.py` confirms 100% pass a
 [POSIX TEST 10/12] Signal Management (rt_sigaction / rt_sigprocmask)... [PASSED]
 [POSIX TEST 11/12] Directory & Path Operations (getcwd / chdir / access)... [PASSED]
 [POSIX TEST 12/12] User Memory Safety (rejection of null/kernel/unmapped)... [PASSED]
->>> ALL 12 POSIX SUBSYSTEM VALIDATION TESTS PASSED (100% PURE RUST)! <<<
+POSIX self-test sequence complete; review each result above. fork and execve currently return ENOSYS.
 
 >>> ALL POSIX.1-2024 COMPLIANCE SUITE TESTS PASSED 100%! <<<
 ```

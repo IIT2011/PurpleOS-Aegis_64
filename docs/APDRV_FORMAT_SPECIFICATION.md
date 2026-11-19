@@ -35,16 +35,18 @@ An `.apdrv` v3 file is a contiguous binary file consisting of a fixed 240-byte h
 |            .rodata Section (Read-Only Data & Strings)     |
 +-----------------------------------------------------------+ data_offset
 |            .data Section (Initialized Writable Data)      |
-+-----------------------------------------------------------+ [EOF]
++-----------------------------------------------------------+
 |   (.bss Section is allocated in memory; 0 bytes in file)  |
 +-----------------------------------------------------------+
+| 512 ASCII hex bytes: RSA-2048 PKCS#1 v1.5 SHA-256 signature|
++-----------------------------------------------------------+ [EOF]
 ```
 
 ---
 
 ## 3. Header Specification (`ApdrvHeader`)
 
-The header occupies exactly **240 bytes** (`0xF0`) and is packed with no internal compiler padding:
+The header occupies exactly **240 bytes** (`0xF0`) and is packed with no internal compiler padding. The `checksum` field contains CRC-32/ISO-HDLC of the package payload with the checksum field set to zero. A package ends with exactly 512 ASCII hexadecimal bytes containing an RSA-2048 PKCS#1 v1.5 SHA-256 signature over every preceding package byte, including the populated checksum, header, and tables. The kernel rejects packages without a valid trailer. Build signed packages with `scripts/build_apdrv.py <output-dir> --signing-key <private-key-path>`; keep the private key outside the repository. Unsigned output from the builder is for inspection only and cannot be loaded.
 
 ```rust
 #[repr(C, packed)]
@@ -82,12 +84,13 @@ pub struct ApdrvHeader {
     pub entry_fini: u32,           // 0xD4: extern "C" fn() -> i32
     pub entry_probe: u32,          // 0xD8: extern "C" fn(vendor: u32, device: u32) -> i32
     pub entry_ioctl: u32,          // 0xDC: extern "C" fn(cmd: u32, arg: *mut u8) -> i32
+    // Entry offsets are relative to .text; 0 is valid. Use 0xFFFFFFFF when absent.
 
     /* Hardware PCI Matcher (0xFFFF = wildcard / all devices) */
     pub target_vendor: u16,        // 0xE0: Target PCI Vendor ID (e.g. 0x8086)
     pub target_device: u16,        // 0xE2: Target PCI Device ID (e.g. 0x100E)
     pub flags: u32,                // 0xE4: APDRV_FLAG_*
-    pub checksum: u32,             // 0xE8: Fletcher-32 or CRC32 checksum
+    pub checksum: u32,             // 0xE8: CRC-32/ISO-HDLC over signed payload with this field zeroed
     pub reserved: u32,             // 0xEC: Alignment padding to 240 bytes
 }
 ```

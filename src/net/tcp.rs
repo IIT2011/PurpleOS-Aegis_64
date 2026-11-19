@@ -35,7 +35,7 @@ impl TcpHeader {
         let urgent_ptr = u16::from_be_bytes([data[18], data[19]]);
 
         let header_len = ((data_offset_flags >> 12) as usize) * 4;
-        if data.len() < header_len || header_len < TCP_HEADER_MIN_LEN {
+        if header_len < TCP_HEADER_MIN_LEN || header_len > data.len() {
             return None;
         }
 
@@ -55,7 +55,9 @@ impl TcpHeader {
     }
 
     pub fn write_to(&self, out: &mut [u8]) -> usize {
-        if out.len() < TCP_HEADER_MIN_LEN {
+        if out.len() < TCP_HEADER_MIN_LEN
+            || (self.data_offset_flags >> 12) as usize != TCP_HEADER_MIN_LEN / 4
+        {
             return 0;
         }
         out[0..2].copy_from_slice(&self.src_port.to_be_bytes());

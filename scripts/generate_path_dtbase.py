@@ -8,6 +8,7 @@ and system scripts can frequently configure and extend search directories.
 
 import sys
 import os
+from pathlib import Path
 
 DEFAULT_PATHS = [
     "/System/Applications",
@@ -15,7 +16,6 @@ DEFAULT_PATHS = [
     "/System/CLI/scripts",
     "/System/Drivers",
     "/System/Frameworks",
-    "/System/Users/aegis/Applications",
     "/tmp",
     "/",
 ]
@@ -34,7 +34,7 @@ def generate_path_dtbase():
     return "\n".join(lines).encode("utf-8")
 
 if __name__ == "__main__":
-    out_path = sys.argv[1] if len(sys.argv) > 1 else "OS/build/path.dtbase"
+    out_path = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parents[1] / "build" / "path.dtbase")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     content = generate_path_dtbase()
     with open(out_path, "wb") as f:

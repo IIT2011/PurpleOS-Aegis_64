@@ -17,10 +17,6 @@ def main():
         subprocess.check_call([sys.executable, "build/mkpfs2_disk", disk_path])
 
     qemu_bin = os.environ.get("QEMU_BIN", "qemu-system-x86_64")
-    if not os.path.exists(qemu_bin) and sys.platform == "win32":
-        win_path = r"D:\OS Development\Dev Tools\qemu\qemu-system-x86_64.exe"
-        if os.path.exists(win_path):
-            qemu_bin = win_path
     qmp_port = 4455
     cmd = [
         qemu_bin,

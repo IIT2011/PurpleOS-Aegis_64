@@ -1,6 +1,9 @@
 //! Internet Protocol Version 4 (IPv4)
 
 pub const IPV4_HEADER_MIN_LEN: usize = 20;
+pub const IPV4_VERSION: u8 = 4;
+pub const IPV4_VERSION_IHL_MIN: u8 = 0x45;
+pub const IPV4_FRAGMENT_MASK: u16 = 0x3FFF;
 pub const IP_PROTO_ICMP: u8 = 1;
 pub const IP_PROTO_TCP: u8 = 6;
 pub const IP_PROTO_UDP: u8 = 17;
@@ -25,8 +28,9 @@ impl Ipv4Header {
             return None;
         }
         let version_ihl = data[0];
+        let version = version_ihl >> 4;
         let ihl = (version_ihl & 0x0F) as usize * 4;
-        if data.len() < ihl || ihl < IPV4_HEADER_MIN_LEN {
+        if version != IPV4_VERSION || ihl < IPV4_HEADER_MIN_LEN || data.len() < ihl {
             return None;
         }
 
@@ -37,13 +41,20 @@ impl Ipv4Header {
         let ttl = data[8];
         let protocol = data[9];
         let checksum = u16::from_be_bytes([data[10], data[11]]);
+        if (total_len as usize) < ihl || total_len as usize > data.len()
+            || flags_frag & IPV4_FRAGMENT_MASK != 0
+            || flags_frag & 0x8000 != 0
+            || compute_checksum(&data[..ihl]) != 0
+        {
+            return None;
+        }
 
         let mut src_ip = [0u8; 4];
         let mut dst_ip = [0u8; 4];
         src_ip.copy_from_slice(&data[12..16]);
         dst_ip.copy_from_slice(&data[16..20]);
 
-        let payload_len = (total_len as usize).saturating_sub(ihl).min(data.len() - ihl);
+        let payload_len = total_len as usize - ihl;
         Some((
             Self {
                 version_ihl,
@@ -62,7 +73,11 @@ impl Ipv4Header {
     }
 
     pub fn write_to(&self, out: &mut [u8]) -> usize {
-        if out.len() < IPV4_HEADER_MIN_LEN {
+        if out.len() < IPV4_HEADER_MIN_LEN
+            || self.version_ihl >> 4 != IPV4_VERSION
+            || (self.version_ihl & 0x0F) as usize * 4 != IPV4_HEADER_MIN_LEN
+            || (self.total_len as usize) < IPV4_HEADER_MIN_LEN
+        {
             return 0;
         }
         out[0] = self.version_ihl;

@@ -16,7 +16,7 @@ import os
 
 def main():
     print("=== Launching Aegis64 Systemwide Font Integration Test ===")
-    disk_path = "build/purple_gpt.img"
+    disk_path = os.environ.get("PURPLEOS_TEST_DISK", "build/purple_gpt.img")
     if not os.path.exists(disk_path):
         subprocess.check_call([sys.executable, "build/mkpfs2_disk", disk_path])
 
@@ -29,6 +29,7 @@ def main():
         "-smp", "4",
         "-drive", f"file={disk_path},format=raw,index=0,media=disk",
         "-display", "none",
+        "-snapshot",
         "-no-reboot"
     ]
 
@@ -64,7 +65,6 @@ def main():
         "font info Inter-Bold.ttf\n",
         "font set vga\n",
         "font set inter\n",
-        "poweroff\n",
     ]
 
     for c in commands:
@@ -72,12 +72,14 @@ def main():
         proc.stdin.flush()
         time.sleep(1.2)
 
+    proc.terminate()
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
 
+    t.join(timeout=5)
     stdout = "".join(captured)
     print("\n=== Verifying Test Assertions ===")
 

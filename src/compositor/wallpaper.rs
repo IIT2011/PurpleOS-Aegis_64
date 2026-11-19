@@ -1,6 +1,6 @@
 //! Background-only Purple nebula wallpaper with dynamic display scaling.
 
-use super::surface::Surface;
+use super::surface::{Rect, Surface};
 use crate::sync::Spinlock;
 
 const RAW_MAGIC: &[u8; 8] = b"PWRAW001";
@@ -20,6 +20,12 @@ impl Wallpaper {
             return;
         }
 
+        let screen = Rect::new(0, 0, target.width, target.height);
+        Self::restore_regions(target, &[screen]);
+    }
+
+    /// Restore the wallpaper beneath damaged desktop regions.
+    pub fn restore_regions(target: &mut Surface, regions: &[Rect]) {
         let mut cache = WALLPAPER_CACHE.lock();
         let needs_redraw = match *cache {
             Some(ref surface) => surface.width != target.width || surface.height != target.height,
@@ -41,11 +47,17 @@ impl Wallpaper {
         }
 
         if let Some(ref cached_surface) = *cache {
-            unsafe {
-                for y in 0..target.height {
-                    let src = cached_surface.pixels.add(y * cached_surface.stride);
-                    let dst = target.pixels.add(y * target.stride);
-                    core::ptr::copy_nonoverlapping(src, dst, target.width);
+            let screen = Rect::new(0, 0, target.width, target.height);
+            for rect in regions {
+                if let Some(rect) = rect.intersection(&screen) {
+                    let x = rect.x as usize;
+                    for y in rect.y as usize..rect.bottom() as usize {
+                        unsafe {
+                            let src = cached_surface.pixels.add(y * cached_surface.stride + x);
+                            let dst = target.pixels.add(y * target.stride + x);
+                            core::ptr::copy_nonoverlapping(src, dst, rect.w);
+                        }
+                    }
                 }
             }
         } else if !Self::render_scaled(target) {

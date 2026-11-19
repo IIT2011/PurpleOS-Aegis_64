@@ -2,7 +2,7 @@
 
 **Document:** `docs/PURPLE_OS_BOOTABLE_IMAGE_ARCHITECTURE_PLAN.md`  
 **Classification:** Engineering Architecture & Staged Implementation Plan (Planning Only)  
-**Target Repository:** `/home/saptanshu-ganguly/OS`  
+**Target Repository:** `<repository-root>`
 **Target Branch:** `Aegis_Purple`  
 **Kernel:** Aegis64 Monolithic Kernel (`src/kernel/main.c`, `src/kernel/boot.S`)  
 **Subsystems:** AegisSched, AegisDetect, PurpleDetect, APDRV, Unified Storage Layer, GPT, PurpleFS  
@@ -413,7 +413,7 @@ Every milestone represents an independent, gated engineering increment. **No imp
 
 ## 9. Deliverables & Safety Compliance Record
 
-- **Working Directory:** `/home/saptanshu-ganguly/OS`
+- **Working Directory:** `<repository-root>`
 - **Active Branch:** `Aegis_Purple`
 - **Source Code Modified:** Zero lines (Only documentation and checkpoint files created).
 - **Checkpoints Created:**

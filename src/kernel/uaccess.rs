@@ -116,6 +116,9 @@ pub fn copy_str_from_user(user_src: u64, kernel_dst: &mut [u8]) -> Result<usize,
     let mut curr_ptr = user_src;
 
     while copied < max_len {
+        if curr_ptr < USER_SPACE_MIN || curr_ptr >= USER_SPACE_MAX {
+            return Err(-EFAULT);
+        }
         if copied == 0 || (curr_ptr & 0xFFF) == 0 {
             let page = curr_ptr & !0xFFF;
             match vmm::get_mapping(pml4, page) {

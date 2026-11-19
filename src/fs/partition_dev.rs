@@ -37,7 +37,18 @@ impl<'a> BlockDevice for PartitionDevice<'a> {
         if end > self.sector_count {
             return BLOCK_DEV_ERR_BOUNDS;
         }
-        self.parent.read_blocks(self.start_lba + lba, count, buf)
+        let absolute_start = match self.start_lba.checked_add(lba) {
+            Some(value) => value,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        let absolute_end = match self.start_lba.checked_add(end) {
+            Some(value) => value,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if absolute_end > self.parent.total_blocks() {
+            return BLOCK_DEV_ERR_BOUNDS;
+        }
+        self.parent.read_blocks(absolute_start, count, buf)
     }
 
     fn write_blocks(&mut self, lba: u64, count: u32, buf: &[u8]) -> i32 {
@@ -48,7 +59,18 @@ impl<'a> BlockDevice for PartitionDevice<'a> {
         if end > self.sector_count {
             return BLOCK_DEV_ERR_BOUNDS;
         }
-        self.parent.write_blocks(self.start_lba + lba, count, buf)
+        let absolute_start = match self.start_lba.checked_add(lba) {
+            Some(value) => value,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        let absolute_end = match self.start_lba.checked_add(end) {
+            Some(value) => value,
+            None => return BLOCK_DEV_ERR_BOUNDS,
+        };
+        if absolute_end > self.parent.total_blocks() {
+            return BLOCK_DEV_ERR_BOUNDS;
+        }
+        self.parent.write_blocks(absolute_start, count, buf)
     }
 
     fn flush(&mut self) -> i32 {

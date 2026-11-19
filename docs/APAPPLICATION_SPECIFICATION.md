@@ -127,7 +127,7 @@ If the computed HMAC does not match `manifest.hmac_signature`, the kernel logs a
 
 1. **Discovery & Storage Location:**
    - **Core System Applications:** Located strictly in `/System/Applications/` (e.g. `PurpleTerminal.apapplication`, `PurpleFiles.apapplication`, `PurpleSettings.apapplication`). Note: `/System/Kernel/Applications` is invalid and must never exist.
-   - **User-Installed Applications:** Located in `/System/Users/<user>/Applications/` (e.g. `/System/Users/aegis/Applications/VLC.apapplication`).
+   - **User-Installed Applications:** Located in `/System/Users/<user>/Applications/`.
    - The application manager searches `/System/Applications/` followed by `/System/Users/<current_user>/Applications/`.
 2. **Inspection:** `apapp_parse_manifest()` reads and validates the header, checking magic, version, and section boundaries.
 3. **Security Audit:** `apapp_verify_security()` evaluates the HMAC-SHA256 signature against the trust anchor.

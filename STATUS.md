@@ -4,13 +4,16 @@
 > **Active Development Warning:**
 > Purple OS and the Aegis64 kernel are under heavy active development.
 
-**Date:** 2026-11-16  
+**Date:** 2026-11-16 (historical status report)
+
+> Subsystem completion and test results below are historical project claims. They have not been independently verified against the current checkout.
+
 **Architecture:** Pure Bare-Metal Rust (`no_std`, `no_main`), Zero C/C++ Runtime Dependencies.  
 **Target:** `x86_64-unknown-none` with Multiboot 1 ELF32 bootstrap compatibility.
 
 ---
 
-## 1. Verified & Implemented Rust Subsystems
+## 1. Previously Reported Rust Subsystem Claims
 
 | Subsystem | State | Module / File | Verification Notes |
 | :--- | :--- | :--- | :--- |
@@ -30,10 +33,10 @@
 | **Local APIC & SMP** | Complete | `src/drivers/apic.rs`, `src/kernel/smp.rs` | Local APIC MMIO, INIT & Startup IPI sequences, real-mode bootstrap trampoline (`smp_trampoline.s`), 4/4 CPUs operational. |
 | **AegisSched_64 Scheduler** | Complete | `src/kernel/task.rs`, `switch.s` | Preemptive multi-core scheduler with priority tiers, time-slice quantum, and hardware context switching. |
 | **Fast Hardware Syscalls** | Complete | `src/kernel/syscall.rs`, `syscall_entry.s` | MSR-based `SYSCALL`/`SYSRET` handler (`EFER.SCE`, `STAR`, `LSTAR`, `SFMASK`) with user pointer validation. |
-| **Unified Block Device Layer** | Complete | `src/drivers/block_dev.rs` | `BlockDevice` trait and device registry for ATA PIO, AHCI SATA, NVMe PCIe, and disk partitions. |
-| **Storage Controllers** | Complete | `src/drivers/storage/` | Primary/Secondary IDE ATA PIO mode, SATA AHCI 1.3 PRDT DMA, and NVMe 1.4 submission/completion queues. |
+| **Unified Block Device Layer** | Partial | `src/drivers/block_dev.rs` | Registry currently receives ATA PIO devices only. Placeholder AHCI, NVMe, USB MSC, and SD media are not registered. |
+| **Storage Controllers** | Partial | `src/drivers/storage/` | ATA PIO is available with LBA28 addressing. AHCI/NVMe initialization and USB/SD media I/O are unavailable. |
 | **Partition & Filesystem Engines** | Complete | `src/fs/` | GPT partition table parser, PurpleFS v2 flat filesystem parser, PurpleFS v3 hierarchical filesystem reader. |
-| **Security & Cryptography** | Complete | `src/crypto/sha256.rs`, `security/aegis_detect.rs` | SHA-256 and HMAC-SHA256 engine; AegisDetect trusted baseline verification (12/12 components verified). |
+| **Security & Cryptography** | Complete | `src/crypto/sha256.rs`, `security/aegis_detect.rs` | SHA-256 and RSA-2048 verification primitives; storage verification is limited to the entries in the trusted manifest and requires fresh runtime verification. |
 | **Hardware Discovery Daemon** | Complete | `src/drivers/purple_detect.rs` | Automated peripheral scanner for COM1, PS2KBD, PS2MOUSE, ATA channels, and PCI hierarchy. |
 | **PCI Bus Enumeration** | Complete | `src/drivers/pci.rs` | Configuration space scanning across buses 0..8 (Host bridge, ISA bridge, VGA/VBE device, Intel E1000 NIC). |
 | **Intel 82540EM Gigabit NIC** | Complete | `src/drivers/e1000.rs` | Authentic MMIO registers, EEPROM MAC reading, 32 RX / 32 TX coherent DMA ring buffers. |
@@ -46,7 +49,7 @@
 | **Interactive Terminal Shell** | Complete | `src/kernel/shell.rs` | AegisShell 2.5 hybrid console supporting MS-DOS commands (`dir`, `cd`, `type`, `copy`, `ren`, `del`, `md`, `rd`, `cls`, `ver`, `date`, `time`), Linux POSIX commands (`ls`, `pwd`, `cat`, `head`, `tail`, `grep`, `wc`, `dump`, `hexdump`, `clear`, `free`, `ps`, `df`, `stat`, `whoami`), and Natural Expressive Phrasing (`copy <src> to <dst>`, `ping to <ip>`, etc.). |
 | **Pure Rust TCP/IP Stack** | Complete | `src/net/` | Full L2/L3/L4 protocol stack (Ethernet II, dynamic ARP, IPv4, ICMP echo ping, UDP, TCP) wired to NIC DMA rings. |
 | **Virtual File System (VFS)** | Complete | `src/fs/vfs.rs` | Unified namespace over `/` (PurpleFS), `/dev` (null, zero, console), `/proc` (version, meminfo, uptime, cpuinfo, tasks), `/tmp` (volatile RAM disk), and dedicated storage paths (`/ssd`, `/hdd`, `/usb`, `/sdxc`, `/sdhc`). |
-| **Dedicated Storage Paths** | Complete | `src/drivers/block_dev.rs` | Type-safe storage device mapping: `/ssd/ssd1..` (NVMe/SATA SSD), `/hdd/hdd1..` (ATA/SATA HDD), `/usb/usb1..` (USB 3.x Flash), `/sdxc/card1` (SDXC), `/sdhc/card1` (SDHC). |
+| **Dedicated Storage Paths** | Partial | `src/drivers/block_dev.rs` | Paths are generated only for registered devices; current storage initialization registers detected ATA PIO drives. |
 | **Per-Process Page Tables** | Complete | `src/kernel/task.rs`, `mm/vmm.rs` | Task `cr3` field, `spawn_user_task()` with private 4-level PML4, and dynamic CR3 reloading on context switch. |
 | **Inter-Process Comm (IPC)** | Complete | `src/kernel/ipc.rs` | Thread-safe 4096-byte ring-buffered UNIX-style Pipes (`Pipe`) and message channels. |
 | **POSIX Subsystem (IEEE 1003.1)** | Complete | `src/kernel/posix.rs`, `syscall.rs` | Linux x86_64 ABI syscalls (0..231), 32 per-task FDs (stdin=0, stdout=1, stderr=2), signal vector, astronomical RTC epoch, brk/mmap virtual memory, fork/wait4 process control. 100% pure Rust `no_std`. |

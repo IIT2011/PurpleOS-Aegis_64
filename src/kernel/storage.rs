@@ -1,8 +1,4 @@
 use crate::drivers::storage::ata_pio::{AtaDevice, ATA_PRIMARY_CTRL, ATA_PRIMARY_IO, ATA_SECONDARY_CTRL, ATA_SECONDARY_IO};
-use crate::drivers::storage::ahci::AhciPort;
-use crate::drivers::storage::nvme::NvmeController;
-use crate::drivers::storage::usb::UsbMassStorageDevice;
-use crate::drivers::storage::sd::SdCardDevice;
 use crate::fs::purplefs_v2::PurpleFsV2;
 use crate::sync::Spinlock;
 
@@ -13,11 +9,6 @@ static mut ATA_DEVICES: [AtaDevice; 4] = [
     AtaDevice::new(b"ata3\0", ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, true),
 ];
 
-static mut AHCI0: AhciPort = AhciPort::new(0);
-static mut NVME0: NvmeController = NvmeController::new();
-static mut USB0: UsbMassStorageDevice = UsbMassStorageDevice::new("usb0", 131072);
-static mut SDXC0: SdCardDevice = SdCardDevice::new("card1", true, 131072);
-static mut SDHC0: SdCardDevice = SdCardDevice::new("card1", false, 65536);
 
 pub struct StorageState {
     pub fs_mounted: bool,
@@ -26,6 +17,7 @@ pub struct StorageState {
     pub total_blocks: u32,
     pub free_blocks: u32,
     pub partition_start_lba: u64,
+    pub partition_sector_count: u64,
     pub dev_index: usize,
 }
 
@@ -36,6 +28,7 @@ pub static STORAGE: Spinlock<StorageState> = Spinlock::new(StorageState {
     total_blocks: 0,
     free_blocks: 0,
     partition_start_lba: 0,
+    partition_sector_count: 0,
     dev_index: 0,
 });
 
@@ -55,59 +48,11 @@ pub fn init() {
             }
         }
 
-        // AHCI scan from PCI (Class 0x01 = Mass Storage, Subclass 0x06 = SATA)
-        crate::drivers::pci::for_each_device(|dev| {
-            if dev.class_id == 0x01 && dev.subclass_id == 0x06 {
-                crate::drivers::serial::print("AHCI: Found controller at PCI [");
-                crate::drivers::serial::print_u64(dev.bus as u64);
-                crate::drivers::serial::print(":");
-                crate::drivers::serial::print_u64(dev.slot as u64);
-                crate::drivers::serial::println("]");
-                crate::drivers::pci::enable_bus_mastering(dev.bus, dev.slot, dev.func);
-                let bar5 = (dev.bar5 & !0xF) as u64;
-                let _ = crate::mm::vmm::map_mmio_range(bar5, 0x2000);
-                let ghc = (bar5 + 0x04) as *mut u32;
-                core::ptr::write_volatile(ghc, core::ptr::read_volatile(ghc) | 0x80000000);
-                let ahci_ref = &mut *core::ptr::addr_of_mut!(AHCI0);
-                if ahci_ref.init((bar5 + 0x100) as *mut u8).is_ok() {
-                    crate::drivers::serial::println("AHCI: Port 0 link active");
-                    crate::drivers::block_dev::register(ahci_ref);
-                }
-            }
-        });
+        // AHCI, NVMe, USB MSC, and SD block-device discovery are not yet
+        // implemented with verified capacity and command completion handling.
+        // Keep them out of the registry until they can guarantee real media I/O.
+        crate::drivers::serial::println("Storage: AHCI, NVMe, USB MSC, and SD I/O unavailable; placeholders skipped");
 
-        // NVMe scan from PCI
-        crate::drivers::pci::for_each_device(|dev| {
-            if dev.class_id == 0x01 && dev.subclass_id == 0x08 { // Mass Storage, NVMe
-                crate::drivers::serial::print("NVMe: Found controller at PCI [");
-                crate::drivers::serial::print_u64(dev.bus as u64);
-                crate::drivers::serial::print(":");
-                crate::drivers::serial::print_u64(dev.slot as u64);
-                crate::drivers::serial::println("]");
-                crate::drivers::pci::enable_bus_mastering(dev.bus, dev.slot, dev.func);
-                let bar0 = (dev.bar0 & !0xF) as u64;
-                let _ = crate::mm::vmm::map_mmio_range(bar0, 0x4000);
-                let nvme_ref = &mut *core::ptr::addr_of_mut!(NVME0);
-                if nvme_ref.init(bar0).is_ok() {
-                    crate::drivers::serial::println("NVMe: Namespace 1 online");
-                    crate::drivers::block_dev::register(nvme_ref);
-                }
-            }
-        });
-
-        // USB 3.x Mass Storage Registration (/usb/usb1, ...)
-        let usb_ref = &mut *core::ptr::addr_of_mut!(USB0);
-        if crate::drivers::usb::is_ready() || crate::drivers::usb::XHCI.lock().active_ports > 0 {
-            usb_ref.set_connected(true);
-        }
-        crate::drivers::block_dev::register(usb_ref);
-
-        // SDXC & SDHC Card Slot Registration (/sdxc/card1, /sdhc/card1, ...)
-        let sdxc_ref = &mut *core::ptr::addr_of_mut!(SDXC0);
-        crate::drivers::block_dev::register(sdxc_ref);
-
-        let sdhc_ref = &mut *core::ptr::addr_of_mut!(SDHC0);
-        crate::drivers::block_dev::register(sdhc_ref);
     }
 
     // Dynamic GPT Scan & PurpleFS Auto-Mount across registered block devices
@@ -127,15 +72,20 @@ pub fn init() {
                     crate::drivers::serial::println("");
 
                     let part = &info.partitions[p_idx];
-                    if let Ok(fs) = PurpleFsV2::mount(dev, part.start_lba) {
-                        return Some((fs.volume_label, fs.total_blocks, fs.free_blocks, part.start_lba));
+                    let partition_sectors = match part.end_lba.checked_sub(part.start_lba)
+                        .and_then(|length| length.checked_add(1)) {
+                        Some(length) => length,
+                        None => return None,
+                    };
+                    if let Ok(fs) = PurpleFsV2::mount(dev, part.start_lba, partition_sectors) {
+                        return Some((fs.volume_label, fs.total_blocks, fs.free_blocks, part.start_lba, partition_sectors));
                     }
                 }
             }
             None
         });
 
-        if let Some(Some((vol_label, tot_blocks, free_blks, start_lba))) = mount_res {
+        if let Some(Some((vol_label, tot_blocks, free_blks, start_lba, partition_sectors))) = mount_res {
             let mut st = STORAGE.lock();
             st.fs_mounted = true;
             st.read_write = false;
@@ -143,6 +93,7 @@ pub fn init() {
             st.total_blocks = tot_blocks;
             st.free_blocks = free_blks;
             st.partition_start_lba = start_lba;
+            st.partition_sector_count = partition_sectors;
             st.dev_index = d;
             mounted = true;
 
@@ -189,10 +140,11 @@ where
     }
     let dev_idx = st.dev_index;
     let start_lba = st.partition_start_lba;
+    let partition_sector_count = st.partition_sector_count;
     let rw = st.read_write;
 
     let res = crate::drivers::block_dev::with_dev(dev_idx, |dev| {
-        if let Ok(mut fs) = PurpleFsV2::mount(dev, start_lba) {
+        if let Ok(mut fs) = PurpleFsV2::mount(dev, start_lba, partition_sector_count) {
             fs.read_only = !rw;
             Some(f(&mut fs))
         } else {

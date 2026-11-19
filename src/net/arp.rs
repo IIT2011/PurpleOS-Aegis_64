@@ -29,6 +29,12 @@ impl ArpPacket {
         let hlen = data[4];
         let plen = data[5];
         let opcode = u16::from_be_bytes([data[6], data[7]]);
+        if htype != 1 || ptype != crate::net::eth::ETHERTYPE_IPV4
+            || hlen != 6 || plen != 4
+            || (opcode != ARP_OP_REQUEST && opcode != ARP_OP_REPLY)
+        {
+            return None;
+        }
 
         let mut smac = [0u8; 6];
         let mut sip = [0u8; 4];
@@ -39,6 +45,9 @@ impl ArpPacket {
         sip.copy_from_slice(&data[14..18]);
         tmac.copy_from_slice(&data[18..24]);
         tip.copy_from_slice(&data[24..28]);
+        if smac == [0; 6] || (smac[0] & 1) != 0 {
+            return None;
+        }
 
         Some(Self {
             htype,

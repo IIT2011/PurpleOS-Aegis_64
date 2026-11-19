@@ -21,12 +21,22 @@ def parse_ttf(font_path):
     head_off = tables['head'][0]
     loca_off = tables['loca'][0]
     glyf_off = tables['glyf'][0]
-    cmap_off = tables['cmap'][0] + 36
-    hhea_off = tables['hhea'][0]
-    hmtx_off = tables['hmtx'][0]
-    num_h_metrics, = struct.unpack_from('>H', data, hhea_off + 34)
+    cmap_base = tables['cmap'][0]
+    units_per_em, = struct.unpack_from('>H', data, head_off + 18)
+    loca_format, = struct.unpack_from('>h', data, head_off + 50)
+    cmap_count, = struct.unpack_from('>H', data, cmap_base + 2)
+    cmap_off = None
+    for i in range(cmap_count):
+        platform, encoding, offset = struct.unpack_from('>HHI', data, cmap_base + 4 + i * 8)
+        candidate = cmap_base + offset
+        fmt, = struct.unpack_from('>H', data, candidate)
+        if fmt == 4 and (platform == 0 or (platform == 3 and encoding == 1)):
+            cmap_off = candidate
+            break
+    if cmap_off is None:
+        raise ValueError(f'{font_path} lacks a Unicode format 4 cmap')
 
-    fmt, length, lang, seg_count_x2 = struct.unpack_from('>HHHH', data, cmap_off)
+    _, _, _, seg_count_x2 = struct.unpack_from('>HHHH', data, cmap_off)
     seg_count = seg_count_x2 // 2
     end_codes = struct.unpack_from(f'>{seg_count}H', data, cmap_off + 14)
     start_codes = struct.unpack_from(f'>{seg_count}H', data, cmap_off + 16 + seg_count * 2)
@@ -41,13 +51,18 @@ def parse_ttf(font_path):
                         return (cp + id_deltas[i]) & 0xFFFF
                     else:
                         off = cmap_off + 16 + seg_count * 6 + i * 2 + id_range_offsets[i] + (cp - start_codes[i]) * 2
-                        return struct.unpack_from('>H', data, off)[0]
+                        index, = struct.unpack_from('>H', data, off)
+                        return (index + id_deltas[i]) & 0xFFFF if index else 0
                 else: return 0
         return 0
 
     def get_poly(gid):
-        off1, off2 = struct.unpack_from('>II', data, loca_off + gid * 4)
-        if off1 == off2: return []
+        if loca_format == 0:
+            off1, off2 = (value * 2 for value in struct.unpack_from('>HH', data, loca_off + gid * 2))
+        else:
+            off1, off2 = struct.unpack_from('>II', data, loca_off + gid * 4)
+        if off1 == off2:
+            return []
         g_data = data[glyf_off + off1 : glyf_off + off2]
         num_contours, xmin, ymin, xmax, ymax = struct.unpack_from('>hhhhh', g_data, 0)
         if num_contours <= 0: return []
@@ -94,6 +109,9 @@ def parse_ttf(font_path):
                 full_pts.append(p0)
                 if not p0[2] and not p1[2]:
                     full_pts.append(((p0[0] + p1[0])/2, (p0[1] + p1[1])/2, True))
+            # Start from an on-curve point so the closing quadratic is preserved.
+            first = next(i for i, point in enumerate(full_pts) if point[2])
+            full_pts = full_pts[first:] + full_pts[:first]
             poly = []
             m = len(full_pts); i = 0
             while i < m:
@@ -102,8 +120,8 @@ def parse_ttf(font_path):
                     poly.append((curr_p[0], curr_p[1])); i += 1
                 elif curr_p[2] and not next_p[2]:
                     p2 = full_pts[(i + 2) % m]
-                    for step in range(3):
-                        t = step / 3.0
+                    for step in range(8):
+                        t = step / 8.0
                         bx = (1-t)**2 * curr_p[0] + 2*(1-t)*t * next_p[0] + t**2 * p2[0]
                         by = (1-t)**2 * curr_p[1] + 2*(1-t)*t * next_p[1] + t**2 * p2[1]
                         poly.append((bx, by))
@@ -125,7 +143,14 @@ def parse_ttf(font_path):
     glyphs_bits = []
     glyphs_alpha = []
 
-    scale = 13.0 / 1490.0
+    cell_width, cell_height = 8, 16
+    outlines = {cp: get_poly(get_gid(cp)) for cp in range(32, 127)}
+    y_values = [y for contours in outlines.values() for contour in contours for _, y in contour]
+    bottom, top = min(y_values), max(y_values)
+    scale = min(cell_height / units_per_em, (cell_height - 2) / (top - bottom))
+    baseline = (cell_height - (top - bottom) * scale) / 2 + top * scale
+    samples = (0.125, 0.375, 0.625, 0.875)
+    sample_count = len(samples) ** 2
 
     for cp in range(256):
         if cp < 32 or cp >= 127:
@@ -134,30 +159,33 @@ def parse_ttf(font_path):
             glyphs_alpha.append([[0]*8 for _ in range(16)])
             continue
 
-        gid = get_gid(cp)
-        contours = get_poly(gid)
+        contours = outlines[cp]
         if not contours:
             glyphs_bits.append([0]*16)
             glyphs_alpha.append([[0]*8 for _ in range(16)])
             continue
 
+        x_values = [x for contour in contours for x, _ in contour]
+        left, right = min(x_values), max(x_values)
+        scale_x = min(scale, (cell_width - 1) / (right - left))
+        origin_x = (cell_width - (right + left) * scale_x) / 2
         row_bits = []
         row_alphas = []
-        for r in range(16):
+        for r in range(cell_height):
             bits = 0
             alphas = []
-            for c in range(8):
+            for c in range(cell_width):
                 hits = 0
-                for sy in [0.2, 0.5, 0.8]:
-                    for sx in [0.2, 0.5, 0.8]:
-                        fx = (c + sx - 0.5) / scale
-                        fy = (12.5 - (r + sy)) / scale
+                for sy in samples:
+                    for sx in samples:
+                        fx = (c + sx - origin_x) / scale_x
+                        fy = (baseline - (r + sy)) / scale
                         in_count = sum(point_in_poly(fx, fy, poly) for poly in contours)
                         if in_count % 2 == 1:
                             hits += 1
-                alpha = int(hits * 255 / 9)
+                alpha = round(hits * 255 / sample_count)
                 alphas.append(alpha)
-                if hits >= 4:
+                if hits * 2 >= sample_count:
                     bits |= (0x80 >> c)
             row_bits.append(bits)
             row_alphas.append(alphas)

@@ -72,17 +72,32 @@ impl Iso9660Driver {
         vol_id.copy_from_slice(&buf[40..72]);
 
         let vol_space_sz = u32::from_le_bytes([buf[80], buf[81], buf[82], buf[83]]);
-        let log_blk_sz = u16::from_le_bytes([buf[128], buf[129]]);
+        let volume_space_size_be = u32::from_be_bytes([buf[84], buf[85], buf[86], buf[87]]);
+        let log_blk_sz_le = u16::from_le_bytes([buf[128], buf[129]]);
+        let log_blk_sz_be = u16::from_be_bytes([buf[130], buf[131]]);
+        if vol_space_sz == 0 || vol_space_sz != volume_space_size_be
+            || log_blk_sz_le != ISO_SECTOR_SIZE as u16 || log_blk_sz_be != ISO_SECTOR_SIZE as u16
+            || buf[156] < 34 || buf[156 + 32] != 1 || buf[156 + 25] & ISO_FLAG_DIRECTORY == 0
+        {
+            return None;
+        }
 
-        // Root directory record is located at byte 156
-        let root_extent = u32::from_le_bytes([buf[156 + 2], buf[156 + 3], buf[156 + 4], buf[156 + 5]]);
-        let root_len = u32::from_le_bytes([buf[156 + 10], buf[156 + 11], buf[156 + 12], buf[156 + 13]]);
+        // Root directory record is located at byte 156.
+        let root_extent = u32::from_le_bytes([buf[158], buf[159], buf[160], buf[161]]);
+        let root_extent_be = u32::from_be_bytes([buf[162], buf[163], buf[164], buf[165]]);
+        let root_len = u32::from_le_bytes([buf[166], buf[167], buf[168], buf[169]]);
+        let root_len_be = u32::from_be_bytes([buf[170], buf[171], buf[172], buf[173]]);
+        if root_extent != root_extent_be || root_len != root_len_be
+            || root_extent >= vol_space_sz || root_len == 0
+        {
+            return None;
+        }
 
         Some(IsoFsInfo {
             volume_id: vol_id,
             system_id: sys_id,
             volume_space_size: vol_space_sz,
-            logical_block_size: if log_blk_sz > 0 { log_blk_sz } else { 2048 },
+            logical_block_size: ISO_SECTOR_SIZE as u16,
             root_extent_lba: root_extent,
             root_data_len: root_len,
         })
@@ -91,9 +106,17 @@ impl Iso9660Driver {
     /// Probe a block device for ISO9660 filesystem at start_lba (PVD at 16 * 2048 bytes = 64 * 512 sectors)
     pub fn probe(&mut self, dev: &mut dyn BlockDevice, start_lba: u64) -> bool {
         // Sector 16 in 2048-byte units is 64 in 512-byte units
-        let pvd_lba = start_lba + (ISO_PVD_LBA_OFFSET * 4);
-        let mut buf = [0u8; 2048];
-        if dev.read_blocks(pvd_lba, 4, &mut buf) != 0 {
+        if dev.block_size() != 512 {
+            return false;
+        }
+        let Some(pvd_lba) = start_lba.checked_add(ISO_PVD_LBA_OFFSET * 4) else {
+            return false;
+        };
+        let Some(pvd_end) = pvd_lba.checked_add(4) else {
+            return false;
+        };
+        let mut buf = [0u8; ISO_SECTOR_SIZE];
+        if pvd_end > dev.total_blocks() || dev.read_blocks(pvd_lba, 4, &mut buf) != 0 {
             return false;
         }
         if let Some(info) = Self::probe_pvd(&buf) {

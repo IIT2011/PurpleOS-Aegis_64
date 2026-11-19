@@ -4,8 +4,9 @@
 //! shared open file descriptions with reference counting, real streaming FIFO pipes
 //! with broken-pipe detection and EOF semantics, virtual memory areas (VMAs),
 //! dynamic mmap/munmap/mprotect, heap expansion (brk), POSIX signal masking and
-//! actions, process lifecycle (fork, wait4, exit), high-resolution clocks, and
-//! directory/filesystem operations.
+//! actions, wait/exit handling, high-resolution clocks, and directory/filesystem
+//! operations. Fork and execve return ENOSYS until a complete context and ELF
+//! loader implementation is available.
 //!
 //! 100% Pure Rust (no_std, x86_64-unknown-none) with zero C/C++ dependencies.
 
@@ -1091,195 +1092,20 @@ pub fn posix_ioctl(fd: usize, req: u64, arg: u64) -> Result<i64, i64> {
     }
 }
 
-extern "C" fn fork_child_trampoline(_arg: *mut u8) {
-    loop {
-        crate::kernel::task::yield_now();
-    }
-}
-
 pub fn posix_fork() -> Result<u32, i64> {
-    let mut s = crate::kernel::task::SCHED.lock();
-    let cpu = crate::kernel::smp::get_current_cpu();
-    let cur_idx = s.current[cpu].unwrap_or(0);
-
-    let parent_id = s.tasks[cur_idx].id;
-    let parent_pml4 = if s.tasks[cur_idx].cr3 != 0 {
-        s.tasks[cur_idx].cr3 as *mut crate::mm::vmm::PageTable
-    } else {
-        crate::mm::vmm::get_kernel_pml4()
-    };
-
-    let new_pml4 = crate::mm::vmm::create_pml4().ok_or(-ENOMEM)?;
-
-    // Allocate 16 KiB kernel stack for child task
-    let stack_frames = 4;
-    let stack_base = match crate::mm::pmm::alloc_frames(stack_frames) {
-        Some(b) => b,
-        None => {
-            crate::mm::vmm::destroy_pml4(new_pml4);
-            return Err(-ENOMEM);
-        }
-    };
-    let stack_top = stack_base + (stack_frames * 4096);
-
-    let c_idx = match crate::kernel::task::alloc_task_slot(&mut s) {
-        Some(idx) => idx,
-        None => {
-            let _ = crate::mm::pmm::free_frames(stack_base, stack_frames);
-            crate::mm::vmm::destroy_pml4(new_pml4);
-            return Err(-EAGAIN);
-        }
-    };
-    let child_pid = s.next_id;
-    s.next_id += 1;
-
-    // Clone parent user-space memory mappings (VMAs, heap brk, and stack) into child PML4
-    let parent = &s.tasks[cur_idx];
-    for vma in parent.vmas.iter() {
-        if vma.in_use {
-            let _ = crate::mm::vmm::clone_user_range(parent_pml4, new_pml4, vma.start, vma.end);
-        }
-    }
-    if parent.brk_current > parent.brk_start {
-        let _ = crate::mm::vmm::clone_user_range(parent_pml4, new_pml4, parent.brk_start, parent.brk_current);
-    }
-    // Clone standard user stack area (0x0000_7FFF_FF00_0000 .. 0x0000_7FFF_FFFF_0000)
-    let _ = crate::mm::vmm::clone_user_range(parent_pml4, new_pml4, 0x0000_7FFF_FF00_0000, 0x0000_7FFF_FFFF_0000);
-
-    // Setup initial kernel stack frame for child for switch_context
-    let child_rsp = unsafe {
-        let mut sp = stack_top as *mut u64;
-
-        // Arguments for task_trampoline
-        sp = sp.sub(1);
-        *sp = 0; // arg pointer
-        sp = sp.sub(1);
-        *sp = fork_child_trampoline as *const () as usize as u64; // entry function pointer
-
-        // Trampoline return address
-        sp = sp.sub(1);
-        *sp = crate::kernel::task::task_trampoline_addr();
-
-        // Callee-saved registers pushed by switch_context
-        sp = sp.sub(1);
-        *sp = 0x202; // RFLAGS (IF=1, bit 1=1)
-        sp = sp.sub(1);
-        *sp = 0; // RBX
-        sp = sp.sub(1);
-        *sp = 0; // RBP
-        sp = sp.sub(1);
-        *sp = 0; // R12
-        sp = sp.sub(1);
-        *sp = 0; // R13
-        sp = sp.sub(1);
-        *sp = 0; // R14
-        sp = sp.sub(1);
-        *sp = 0; // R15
-
-        sp as u64
-    };
-
-    // Clone parent state into child task slot
-    let mut child = crate::kernel::task::Task::empty();
-    child.id = child_pid;
-    child.ppid = parent_id;
-    child.pgid = parent.pgid;
-    child.priority = parent.priority;
-    child.cr3 = new_pml4 as u64;
-    child.rsp = child_rsp;
-    child.stack_base = stack_base as u64;
-    child.is_user = true;
-    child.fd_table = parent.fd_table;
-    child.vmas = parent.vmas;
-    child.cwd = parent.cwd;
-    child.cwd_len = parent.cwd_len;
-    child.umask = parent.umask;
-    child.brk_start = parent.brk_start;
-    child.brk_current = parent.brk_current;
-    child.sig_mask = parent.sig_mask;
-    child.sig_handlers = parent.sig_handlers;
-    child.state = crate::kernel::task::TaskState::Ready;
-
-    let child_name = b"fork_child\0";
-    child.name[..child_name.len()].copy_from_slice(child_name);
-
-    // Increment open file description and pipe reference counts for all inherited descriptors
-    let mut oft = OPEN_FILE_TABLE.lock();
-    for fd in child.fd_table.iter() {
-        if let Some(desc_idx) = fd.desc_idx {
-            if desc_idx < MAX_OPEN_FILES && desc_idx >= 3 && oft[desc_idx].ref_count > 0 {
-                oft[desc_idx].ref_count += 1;
-                match oft[desc_idx].fd_type {
-                    FdType::PipeRead(id) => crate::kernel::ipc::pipe_add_reader(id),
-                    FdType::PipeWrite(id) => crate::kernel::ipc::pipe_add_writer(id),
-                    _ => {}
-                }
-            }
-        }
-    }
-    drop(oft);
-
-    s.tasks[c_idx] = child;
-    crate::kernel::smp::broadcast_resched();
-    Ok(child_pid)
+    // A real fork must preserve the interrupted user register frame, clone all
+    // mappings successfully, and make the child resume with return value zero.
+    // The current scheduler has no child return-frame support; do not report a
+    // child PID for the old yield-loop placeholder.
+    Err(-ENOSYS)
 }
 
-pub fn posix_execve(path: &str, _argv: &[&str], _envp: &[&str]) -> Result<(), i64> {
-    let clean = path.trim();
-    if clean.is_empty() {
-        return Err(-ENOENT);
-    }
-
-    let mut file_buf = [0u8; 4096];
-    let file_len = crate::fs::vfs::read(clean, &mut file_buf).map_err(|_| -ENOENT)?;
-    if file_len < 64 {
-        return Err(-ENOEXEC);
-    }
-
-    // Validate 64-bit ELF format
-    if &file_buf[0..4] != b"\x7fELF" || file_buf[4] != 2 || file_buf[5] != 1 {
-        return Err(-ENOEXEC);
-    }
-
-    // Allocate fresh PML4 and setup user execution space
-    let new_pml4 = crate::mm::vmm::create_pml4().ok_or(-ENOMEM)?;
-
-    // Close descriptors marked with FD_CLOEXEC
-    for i in 0..MAX_FD_PER_TASK {
-        let should_close = {
-            let s = crate::kernel::task::SCHED.lock();
-            let cpu = crate::kernel::smp::get_current_cpu();
-            let cur_idx = s.current[cpu].unwrap_or(0);
-            (s.tasks[cur_idx].fd_table[i].flags & FD_CLOEXEC) != 0
-        };
-        if should_close {
-            let _ = posix_close(i);
-        }
-    }
-
-    let mut s = crate::kernel::task::SCHED.lock();
-    let cpu = crate::kernel::smp::get_current_cpu();
-    let cur_idx = s.current[cpu].unwrap_or(0);
-    let t = &mut s.tasks[cur_idx];
-    let old_cr3 = t.cr3;
-    t.cr3 = new_pml4 as u64;
-    crate::mm::vmm::switch_pml4(new_pml4);
-    if old_cr3 != 0 && old_cr3 != crate::mm::vmm::get_kernel_pml4() as u64 {
-        crate::mm::vmm::destroy_pml4(old_cr3 as *mut crate::mm::vmm::PageTable);
-    }
-    t.is_user = true;
-    t.vmas = [Vma::empty(); MAX_VMAS_PER_TASK];
-    t.brk_start = 0x0000_0000_1000_0000;
-    t.brk_current = 0x0000_0000_1000_0000;
-
-    // Reset signal handlers that are not ignored
-    for h in t.sig_handlers.iter_mut() {
-        if *h != 1 { // 1 = SIG_IGN
-            *h = 0; // 0 = SIG_DFL
-        }
-    }
-
-    Ok(())
+pub fn posix_execve(_path: &str, _argv: &[&str], _envp: &[&str]) -> Result<(), i64> {
+    // ELF segment loading, argument/environment stack construction, and an
+    // atomic user-mode transfer are not implemented. Preserve the current task
+    // and report the operation as unsupported instead of switching to an empty
+    // address space and returning success.
+    Err(-ENOSYS)
 }
 
 pub fn posix_wait4(target_pid: i32, status_ptr: *mut i32, options: i32) -> Result<i32, i64> {
@@ -1922,7 +1748,10 @@ pub fn run_posix_self_test() {
     // Test 1: Standard Streams
     crate::drivers::serial::print("[POSIX TEST 1/12] Standard Streams (stdin=0, stdout=1, stderr=2)... ");
     let msg = b"[POSIX OK] stdout stream functional\n";
-    let _ = posix_write(1, msg);
+    match posix_write(1, msg) {
+        Ok(written) if written == msg.len() => crate::drivers::serial::println("[PASSED]"),
+        _ => crate::drivers::serial::println("[FAILED: stdout write]"),
+    }
 
     // Test 2: File I/O Lifecycle (open, write, lseek, read, close)
     crate::drivers::serial::print("[POSIX TEST 2/12] File I/O Lifecycle (open, write, lseek, read, close)... ");
@@ -2111,5 +1940,5 @@ pub fn run_posix_self_test() {
         crate::drivers::serial::println("[FAILED: user memory safety leak]");
     }
 
-    crate::drivers::serial::println(">>> ALL 12 POSIX SUBSYSTEM VALIDATION TESTS PASSED (100% PURE RUST)! <<<\n");
+    crate::drivers::serial::println("POSIX self-test sequence complete; review each result above. fork and execve currently return ENOSYS.\n");
 }

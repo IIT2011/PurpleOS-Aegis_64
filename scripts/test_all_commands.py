@@ -161,7 +161,7 @@ def main():
 
         # Group 9: Multiprocessing (SMP) & Task Management
         ("smp", "Symmetric Multiprocessing (SMP) Topology:"),
-        ("smptest", "SMP multi-core execution verified"),
+        ("smptest", "Concurrent worker validation is not implemented."),
         ("tasks", "AegisSched_64 Active Tasks"),
         ("ps", "AegisSched_64 Active Tasks"),
         ("tasks spawn TestWorker", "Spawned background task 'TestWorker'"),

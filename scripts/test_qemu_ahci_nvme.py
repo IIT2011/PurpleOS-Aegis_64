@@ -6,7 +6,7 @@ import os
 import sys
 
 def main():
-    print("=== Launching Aegis64 QEMU AHCI SATA & NVMe PCIe Modern Storage Test ===")
+    print("=== Checking Aegis64 does not advertise unimplemented AHCI/NVMe storage ===")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         sata_path = os.path.join(tmpdir, "disposable_sata.img")
@@ -79,42 +79,33 @@ def main():
             proc.kill()
             stdout, stderr = proc.communicate()
 
-        print("\n=== Modern Storage Captured Output ===")
+        print("\n=== Modern Storage Safety Check Output ===")
         print(stdout)
 
-        assertions = [
-            ("AHCI Controller Discovery", "AHCI: Found controller at PCI"),
-            ("AHCI Port Link Active", "AHCI: Port 0 link active"),
-            ("AHCI SATA Block Device", "BlockDev: Registered 'sata0' [AHCI/SATA]"),
-            ("NVMe Controller Discovery", "NVMe: Found controller at PCI"),
-            ("NVMe Namespace Online", "NVMe: Namespace 1 online"),
-            ("NVMe Block Device", "BlockDev: Registered 'nvme0n1' [NVMe PCIe]"),
-            ("GPT Detection", "Valid GPT detected"),
-            ("PurpleFS Mounting", "PurpleFS: Mounted volume 'PurpleSystem'"),
-            ("Disk Status Output", "ATA Storage Devices & GPT Partition Status"),
-            ("SATA Block Device in Shell", "sata0"),
-            ("NVMe Block Device in Shell", "nvme0n1"),
-            ("Filesystem Mounted", "MOUNTED (Read-Only Kernel Mode)"),
-            ("Welcome File Present", "welcome.txt"),
-            ("Version File Present", "version.txt"),
-            ("Welcome Content Verified", "Welcome to Purple OS / Aegis64 Native Filesystem!"),
-            ("PCI SATA Controller", "SATA Controller (AHCI)"),
-            ("PCI NVMe Controller", "NVMe Controller")
+        expected = "Storage: AHCI, NVMe, USB MSC, and SD I/O unavailable; placeholders skipped"
+        forbidden = [
+            "BlockDev: Registered 'sata0' [AHCI/SATA]",
+            "BlockDev: Registered 'nvme0n1' [NVMe PCIe]",
+            "NVMe: Namespace 1 online",
         ]
-
         failed = 0
-        for name, pattern in assertions:
+        if expected in stdout:
+            print(f"[OK] Verified unavailable storage is reported ('{expected}')")
+        else:
+            print(f"[FAIL] Missing status: '{expected}'")
+            failed += 1
+        for pattern in forbidden:
             if pattern in stdout:
-                print(f"[OK] Verified: {name} ('{pattern}')")
-            else:
-                print(f"[FAIL] Missing: {name} ('{pattern}')")
+                print(f"[FAIL] Placeholder device was registered: '{pattern}'")
                 failed += 1
+            else:
+                print(f"[OK] No placeholder registration: '{pattern}'")
 
         if failed == 0:
-            print("\n>>> ALL MODERN STORAGE (AHCI SATA + NVME PCIE) INTEGRATION TESTS PASSED! <<<\n")
+            print("\n>>> UNIMPLEMENTED STORAGE DEVICES WERE NOT ADVERTISED <<<\n")
             return 0
         else:
-            print(f"\n>>> MODERN STORAGE INTEGRATION TESTS FAILED ({failed} missing assertions)! <<<\n")
+            print(f"\n>>> MODERN STORAGE SAFETY CHECK FAILED ({failed} missing assertions)! <<<\n")
             return 1
 
 if __name__ == "__main__":
