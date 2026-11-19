@@ -4,27 +4,9 @@
 
 use crate::compositor::surface::Surface;
 
-/// Stylish 'Amethyst Prism P' Logo (18x18 ARGB8888)
-pub const STYLISH_P_LOGO: [[u32; 18]; 18] = [
-    [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF6EEFF, 0xFFF6EEFF, 0xFFF6EEFF, 0xFFF6EEFF, 0xDFD7CFDF, 0xFFF6EEFF, 0xFFF6EEFF, 0xFFF6EEFF, 0xDFD7CFDF, 0x7F79737F, 0x0F0F0E0F, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF1E5FF, 0xFFC792FA, 0xFFB976F9, 0xFFB976F9, 0xFFB976F9, 0xFFB976F9, 0xFFB976F9, 0xFFB976F9, 0xFFB976F9, 0xFFC691FB, 0xEFBC8CEC, 0x2F24182F, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFFBA79F9, 0xFFA855F7, 0xFFA855F7, 0x8F5E2F8A, 0x1F150A1E, 0x00000000, 0x2F1F0F2E, 0xAF733AA9, 0xFFBA78FA, 0xFFC084FC, 0xEFB47BEC, 0x1F18101F, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFFBA79F9, 0xFFA855F7, 0xFFA855F7, 0x3F2A153D, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xBF8E60BC, 0xFFC084FC, 0xFFC084FC, 0x7F60427E, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFFBA79F9, 0xFFA855F7, 0xFFA855F7, 0x3F2A153D, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x7F60427E, 0xFFC084FC, 0xFFC084FC, 0x7F60427E, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFFBA79F9, 0xFFA855F7, 0xFFA855F7, 0x3F2A153D, 0x00000000, 0x00000000, 0x00000000, 0x0F0A050F, 0xDFA56DDB, 0xFFC084FC, 0xFFC084FC, 0x5F48315E, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFFBA79F9, 0xFFA855F7, 0xFFA855F7, 0xBF7E3FB9, 0x7F542A7B, 0x7F542A7B, 0x8F5E2F8A, 0xEF9D4FE7, 0xFFBA78FA, 0xFFC084FC, 0xCF9C6BCC, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFFBA79F9, 0xFFA855F7, 0xFFA855F7, 0xFFA855F7, 0xFFA855F7, 0xFFA855F7, 0xFFA855F7, 0xFFA855F7, 0xFFBA78FA, 0xAF845AAD, 0x0F0C080F, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFFA35DE1, 0xFF882ED8, 0xFF882ED8, 0x9F59228B, 0xAF612497, 0xBF6926A4, 0xBF6926A4, 0x7F491D71, 0x2F22152E, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFF9B53DA, 0xFF7E22CE, 0xFF7E22CE, 0x3F1F0833, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFF9B53DA, 0xFF7E22CE, 0xFF7E22CE, 0x3F1F0833, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFF9B53DA, 0xFF7E22CE, 0xFF7E22CE, 0x3F1F0833, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xFF9B53DA, 0xFF7E22CE, 0xFF7E22CE, 0x3F1F0833, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0xFFF3E8FF, 0xDF8B4FC0, 0x7F3F1167, 0x1F0F0419, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0x2F2D2B2F, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-    [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
-];
+pub const PURPLE_MARK_SIZE: usize = 22;
+pub const PURPLE_MARK: &[u8; PURPLE_MARK_SIZE * PURPLE_MARK_SIZE * 4] =
+    include_bytes!("../../assets/icons/purple-mark.rgba");
 
 /// Anti-aliased ICON_WIFI_FULL (16x16 8-bit alpha mask)
 pub const ICON_WIFI_FULL: [[u8; 16]; 16] = [
@@ -298,35 +280,37 @@ pub fn render_icon_mask<const W: usize, const H: usize>(
     }
 }
 
-/// Blit a pre-shaded 32-bit ARGB logo onto the target surface
-pub fn render_logo_argb<const W: usize, const H: usize>(
-    target: &mut Surface,
-    x: i32,
-    y: i32,
-    logo: &[[u32; W]; H],
-    alpha_mult: u32,
-) {
-    if !target.is_valid() || x + (W as i32) <= 0 || y + (H as i32) <= 0 {
-        return;
-    }
-
-    for row in 0..H {
-        let py = y + row as i32;
-        if py < 0 || py as usize >= target.height {
-            continue;
+/// Draw the Purple mark at its native resolution.
+pub fn render_purple_mark(dst: &mut Surface, x: i32, y: i32) {
+    for (index, pixel) in PURPLE_MARK.chunks_exact(4).enumerate() {
+        let px = x + (index % PURPLE_MARK_SIZE) as i32;
+        let py = y + (index / PURPLE_MARK_SIZE) as i32;
+        if px >= 0 && py >= 0 && pixel[3] != 0 {
+            dst.blend_pixel(px as usize, py as usize,
+                u32::from_be_bytes([pixel[3], pixel[0], pixel[1], pixel[2]]));
         }
-        for col in 0..W {
+    }
+}
+
+#[repr(usize)]
+#[derive(Clone, Copy)]
+pub enum ShellIcon {
+    Terminal, Files, Resources, Code, Settings, Wifi, Bluetooth, Power, Chevron, Restart,
+}
+
+pub fn shell_icon(dst: &mut Surface, icon: ShellIcon, x: i32, y: i32, size: usize, color: u32) {
+    const EDGE: usize = 24;
+    const MASK_SIZE: usize = EDGE * EDGE;
+    const MASKS: &[u8; 10 * MASK_SIZE] = include_bytes!("../../assets/icons/shell-icons.alpha");
+    let start = icon as usize * MASK_SIZE;
+    for row in 0..size {
+        for col in 0..size {
             let px = x + col as i32;
-            if px < 0 || px as usize >= target.width {
-                continue;
-            }
-            let src = logo[row][col];
-            let a = (src >> 24) & 0xFF;
-            if a > 0 {
-                let eff_a = (a * alpha_mult) / 255;
-                if eff_a > 0 {
-                    let pixel = (eff_a << 24) | (src & 0x00FFFFFF);
-                    target.blend_pixel(px as usize, py as usize, pixel);
+            let py = y + row as i32;
+            if px >= 0 && py >= 0 {
+                let mask = MASKS[start + (row * EDGE / size) * EDGE + col * EDGE / size];
+                if mask != 0 {
+                    dst.blend_pixel(px as usize, py as usize, super::blend::scale_alpha(color, mask));
                 }
             }
         }

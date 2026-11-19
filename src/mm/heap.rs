@@ -59,7 +59,12 @@ impl Heap {
 
     pub fn alloc(&mut self, layout: Layout) -> *mut u8 {
         let align = layout.align().max(16);
-        let size = layout.size().max(MIN_ALLOC_SIZE);
+        // The split remainder becomes a FreeListNode and must stay aligned.
+        let node_align = core::mem::align_of::<FreeListNode>();
+        let Some(rounded_size) = layout.size().max(MIN_ALLOC_SIZE).checked_add(node_align - 1) else {
+            return null_mut();
+        };
+        let size = rounded_size & !(node_align - 1);
         let header_size = core::mem::size_of::<AllocHeader>();
 
         let mut prev: *mut FreeListNode = null_mut();

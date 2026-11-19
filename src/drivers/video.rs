@@ -44,31 +44,39 @@ pub static VIDEO: Spinlock<VideoState> = Spinlock::new(VideoState {
     text_buf: [0; 128 * 64],
 });
 
+pub fn has_boot_framebuffer(info: &MultibootInfo) -> bool {
+    info.flags & MULTIBOOT_INFO_FRAMEBUFFER != 0
+        && info.framebuffer_addr != 0
+        && info.framebuffer_bpp == 32
+        && info.framebuffer_width > 0
+        && info.framebuffer_height > 0
+        && info.framebuffer_pitch % 4 == 0
+        && info.framebuffer_pitch / 4 >= info.framebuffer_width
+}
+
 pub fn init(mbi: Option<&MultibootInfo>) {
     let mut v = VIDEO.lock();
 
-    if let Some(info) = mbi {
-        if (info.flags & MULTIBOOT_INFO_FRAMEBUFFER) != 0 && info.framebuffer_addr != 0 {
-            v.fb_ptr = info.framebuffer_addr as *mut u32;
-            v.width = info.framebuffer_width as usize;
-            v.height = info.framebuffer_height as usize;
-            v.pitch = (info.framebuffer_pitch / 4) as usize;
-            v.bpp = info.framebuffer_bpp as usize;
-            v.cursor_col = 0;
-            v.cursor_row = 0;
-            v.fg_color = COLOR_WHITE;
-            v.bg_color = COLOR_PURPLE_BG;
-            v.available = true;
+    if let Some(info) = mbi.filter(|info| has_boot_framebuffer(info)) {
+        v.fb_ptr = info.framebuffer_addr as *mut u32;
+        v.width = info.framebuffer_width as usize;
+        v.height = info.framebuffer_height as usize;
+        v.pitch = (info.framebuffer_pitch / 4) as usize;
+        v.bpp = info.framebuffer_bpp as usize;
+        v.cursor_col = 0;
+        v.cursor_row = 0;
+        v.fg_color = COLOR_WHITE;
+        v.bg_color = COLOR_PURPLE_BG;
+        v.available = true;
 
-            crate::drivers::serial::print("Video: Linear Framebuffer initialized: ");
-            crate::drivers::serial::print_u64(v.width as u64);
-            crate::drivers::serial::print("x");
-            crate::drivers::serial::print_u64(v.height as u64);
-            crate::drivers::serial::print("@");
-            crate::drivers::serial::print_u64(v.bpp as u64);
-            crate::drivers::serial::println("bpp");
-            return;
-        }
+        crate::drivers::serial::print("Video: Linear Framebuffer initialized: ");
+        crate::drivers::serial::print_u64(v.width as u64);
+        crate::drivers::serial::print("x");
+        crate::drivers::serial::print_u64(v.height as u64);
+        crate::drivers::serial::print("@");
+        crate::drivers::serial::print_u64(v.bpp as u64);
+        crate::drivers::serial::println("bpp");
+        return;
     }
 
     // Hardware GPU fallback: probe Bochs / Intel / VirtIO GPU directly

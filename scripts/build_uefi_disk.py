@@ -1,8 +1,25 @@
 #!/usr/bin/env python3
+import argparse
 import struct
 import os
 import subprocess
-import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+def read_signed_efi(path):
+    data = path.read_bytes()
+    if len(data) < 64 or data[:2] != b"MZ":
+        raise ValueError(f"invalid EFI executable: {path}")
+    pe = struct.unpack_from("<I", data, 60)[0]
+    header = pe + 24
+    if len(data) < header + 152 or data[pe:pe + 6] != b"PE\0\0\x64\x86":
+        raise ValueError(f"expected an x86-64 EFI executable: {path}")
+    if struct.unpack_from("<H", data, header)[0] != 0x20b:
+        raise ValueError(f"expected a PE32+ EFI executable: {path}")
+    offset, size = struct.unpack_from("<II", data, header + 144)
+    if offset == 0 or size < 8 or offset + size > len(data):
+        raise ValueError(f"EFI executable has no Authenticode certificate table: {path}")
+    return data
 
 def build_fat16_image(out_path, files):
     """
@@ -280,7 +297,42 @@ def format_purplefs_v2(total_blocks, label, files):
 
     return data
 
-def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 MiB total disk
+def read_system_partition(path, max_sectors):
+    with open(path, "rb") as source:
+        source.seek(512)
+        header = source.read(512)
+        if len(header) != 512 or header[:8] != b"EFI PART":
+            raise ValueError("system disk must have a primary GPT")
+        size, checksum = struct.unpack_from("<II", header, 12)
+        if not 92 <= size <= 512 or crc32_gpt(header[:16] + bytes(4) + header[20:size]) != checksum:
+            raise ValueError("invalid system disk GPT header")
+        lba, count, entry_size, checksum = struct.unpack_from("<QIII", header, 72)
+        if not 1 <= count <= 128 or entry_size != 128:
+            raise ValueError("unsupported system disk GPT entry layout")
+        source.seek(lba * 512)
+        entries = source.read(count * entry_size)
+        if len(entries) != count * entry_size or crc32_gpt(entries) != checksum:
+            raise ValueError("invalid system disk GPT entries")
+        first, last = struct.unpack_from("<QQ", header, 40)
+        for entry in range(0, len(entries), entry_size):
+            start, end = struct.unpack_from("<QQ", entries, entry + 32)
+            if not first <= start <= end <= last:
+                continue
+            source.seek(start * 512)
+            if not source.read(16).startswith(b"PURPLEFS\x00PFS2\x00\x00\x00"):
+                continue
+            sectors = end - start + 1
+            if sectors > max_sectors:
+                raise ValueError("system partition does not fit the UEFI disk")
+            source.seek(start * 512)
+            payload = source.read(sectors * 512)
+            if len(payload) != sectors * 512:
+                raise ValueError("truncated PurpleFS system partition")
+            return payload
+    raise ValueError("system disk has no PurpleFS v2 partition")
+
+
+def build_gpt_disk(disk_path, esp_img_path, system_disk, total_disk_sectors=524288):
     """
     Builds a GPT partitioned disk with:
     Partition 1: ESP (FAT16/FAT32)
@@ -305,28 +357,15 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     p1_start = 2048
     p1_end = p1_start + esp_sectors - 1
 
-    # Partition 2: PurpleFS (remaining disk space)
+    # Partition 2: Copy the system filesystem without changing its signed files.
     p2_start = p1_end + 1
-    p2_end = total_disk_sectors - 34
-    p2_sectors = p2_end - p2_start + 1
-    p2_blocks = min(p2_sectors // 8, 32768)
+    system = read_system_partition(system_disk, total_disk_sectors - 33 - p2_start)
+    p2_end = p2_start + len(system) // 512 - 1
 
     # Copy ESP filesystem into disk at p1_start
     disk[p1_start * 512 : (p1_start + esp_sectors) * 512] = esp_data
 
-    # Format and copy PurpleFS v3 filesystem into Partition 2
-    pfs3_img = "build/pfs3_part.img"
-    pfs3_tool = "./build/pfs3_tool"
-    if not os.path.exists(pfs3_tool):
-        subprocess.check_call([
-            "gcc", "-Wall", "-Wextra", "-D__KERNEL_HOST_TEST__", "-Iinclude",
-            "tools/pfs3_tool.c", "src/fs/purplefs_v3.c", "src/drivers/block_dev.c",
-            "src/kernel/string.c", "src/drivers/serial.c", "-o", pfs3_tool
-        ])
-    subprocess.check_call([pfs3_tool, "populate", pfs3_img, str(p2_sectors)])
-    with open(pfs3_img, "rb") as pf:
-        pfs3_data = pf.read()
-    disk[p2_start * 512 : p2_start * 512 + len(pfs3_data)] = pfs3_data
+    disk[p2_start * 512 : p2_start * 512 + len(system)] = system
 
     # Generate Partition Entries
     entries = bytearray(128 * 128) # 128 entries of 128 bytes each
@@ -346,7 +385,7 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     name1 = "EFI System Partition".encode("utf-16le")
     entries[56:56 + len(name1)] = name1
 
-    # Entry 2: PurpleFS Partition GUID: 4F535046-5333-0001-8000-00A0C911D504
+    # Entry 2: PurpleFS Partition GUID
     pfs_guid = bytes([
         0x46, 0x50, 0x53, 0x4F,
         0x33, 0x53,
@@ -358,7 +397,7 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     entries[128:144] = pfs_guid
     entries[144:160] = unique_guid2
     struct.pack_into("<QQQ", entries, 160, p2_start, p2_end, 0)
-    name2 = "PurpleFS v3 System".encode("utf-16le")
+    name2 = "PurpleFS v2 System".encode("utf-16le")
     entries[184:184 + len(name2)] = name2
 
     entries_crc = crc32_gpt(entries)
@@ -401,57 +440,41 @@ def build_gpt_disk(disk_path, esp_img_path, total_disk_sectors=262144): # 128 Mi
     print(f"[OK] Successfully built GPT disk: {disk_path} ({len(disk) // (1024*1024)} MiB)")
 
 def main():
-    os.makedirs("build", exist_ok=True)
+    parser = argparse.ArgumentParser(description="Build a Purple OS UEFI disk")
+    parser.add_argument("out_disk", nargs="?", default="build/aegis64-uefi.img")
+    parser.add_argument("esp_disk", nargs="?", default="build/esp.img")
+    parser.add_argument("--development", action="store_true", help="allow an unsigned AegisX64 loader")
+    parser.add_argument("--loader", type=Path, help="Aegisx64 EFI executable")
+    parser.add_argument("--efi-signing-cert", type=Path, help="certificate that signed Aegisx64")
+    parser.add_argument("--signature-verifier", default="osslsigncode", help="osslsigncode executable path")
+    parser.add_argument("--system-disk", type=Path, default=Path("target/aegis-signed-system.img"),
+                        help="GPT disk containing the PurpleFS v2 system partition")
+    args = parser.parse_args()
 
-    print("=== Generating GRUB BOOTX64.EFI ===")
-    grub_cmd = [
-        "grub-mkimage",
-        "-O", "x86_64-efi",
-        "-o", "build/BOOTX64.EFI",
-        "-p", "/EFI/BOOT",
-        "fat", "part_gpt", "part_msdos", "normal", "boot",
-        "multiboot", "multiboot2", "configfile", "efi_gop", "video",
-        "gfxterm", "serial"
-    ]
-    subprocess.check_call(grub_cmd)
+    if args.development and args.efi_signing_cert:
+        parser.error("choose either --development or protected boot inputs")
+    if not args.development and args.efi_signing_cert is None:
+        parser.error("protected boot requires --efi-signing-cert")
 
-    grub_cfg = """set timeout=1
-set default=0
-terminal_output console serial
-terminal_input console serial
+    if args.development:
+        loader = args.loader or Path("target/Aegisx64.efi")
+        aegis = loader.read_bytes()
+    else:
+        loader = args.loader or Path("target/Aegisx64.signed.efi")
+        aegis = read_signed_efi(loader)
+        Path("target").mkdir(exist_ok=True)
+        with TemporaryDirectory(dir="target") as temporary:
+            staged = Path(temporary) / "Aegisx64.efi"
+            staged.write_bytes(aegis)
+            subprocess.check_call([args.signature_verifier, "verify", "-CAfile",
+                                   str(args.efi_signing_cert), "-in", str(staged)])
+    files = {"EFI/BOOT/AEGISX64.EFI": aegis, "EFI/BOOT/BOOTX64.EFI": aegis}
 
-menuentry "Purple OS / Aegis64" {
-    insmod efi_gop
-    insmod video
-    multiboot /KERNEL.ELF
-    boot
-}
-"""
+    for path in (args.out_disk, args.esp_disk):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    build_fat16_image(args.esp_disk, files)
+    build_gpt_disk(args.out_disk, args.esp_disk, args.system_disk)
 
-    kernel_elf_data = open("target/kernel.elf", "rb").read()
-    bootx64_data = open("build/BOOTX64.EFI", "rb").read()
-
-    files = {
-        "EFI/BOOT/BOOTX64.EFI": bootx64_data,
-        "EFI/BOOT/GRUB.CFG": grub_cfg.encode("utf-8"),
-        "KERNEL.ELF": kernel_elf_data
-    }
-
-    out_disk = sys.argv[1] if len(sys.argv) > 1 else "build/aegis64-uefi.img"
-    esp_disk = sys.argv[2] if len(sys.argv) > 2 else "build/esp.img"
-
-    print(f"=== Building FAT ESP Image ({esp_disk}) ===")
-    build_fat16_image(esp_disk, files)
-
-    print(f"=== Building GPT Multi-Partition Disk Image ({out_disk}) ===")
-    build_gpt_disk(out_disk, esp_disk)
-
-    # Copy OVMF vars template
-    ovmf_vars_src = "/usr/share/edk2/x64/OVMF_VARS.4m.fd"
-    if os.path.exists(ovmf_vars_src):
-        with open(ovmf_vars_src, "rb") as sf, open("build/ovmf_vars.fd", "wb") as df:
-            df.write(sf.read())
-        print(f"[OK] Prepared OVMF vars: build/ovmf_vars.fd")
 
 if __name__ == "__main__":
     main()

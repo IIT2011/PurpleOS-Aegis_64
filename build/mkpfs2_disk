@@ -49,9 +49,12 @@ def format_purplefs_v2(total_blocks, label, files):
     inodes = bytearray(8 * 4096)
 
     # Root dir dirents block (block 10)
+    names = [name.encode("ascii") for name in files]
+    if any(len(name) > 55 for name in names) or 64 + sum(64 if len(name) > 23 else 32 for name in names) > 4096:
+        raise ValueError("System files exceed the PurpleFS v2 root directory limits")
     dir_block = bytearray(4096)
     def pack_dirent(offset, ino, name, ftype):
-        name_b = name.encode("ascii")[:55]
+        name_b = name.encode("ascii")
         rec_len = 64 if len(name_b) > 23 else 32
         struct.pack_into("<IHBB", dir_block, offset, ino, rec_len, len(name_b), ftype)
         dir_block[offset+8:offset+8+len(name_b)] = name_b
@@ -138,7 +141,7 @@ def format_purplefs_v2(total_blocks, label, files):
 
     return data
 
-def build_gpt_disk(disk_path, total_disk_sectors=2097152): # 1024 MiB
+def build_gpt_disk(disk_path, total_disk_sectors=2097152, signing_key=None, applications_dir=None, https_roots=None): # 1024 MiB
     os.makedirs(os.path.dirname(os.path.abspath(disk_path)), exist_ok=True)
     
     # Files to seed into PurpleFS
@@ -273,6 +276,38 @@ Library = libcompositor.a
                 ipath = os.path.join(icon_dir, icon_f)
                 files[f"System/Resources/Icons/{icon_f}"] = open(ipath, "rb").read()
 
+    if applications_dir:
+        from pathlib import Path
+        application_sources = Path(applications_dir)
+        for name in ("trust.policy", "trust.policy.sig"):
+            files[f"System/Applications/{name}"] = (application_sources / name).read_bytes()
+        for bundle in sorted(application_sources.glob("*.apapplication")):
+            files[f"System/Applications/{bundle.name}"] = bundle.read_bytes()
+
+    if https_roots:
+        from pathlib import Path
+
+        bundle = Path(https_roots)
+        system_path = "System/Network/https-roots.pem"
+        files[system_path] = bundle.read_bytes()
+        files[system_path + ".sig"] = bundle.with_name(bundle.name + ".sig").read_bytes()
+
+    if signing_key:
+        import hashlib
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        from sign_cmddb import sign_payload_rsa
+
+        manifest_path = "System/components.manifest"
+        manifest = b"".join(
+            f"{hashlib.sha256(data).hexdigest()}  {name}\n".encode("ascii")
+            for name, data in sorted(files.items()) if name != "System/CLI/path.dtbase"
+        )
+        signature = sign_payload_rsa(b"PurpleOS/COMPONENTS/v1\0" + manifest, signing_key)
+        files[manifest_path] = manifest
+        files[manifest_path + ".sig"] = signature.encode("ascii")
+
     pfs_data = format_purplefs_v2(32768, "PurpleSystem", files)
     pfs_sectors = len(pfs_data) // 512
 
@@ -344,7 +379,12 @@ Library = libcompositor.a
     print(f"[OK] Formatted GPT disk with PurpleFS v2 at {disk_path}")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: mkpfs2_disk <output_image>")
-        sys.exit(1)
-    build_gpt_disk(sys.argv[1])
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("output_image")
+    parser.add_argument("--signing-key")
+    parser.add_argument("--applications-dir", help="stage an existing signed application policy and bundles")
+    parser.add_argument("--https-roots", help="stage an approved CA bundle and its AegisDetect .sig sidecar")
+    args = parser.parse_args()
+    build_gpt_disk(args.output_image, signing_key=args.signing_key, applications_dir=args.applications_dir,
+                   https_roots=args.https_roots)

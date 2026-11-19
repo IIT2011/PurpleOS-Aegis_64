@@ -4,7 +4,7 @@
 //!   - `drivers/net/ethernet/realtek/8139too.c`
 //!   - `drivers/net/ethernet/realtek/8139cp.c`
 
-use crate::arch::x86_64::io::{inb, outb, outw, outl};
+use crate::arch::x86_64::io::{inb, inl, inw, outb, outw, outl};
 use crate::drivers::pci::find_device;
 use crate::drivers::dma::alloc_coherent;
 use crate::sync::Spinlock;
@@ -40,7 +40,9 @@ pub const RX_CFG_AB: u32   = 0x0008; /* Accept Broadcast */
 pub const RX_CFG_WRAP: u32 = 0x0080; /* Wrap packet past end of buffer */
 
 /* Buffer Sizes */
-pub const RX_BUF_LEN: usize = 8192 + 16 + 1500; // 8K + 16-byte status + wrap
+const RX_RING_LEN: usize = 8192;
+const RX_MAX_LENGTH: usize = 1536;
+pub const RX_BUF_LEN: usize = RX_RING_LEN + 16 + RX_MAX_LENGTH;
 pub const TX_BUF_LEN: usize = 2048;
 
 pub struct Rtl8139Device {
@@ -87,6 +89,9 @@ impl Rtl8139Device {
                 core::hint::spin_loop();
                 timeout -= 1;
             }
+            if timeout == 0 {
+                return Err("RTL8139 reset timed out");
+            }
 
             // 3. Read Hardware MAC Address
             for i in 0..6 {
@@ -123,18 +128,25 @@ impl Rtl8139Device {
 
     /// Transmit raw ethernet frame
     pub fn transmit(&mut self, packet: &[u8]) -> Result<(), &'static str> {
-        if !self.is_ready || packet.len() > TX_BUF_LEN {
+        if !self.is_ready || !(crate::net::eth::ETH_HEADER_LEN..=TX_BUF_LEN).contains(&packet.len()) {
             return Err("RTL8139 not ready or packet too large");
         }
 
         unsafe {
             let cur = self.tx_cur;
+            let status_port = self.io_base + REG_TX_STATUS0 + (cur as u16 * 4);
+            if inl(status_port) & (1 << 13) == 0 {
+                return Err("RTL8139 transmit slot is busy");
+            }
+            core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
             let dst_buf = self.tx_bufs[cur];
             core::ptr::copy_nonoverlapping(packet.as_ptr(), dst_buf, packet.len());
 
             // Write length to TxStatus register (pad to min 60 bytes if needed)
             let len = packet.len().max(60);
-            outl(self.io_base + REG_TX_STATUS0 + (cur as u16 * 4), len as u32);
+            dst_buf.add(packet.len()).write_bytes(0, len - packet.len());
+            core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
+            outl(status_port, len as u32);
 
             self.tx_cur = (cur + 1) % 4;
         }
@@ -159,25 +171,28 @@ impl Rtl8139Device {
             let status = core::ptr::read_volatile(header_ptr);
             let length = core::ptr::read_volatile(header_ptr.add(1)) as usize;
 
-            if (status & 0x01) == 0 || length < 4 || length > 1536 {
-                return 0; // Bad packet header or truncated packet
+            if length == 0xfff0 {
+                return 0; // DMA of this packet is still in progress.
             }
-
-            // Copy packet payload (skip 4-byte header and 4-byte CRC)
-            let payload_len = (length - 4).min(buf.len());
-            let src = self.rx_buf.add(cur_ptr + 4);
-            core::ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), payload_len);
-
-            // Update read pointer (4-byte aligned)
-            self.rx_read_ptr = (cur_ptr + length + 4 + 3) & !3;
-            if self.rx_read_ptr >= 8192 {
-                self.rx_read_ptr -= 8192;
+            if !(4..=RX_MAX_LENGTH).contains(&length) {
+                // Discard the pending ring contents when its length cannot be trusted.
+                self.rx_read_ptr = usize::from(inw(self.io_base + REG_CBR)) % RX_RING_LEN & !3;
+                outw(self.io_base + REG_CAPR, (self.rx_read_ptr as u16).wrapping_sub(16));
+                return 0;
             }
+            let payload_len = length - 4;
+            let valid = status & 0x3f == 1
+                && (crate::net::eth::ETH_HEADER_LEN..=buf.len()).contains(&payload_len);
+            if valid {
+                core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
+                core::ptr::copy_nonoverlapping(self.rx_buf.add(cur_ptr + 4), buf.as_mut_ptr(), payload_len);
+            }
+            self.rx_read_ptr = ((cur_ptr + length + 7) & !3) % RX_RING_LEN;
 
             // Update CAPR register (subtract 16 per RTL8139 hardware erratum specification)
             outw(self.io_base + REG_CAPR, (self.rx_read_ptr as u16).wrapping_sub(16));
 
-            payload_len
+            if valid { payload_len } else { 0 }
         }
     }
 }
@@ -186,7 +201,13 @@ pub static RTL8139: Spinlock<Rtl8139Device> = Spinlock::new(Rtl8139Device::new()
 
 pub fn init() {
     if let Some(dev) = find_device(RTL8139_VENDOR, RTL8139_DEV_ID) {
-        let io_base = (dev.bar0 & !0x3) as u16;
+        let address = dev.bar0 & !0x3;
+        if dev.bar0 & 1 == 0 || address == 0 || address > u32::from(u16::MAX) - 0xff {
+            crate::drivers::serial::println("RTL8139: invalid PCI I/O aperture");
+            return;
+        }
+        crate::drivers::pci::enable_bus_mastering(dev.bus, dev.slot, dev.func);
+        let io_base = address as u16;
         let mut nic = RTL8139.lock();
         if nic.init_hw(io_base).is_ok() {
             crate::drivers::serial::print("RTL8139: Realtek Fast Ethernet NIC initialized (MAC: ");

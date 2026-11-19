@@ -72,7 +72,7 @@ Keep these responsibilities distinct, even if the first version is a few modules
 4. **Desktop session:** owns bar, dock, launcher, windows, focus, pointer capture, task state, and actions.
 5. **Window manager:** validates geometry, z-order, state transitions, hit testing, clipping, and client event delivery.
 6. **Compositor:** paints the desktop layers and window surfaces into a back surface, then presents it.
-7. **Application service:** initially launches built-in kernel-resident clients. A future user-mode loader and IPC protocol must be designed separately from this UI foundation.
+7. **Application service:** launches verified system-installed userspace clients through the [GUI runtime ABI](PURPLE_GUI_ABI.md).
 
 No external display server, Wayland, X11, Java runtime, or new crate dependency is part of this foundation. Avoid allocation in interrupt context. Use bounded queues and checked geometry arithmetic appropriate for a bare-metal kernel.
 
@@ -90,7 +90,7 @@ No external display server, Wayland, X11, Java runtime, or new crate dependency 
 | `src/drivers/mouse.rs` | PS/2 packet decode and pointer handling | IRQ must enqueue only; move compositor calls out of event/IRQ path |
 | `src/drivers/keyboard.rs` | Character-oriented input ring | Add GUI key/modifier events while preserving shell input |
 | `src/kernel/shell.rs` | Serial and keyboard command shell | Explicitly route keyboard to desktop when active; retain serial diagnostics |
-| `src/kernel/apexec.rs` | Startup log placeholder | Do not treat as a loader; future application service is separate work |
+| `src/kernel/apexec.rs` | Image validation and private address-space construction | Launch consumes a verified bundle and the GUI runtime ABI |
 | `build/mkpfs2_disk` | Seeds configuration and system files | Define and implement a parser/consumer, or document defaults as authoritative |
 
 ### Current display truth
@@ -161,7 +161,7 @@ Required states: `Normal`, `Maximized`, `Minimized`, and `Closing` (or equivalen
 - Close: request client shutdown; after completion or bounded timeout, release surface and task state. A built-in client can close synchronously. Do not let a client callback run while holding the scene/window collection lock.
 - Destroy: release resources exactly once and choose a valid next focus target.
 
-Hit test topmost window first; test controls before titlebar/client; then shell elements according to overlay priority. Pointer capture is explicit and released on button-up even if the pointer leaves the original rectangle. Deliver client mouse/key events to the focused, visible, input-enabled window. The current implementation has no client event protocol, so first wire built-in desktop clients through the kernel-owned API.
+Hit test shell overlays before client windows and decorations before client content. Native client events include pointer input, cooked keyboard bytes, focus, resize, and close requests. See the [GUI runtime ABI](PURPLE_GUI_ABI.md) for the bounded queue and polling contract.
 
 Clipping is mandatory for windows partly off-screen, shadows, text, and client pixels. Z ranks must be renormalized safely before integer wrap. No single application can cover the cursor or shell overlays.
 
@@ -198,9 +198,9 @@ Session startup sequence:
 7. Route post-start keyboard/pointer events through the desktop event queue; keep serial diagnostics working.
 8. Render the first frame and then render on invalidation/scheduled animation.
 
-The launcher opens from the P control and lists registered applications, not filenames discovered and blindly executed. Initially it can launch only built-in programs. `/System/Applications` is the proposed future installation location, not an existing executable ABI. `/System/Resources` is the intended shared-resource location; current embedded assets under `assets/` are compile-time project inputs. Define any on-disk package layout and trust rules separately.
+The launcher opens from the P control. It lists system applications from the authenticated boot policy and installed filenames. Launch rechecks the complete bundle before constructing the process. The [GUI runtime ABI](PURPLE_GUI_ABI.md) defines deployment and the user-mode interface.
 
-Keep the current app boundary honest: no APApplication parser, permissions, GUI syscall, or dynamic loader exists yet. First provide kernel-owned surfaces for built-in clients. Any future user-mode protocol must validate every request and use handles/capabilities for windows, buffers, and events; never accept raw physical addresses or let clients map the screen framebuffer. Specify process lifecycle and IPC before advertising third-party apps.
+The native GUI runtime enforces a syscall allowlist and task ownership for windows, buffers, and events. The compositor owns the physical framebuffer.
 
 ## 11. Configuration and assets
 
@@ -263,7 +263,7 @@ Add or update focused tests as code is implemented: geometry/scale and clipping 
 ## 15. Related project documents
 
 - `docs/PURPLE_DESKTOP_UI_SPECIFICATION.md` — approved visual direction and design tokens; some technical claims are aspirational and this blueprint corrects their implementation status.
-- `docs/APAPPLICATION_SPECIFICATION.md` — proposed future application package contract; not implemented.
+- `docs/APAPPLICATION_SPECIFICATION.md` — application package format, verification, and pending launch integration.
 - `docs/PURPLE_OS_DIRECTORY_STRUCTURE_SPECIFICATION.md` — intended filesystem organization.
 - `docs/PURPLE_OS_ARCHITECTURE_DECISIONS.md` — architecture decisions and constraints.
 - `Journals/18-11-2026 - Native Framebuffer Compositor, Window Server Subsystem, and Resigned OS Hierarchy.md` — compositor history; verify claims against code.

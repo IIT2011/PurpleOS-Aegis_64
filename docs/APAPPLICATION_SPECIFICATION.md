@@ -1,137 +1,84 @@
-# PURPLE OS / AEGIS64 — .APAPPLICATION BUNDLE SPECIFICATION
+# Purple OS / Aegis64 .apapplication Bundle Specification
 
-**Classification:** Native Userland Application Package Specification  
-**Architecture:** Aegis64 / Purple OS  
-**File Extension:** `.apapplication` (canonical, mandatory — `.apapp` is prohibited)  
-**Package Magic:** `APAPP100` (8 bytes)  
-**Format Version:** 1  
-**Security Model:** AegisDetect HMAC-SHA256 Integrity Verification with Trust Anchor  
+**Status:** System-installed GUI bundles launch through the [GUI runtime ABI](PURPLE_GUI_ABI.md). User-profile installation and the additional capability classes in this format remain reserved for future runtime support.
 
----
+## 1. File format
 
-## 1. Executive Overview
+The canonical extension is `.apapplication`. Version 2 uses the eight ASCII bytes `APAPP200`. AegisDetect rejects version 1 and unknown versions. Existing version 1 bundles must be repackaged and signed under version 2.
 
-The `.apapplication` format is the official self-contained application package format for Purple OS. Designed for the Aegis64 kernel and Purple Desktop environment, an `.apapplication` bundle encapsulates:
+A bundle contains a fixed 336-byte manifest followed by the mandatory executable and up to two optional sections. All integer fields are unsigned and little-endian. Offsets are absolute byte offsets from the start of the file. Decode fields directly from the file bytes.
 
-1. **Application Manifest & Metadata:** Machine-readable identifier, name, version, author, description, requested window geometry, and execution priorities.
-2. **Capability-Based Permissions:** Granular security flags controlling access to the console, graphical window manager, filesystem storage, network stack, and privileged system administration routines.
-3. **Multi-Section File Layout:** Explicit offsets and byte counts for executable code, graphical and font assets, shared libraries, and application metadata.
-4. **Hardware-Anchored Cryptographic Verification:** End-to-end authentication via HMAC-SHA256 keyed to the AegisDetect system trust anchor, preventing tampered, corrupted, or unauthorized execution.
+| Byte offset | Size | Field |
+| --- | ---: | --- |
+| 0x000 | 8 | Magic, `APAPP200` |
+| 0x008 | 4 | Format version, 2 |
+| 0x00C | 4 | Manifest size, 336 |
+| 0x010 | 32 | Application ID |
+| 0x030 | 32 | Display name |
+| 0x050 | 16 | Application version label |
+| 0x060 | 32 | Author display label |
+| 0x080 | 64 | Description |
+| 0x0C0 | 4 | Requested capability bitmask |
+| 0x0C4 | 4 | Priority, 1 low, 2 normal, 3 high |
+| 0x0C8 | 4 | Initial client width in pixels |
+| 0x0CC | 4 | Initial client height in pixels |
+| 0x0D0 | 8 | Executable offset and size, two u32 fields |
+| 0x0D8 | 8 | Resource offset and size, two u32 fields |
+| 0x0E0 | 8 | Reserved library offset and size, both zero in version 2 |
+| 0x0E8 | 8 | Metadata offset and size, two u32 fields |
+| 0x0F0 | 32 | Signer key ID |
+| 0x110 | 64 | Ed25519 signature |
 
----
+Text fields contain valid UTF-8 followed by a NUL and zero padding. Reject control characters. The app ID, display name, and version label must be nonempty. The app ID uses one or more lowercase ASCII alphanumeric segments separated by single dots. The filename extension is separate from the ID. The author is a display label. Use the verified signing key's identity for publisher attribution.
 
-## 2. On-Disk Binary Layout
+Priority must be in the listed range. GUI apps must specify nonzero width and height within the system's client surface limits. Both dimensions must be zero for apps without the GUI capability.
 
-An `.apapplication` file is structured as a contiguous binary package composed of a fixed manifest header followed by optional payload sections:
+The executable starts at byte 336 and must have nonzero size. Present optional sections follow in table order, immediately after the previous present section. An absent section has offset and size both zero. Reject mixed-zero pairs, gaps, overlaps, trailing bytes, arithmetic overflow and ranges outside the file. Apply a system bundle size limit before allocating a snapshot. Version 2 has no standalone CRC field.
 
-```
-+-------------------------------------------------------------+
-| Section 0: Manifest Header (apapp_manifest_t, 284 bytes)    |
-|   - Magic: 'APAPP100'                                       |
-|   - Version: 1                                              |
-|   - Metadata: App ID, Name, Version, Author, Description    |
-|   - Runtime Config: Permissions, Priority, Window (W x H)   |
-|   - Section Offsets & Sizes (Exec, Res, Lib, Meta)          |
-|   - AegisDetect HMAC-SHA256 Signature (32 bytes)            |
-|   - Payload Checksum (CRC32, 4 bytes)                       |
-+-------------------------------------------------------------+
-| Section 1: Executable Payload (.text / code)                |
-|   - Native x86-64 executable instructions / entry point     |
-+-------------------------------------------------------------+
-| Section 2: Application Resources (.res / assets)            |
-|   - Bitmaps, icons, fonts, localized strings                |
-+-------------------------------------------------------------+
-| Section 3: Dynamic Shared Libraries (.lib)                  |
-|   - Relocatable modules or bundled helper libraries         |
-+-------------------------------------------------------------+
-| Section 4: Extended Metadata (.meta)                        |
-|   - Key-value configuration, desktop entry, mime associations|
-+-------------------------------------------------------------+
-```
+The executable is a complete [APEXEC binary](APEXEC_FORMAT_SPECIFICATION.md). Resources and metadata are optional, opaque data sections. Applications may define their own encoding for these bytes. Their contents confer no capabilities or executable mappings. Shared library loading requires a future format revision.
 
----
+## 2. AegisDetect verification
 
-## 3. Manifest Data Structure
+Version 2 uses pure Ed25519 as specified in [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032). The key ID is the 32-byte SHA-256 digest of the raw 32-byte Ed25519 public key. The 64-byte signature field carries the raw signature. The signed message is:
 
-The manifest is defined in C as `apapp_manifest_t` (packed, 284 bytes):
-
-```c
-typedef struct {
-    uint8_t  magic[8];          /* 0x00..0x07: "APAPP100" */
-    uint32_t version;           /* 0x08..0x0B: 1 */
-    uint32_t manifest_size;     /* 0x0C..0x0F: sizeof(apapp_manifest_t) */
-    char     app_id[32];        /* 0x10..0x2F: e.g. "terminal.apapplication" */
-    char     app_name[32];      /* 0x30..0x4F: e.g. "Purple Terminal" */
-    char     version_str[16];   /* 0x50..0x5F: e.g. "1.0.0" */
-    char     author[32];        /* 0x60..0x7F: e.g. "Purple OS Team" */
-    char     description[64];   /* 0x80..0xBF: Application summary */
-    uint32_t permissions;       /* 0xC0..0xC3: APAPP_PERM_* bitmask */
-    uint32_t default_priority;  /* 0xC4..0xC7: Task priority (1=Low, 2=Normal, 3=High) */
-    uint32_t window_width;      /* 0xC8..0xCB: Default window width (pixels) */
-    uint32_t window_height;     /* 0xCC..0xCF: Default window height (pixels) */
-
-    /* Section Offsets in bundle file */
-    uint32_t exec_offset;       /* 0xD0..0xD3: Byte offset of executable payload */
-    uint32_t exec_size;         /* 0xD4..0xD7: Byte length of executable payload */
-    uint32_t res_offset;        /* 0xD8..0xDB: Byte offset of resource section */
-    uint32_t res_size;          /* 0xDC..0xDF: Byte length of resource section */
-    uint32_t lib_offset;        /* 0xE0..0xE3: Byte offset of library section */
-    uint32_t lib_size;          /* 0xE4..0xE7: Byte length of library section */
-    uint32_t meta_offset;       /* 0xE8..0xEB: Byte offset of metadata section */
-    uint32_t meta_size;         /* 0xEC..0xEF: Byte length of metadata section */
-
-    /* Security: HMAC-SHA256 authenticated by AegisDetect */
-    uint8_t  hmac_signature[32];/* 0xF0..0x10F: HMAC-SHA256 digest */
-    uint32_t payload_checksum;  /* 0x110..0x113: CRC32 of payload */
-    uint32_t reserved[2];       /* 0x114..0x11B: Alignment padding */
-} __attribute__((packed)) apapp_manifest_t;
+```text
+ASCII bytes "PurpleOS/APAPPLICATION/v2" followed by one NUL byte
+|| bundle bytes [0, 272)
+|| 64 zero bytes
+|| bundle bytes [336, end)
 ```
 
----
+The ranges are half-open. Every manifest field and payload section is authenticated. The signature is verified using the trusted public key selected by the signed key ID.
 
-## 4. Capability Permissions Model
+AegisDetect performs these steps for each launch:
 
-Purple OS implements strict principle-of-least-privilege capability bits:
+1. Obtain a bounded, immutable snapshot of the package. Check the manifest and section layout against that snapshot.
+2. Resolve the key ID through the system trust store and verify the signature over the specified message. Reject unknown, disabled or revoked keys and malformed or invalid signatures.
+3. Evaluate signer policy, app identity, installation scope and local policy. Reject requests that exceed the allowed capabilities or priority.
+4. Pass the same verified bytes and granted capability set to the loader. Keep resource and metadata access bound to that snapshot throughout the task lifetime.
 
-| Flag | Value | Description |
-| :--- | :---: | :--- |
-| `APAPP_PERM_CONSOLE` | `0x00000001` | Allows standard console I/O (`printf`, `kinfo`, interactive stdin/stdout). |
-| `APAPP_PERM_GUI` | `0x00000002` | Permits creation and management of graphical desktop windows via `desktop_create_window()`. |
-| `APAPP_PERM_STORAGE` | `0x00000004` | Grants read/write access to user files on PurpleFS (`/System/Users/`, `/System/Data/`). |
-| `APAPP_PERM_NETWORK` | `0x00000008` | Grants network access (raw packets, socket communication via netdev). |
-| `APAPP_PERM_SYSADMIN`| `0x00000010` | Privileged operations (modifying system drivers, reboot, low-level hardware access). |
+The GUI runtime loads a Creator-signed boot policy with publisher public keys, authorized system app IDs, and capability and priority ceilings. Bundles cannot change this policy. Key rotation or revocation requires deployment of a replacement policy and reboot. Publisher private keys stay with the external signing tool or a hardware-backed key store. ABI v1 does not implement hardware-backed policy rollback protection.
 
----
+## 3. Capabilities
 
-## 5. Security & Cryptographic Verification
+| Flag | Value | Access |
+| --- | --- | --- |
+| `APAPP_PERM_CONSOLE` | 0x01 | Standard console I/O |
+| `APAPP_PERM_GUI` | 0x02 | Owned windows and their input events |
+| `APAPP_PERM_STORAGE` | 0x04 | User files within explicitly granted scopes |
+| `APAPP_PERM_NETWORK` | 0x08 | Network operations permitted by local policy |
+| `APAPP_PERM_SYSADMIN` | 0x10 | Explicitly authorized privileged maintenance operations |
 
-AegisDetect enforces tamper detection before allocating memory or executing any code from an `.apapplication` bundle.
+The manifest requests capabilities. AegisDetect rejects unknown bits and denies launch if any requested capability falls outside either signer policy or local policy. Only an explicitly authorized system signer and app identity may receive SYSADMIN for a system-installed bundle. The kernel binds granted capabilities to the task and checks both the capability and object scope on each protected operation. SYSADMIN does not bypass userspace isolation or object ownership.
 
-### 5.1 Trust Anchor Keying
-The system verification engine uses the kernel trust anchor:
-`"PurpleOS-Aegis64-TrustAnchor-2026"`
+## 4. Discovery and runtime
 
-### 5.2 HMAC-SHA256 Computation
-The signature covers:
-1. **Manifest Metadata:** All manifest bytes from offset `0x00` up to `offsetof(hmac_signature)` (240 bytes).
-2. **Executable Payload:** The exact executable payload bytes (`exec_size` bytes starting at `exec_offset`).
+Core applications reside in `/System/Applications/`. User-installed applications reside in `/System/Users/<user>/Applications/`. The launcher resolves the system location first. If a system candidate exists but verification fails, the launch fails. It does not fall back to a user copy. `/System/Kernel/Applications/` is invalid. The application manager checks the verified manifest ID against the requested ID or registered launch entry.
 
-Formula:
-$$\text{HMAC} = \text{HMAC-SHA256}(K_{trust}, \text{Manifest}_{0 \dots 239} \parallel \text{Payload})$$
+1. AegisDetect supplies the verified bundle and authorization to the APEXEC loader. The loader validates the executable, creates a private user address space, maps code and data with the permissions specified by APEXEC, and prepares the user stack and entry point.
+2. The application service maps present resource and metadata sections read-only. For a GUI app, it provisions an initial client window with the manifest title and size and prepares its handle before starting the task.
+3. Launch passes the initial handles through a versioned startup interface. The GUI service accepts pixel updates from task-owned buffers through checked window handles and routes input and close events to the owning task. The compositor owns the framebuffer. Handles are scoped to the task and invalidated on close or task exit.
+4. If validation, mapping, handle creation, window provisioning, or task startup fails, the service releases the resources acquired for that launch and returns an error. Normal exit or termination closes owned windows and handles and releases task resources.
+5. Report distinct errors for malformed packages, unsupported formats, signature or trust failures, capability denial, invalid executables, and runtime resource failures.
 
-If the computed HMAC does not match `manifest.hmac_signature`, the kernel logs a security violation and aborts launch with `APAPP_ERR_SIGNATURE`.
-
----
-
-## 6. Application Lifecycle
-
-1. **Discovery & Storage Location:**
-   - **Core System Applications:** Located strictly in `/System/Applications/` (e.g. `PurpleTerminal.apapplication`, `PurpleFiles.apapplication`, `PurpleSettings.apapplication`). Note: `/System/Kernel/Applications` is invalid and must never exist.
-   - **User-Installed Applications:** Located in `/System/Users/<user>/Applications/`.
-   - The application manager searches `/System/Applications/` followed by `/System/Users/<current_user>/Applications/`.
-2. **Inspection:** `apapp_parse_manifest()` reads and validates the header, checking magic, version, and section boundaries.
-3. **Security Audit:** `apapp_verify_security()` evaluates the HMAC-SHA256 signature against the trust anchor.
-4. **Task Instantiation:** `apapp_launch()` spawns an AegisSched task with the specified priority and name.
-5. **Window Provisioning:** If `APAPP_PERM_GUI` is set, a desktop window is initialized with title `manifest.app_name` and dimensions `window_width` $\times$ `window_height`.
-6. **Execution:** The application's entrypoint runs inside its cooperative or preemptive thread.
-7. **Termination:** Upon completion or `kill` command, `apapp_terminate()` destroys the GUI window, releases physical memory pages, and notifies the scheduler.
+See the [GUI runtime ABI](PURPLE_GUI_ABI.md) for the startup record, syscall numbers, events, pixel buffers, and implemented capability limits.

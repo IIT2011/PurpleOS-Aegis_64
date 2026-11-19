@@ -79,50 +79,53 @@ impl ArpPacket {
     }
 }
 
-pub struct ArpEntry {
-    pub ip: [u8; 4],
-    pub mac: [u8; 6],
-    pub valid: bool,
+#[derive(Clone, Copy)]
+struct ArpEntry {
+    ip: [u8; 4],
+    mac: [u8; 6],
+    seen: u64,
 }
 
 pub const ARP_CACHE_SIZE: usize = 16;
-static ARP_CACHE: Spinlock<[ArpEntry; ARP_CACHE_SIZE]> = Spinlock::new([
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-    ArpEntry { ip: [0; 4], mac: [0; 6], valid: false },
-]);
+const ARP_CACHE_LIFETIME_MS: u64 = 60_000;
+static ARP_CACHE: Spinlock<[Option<ArpEntry>; ARP_CACHE_SIZE]> = Spinlock::new([None; ARP_CACHE_SIZE]);
+static PENDING: Spinlock<Option<([u8; 4], u64)>> = Spinlock::new(None);
+const ARP_REQUEST_TIMEOUT_MS: u64 = 1_000;
+
+fn current(entry: ArpEntry, now: u64) -> bool {
+    crate::drivers::pit::ticks_to_millis(now.saturating_sub(entry.seen)) < ARP_CACHE_LIFETIME_MS
+}
 
 pub fn update_arp_cache(ip: [u8; 4], mac: [u8; 6]) {
+    let now = crate::drivers::pit::get_ticks();
     let mut cache = ARP_CACHE.lock();
-    for entry in cache.iter_mut() {
-        if entry.valid && entry.ip == ip {
-            entry.mac = mac;
-            return;
-        }
+    let index = cache.iter().position(|entry| entry.is_some_and(|entry| entry.ip == ip))
+        .or_else(|| cache.iter().position(|entry| !entry.is_some_and(|entry| current(entry, now))))
+        .or_else(|| cache.iter().enumerate().min_by_key(|(_, entry)| entry.map_or(0, |entry| entry.seen)).map(|(index, _)| index));
+    if let Some(index) = index {
+        cache[index] = Some(ArpEntry { ip, mac, seen: now });
     }
-    for entry in cache.iter_mut() {
-        if !entry.valid {
-            entry.ip = ip;
-            entry.mac = mac;
-            entry.valid = true;
-            return;
+}
+
+pub fn clear() {
+    ARP_CACHE.lock().fill(None);
+    *PENDING.lock() = None;
+}
+
+pub fn accept_reply(ip: [u8; 4], mac: [u8; 6]) {
+    let now = crate::drivers::pit::get_ticks();
+    let accepted = {
+        let mut pending = PENDING.lock();
+        if pending.is_some_and(|(target, sent)| {
+            target == ip && crate::drivers::pit::ticks_to_millis(now.saturating_sub(sent)) < ARP_REQUEST_TIMEOUT_MS
+        }) {
+            *pending = None;
+            true
+        } else {
+            false
         }
-    }
-    // Replace first slot if full
-    cache[0] = ArpEntry { ip, mac, valid: true };
+    };
+    if accepted { update_arp_cache(ip, mac); }
 }
 
 pub fn send_arp_request(target_ip: [u8; 4]) -> Result<(), &'static str> {
@@ -154,7 +157,14 @@ pub fn send_arp_request(target_ip: [u8; 4]) -> Result<(), &'static str> {
     let eth_len = eth_hdr.write_to(&mut buf);
     let arp_len = arp_req.write_to(&mut buf[eth_len..]);
     let total = (eth_len + arp_len).max(60);
-    crate::net::send_raw(&buf[..total])
+    let request = (target_ip, crate::drivers::pit::get_ticks());
+    *PENDING.lock() = Some(request);
+    let result = crate::net::send_raw(&buf[..total]);
+    if result.is_err() {
+        let mut pending = PENDING.lock();
+        if *pending == Some(request) { *pending = None; }
+    }
+    result
 }
 
 pub fn lookup_mac(ip: [u8; 4]) -> Option<[u8; 6]> {
@@ -162,11 +172,8 @@ pub fn lookup_mac(ip: [u8; 4]) -> Option<[u8; 6]> {
     if ip == [255, 255, 255, 255] {
         return Some([0xFF; 6]);
     }
-    let cache = ARP_CACHE.lock();
-    for entry in cache.iter() {
-        if entry.valid && entry.ip == ip {
-            return Some(entry.mac);
-        }
-    }
-    None
+    let now = crate::drivers::pit::get_ticks();
+    ARP_CACHE.lock().iter().flatten()
+        .find(|&&entry| entry.ip == ip && current(entry, now))
+        .map(|entry| entry.mac)
 }

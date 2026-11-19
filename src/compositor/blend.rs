@@ -175,3 +175,9 @@ pub fn render_drop_shadow(dst: &mut Surface, window_rect: Rect, shadow_margin: u
         }
     }
 }
+pub fn gray_level(color: u32) -> u32 {
+    let red = (color >> 16) & 0xff;
+    let green = (color >> 8) & 0xff;
+    let blue = color & 0xff;
+    (red * 77 + green * 150 + blue * 29 + 128) >> 8
+}

@@ -283,14 +283,27 @@ impl BlockDevice for AtaDevice {
             for _ in 0..4 { let _ = inb(self.ctrl_base); }
             outb(self.io_base + 7, 0xE7); // CACHE FLUSH
             for _ in 0..4 { let _ = inb(self.ctrl_base); }
-            if !self.wait_not_busy() {
-                return BLOCK_DEV_ERR_IO;
+            // Cache flush includes host media latency and can take much longer
+            // than the normal PIO command timeout.
+            for _ in 0..5_000 {
+                let status = inb(self.ctrl_base);
+                if status & 0x80 == 0 {
+                    let status = inb(self.io_base + 7);
+                    return if status == 0 || status & 0x29 != 0 {
+                        crate::drivers::serial::print("ATA: cache flush failed, status 0x");
+                        crate::drivers::serial::print_hex(status as u64);
+                        crate::drivers::serial::print(", error 0x");
+                        crate::drivers::serial::print_hex(inb(self.io_base + 1) as u64);
+                        crate::drivers::serial::println("");
+                        BLOCK_DEV_ERR_IO
+                    } else {
+                        BLOCK_DEV_OK
+                    };
+                }
+                crate::drivers::pit::delay_ms(1);
             }
-            let status = inb(self.io_base + 7);
-            if (status & 0x01) != 0 || (status & 0x20) != 0 {
-                return BLOCK_DEV_ERR_IO;
-            }
+            crate::drivers::serial::println("ATA: timed out waiting for cache flush");
         }
-        BLOCK_DEV_OK
+        BLOCK_DEV_ERR_IO
     }
 }

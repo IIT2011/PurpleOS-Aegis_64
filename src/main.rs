@@ -52,6 +52,7 @@ fn panic(info: &PanicInfo) -> ! {
 pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     // 1. Initialize COM1 UART serial logging
     drivers::serial::init();
+    security::aegis_detect::init();
 
     drivers::serial::println("=================================================");
     drivers::serial::println("Aegis64 Kernel (Purple OS) Initializing (Pure Rust Edition)");
@@ -65,8 +66,13 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     drivers::serial::print_hex(kend as u64);
     drivers::serial::println("");
 
-    let mbi = if magic == arch::x86_64::boot::MULTIBOOT_BOOTLOADER_MAGIC && mbi_addr != 0 {
-        drivers::serial::println("Multiboot 1 bootloader detected");
+    use arch::x86_64::boot::{AEGIS_UEFI_BOOT_MAGIC, MULTIBOOT_BOOTLOADER_MAGIC};
+    let mbi = if matches!(magic, MULTIBOOT_BOOTLOADER_MAGIC | AEGIS_UEFI_BOOT_MAGIC) && mbi_addr != 0 {
+        drivers::serial::println(if magic == AEGIS_UEFI_BOOT_MAGIC {
+            "AegisX64 native UEFI bootloader detected"
+        } else {
+            "Multiboot 1 bootloader detected"
+        });
         Some(unsafe { &*(mbi_addr as *const arch::x86_64::boot::MultibootInfo) })
     } else {
         None
@@ -117,12 +123,8 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     fs::fs_registry::init();
 
     // 13. Security & Integrity Subsystems
-    security::aegis_detect::init();
-    if kernel::storage::is_mounted() {
-        security::aegis_detect::verify_storage();
-        kernel::cmddb::init();
-        kernel::pathdb::init();
-    }
+    security::aegis_detect::enforce_boot_policy();
+    kernel::app_runtime::init();
 
     // 14. Peripheral Discovery Daemon
     drivers::purple_detect::init();
@@ -136,7 +138,9 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     drivers::e1000::init();
     drivers::rtl8139::init();
     drivers::audio::init();
-    drivers::gpu::init();
+    if !mbi.is_some_and(drivers::video::has_boot_framebuffer) {
+        drivers::gpu::init();
+    }
     drivers::gpu_accel::init();
     kernel::apdrv::init();
     kernel::apexec::init();

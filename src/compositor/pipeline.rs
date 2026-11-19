@@ -22,6 +22,7 @@ impl CompositorPipeline {
         cursor: &mut Cursor,
         animation_tick: u64,
         dock_lift: &[u8; super::desktop::DOCK_NUM_ICONS],
+        panel: super::desktop::Panel,
     ) {
         if !target.is_valid() {
             return;
@@ -37,6 +38,7 @@ impl CompositorPipeline {
         super::desktop::render_desktop_shell(target, animation_tick, dock_lift);
 
         // Pass 4: Render Cursor Overlay on Top
+        super::desktop::render_panel(target, panel, cursor);
         cursor.draw(target);
     }
 

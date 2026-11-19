@@ -1,4 +1,4 @@
-use crate::arch::x86_64::boot::MultibootInfo;
+use crate::arch::x86_64::boot::{MultibootInfo, AEGIS_UEFI_ACPI_RSDP};
 
 #[repr(C, packed)]
 struct RsdpDescriptor {
@@ -34,15 +34,20 @@ static mut MADT_INFO: MadtInfo = MadtInfo {
     apic_ids: [0; 8],
 };
 
-pub fn init(_mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
+pub fn init(mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
     unsafe {
         // Default detected cores if ACPI scan in standard QEMU memory
         let mut count = 0;
         let mut lapic = 0xFEE00000;
 
         // Search BIOS ROM area 0xE0000..0xFFFFF for "RSD PTR "
-        let mut addr = 0xE0000 as *const u8;
-        let end = 0x100000 as *const u8;
+        let (start, limit) = mbi.filter(|info| info.flags & AEGIS_UEFI_ACPI_RSDP != 0)
+            .map_or((0xE0000, 0x100000), |info| {
+                let rsdp = info.config_table as usize;
+                (rsdp, rsdp + 16)
+            });
+        let mut addr = start as *const u8;
+        let end = limit as *const u8;
 
         while addr < end {
             if core::slice::from_raw_parts(addr, 8) == b"RSD PTR " {
@@ -73,6 +78,10 @@ pub fn init(_mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
                                         continue;
                                     }
                                     let table_addr = table_phys as *const AcpiHeader;
+                                    if core::slice::from_raw_parts(table_addr as *const u8, 4) == b"FACP" {
+                                        crate::kernel::power::init(table_phys);
+                                        continue;
+                                    }
                                     if core::slice::from_raw_parts(table_addr as *const u8, 4) == b"APIC" {
                                         // MADT Table
                                         lapic = core::ptr::read_unaligned(((table_addr as usize) + 0x24) as *const u32) as u64;
@@ -97,7 +106,6 @@ pub fn init(_mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
                                             }
                                             madt_cur += entry_len;
                                         }
-                                        break;
                                     }
                                 }
                             }

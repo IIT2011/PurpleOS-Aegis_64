@@ -799,6 +799,9 @@ impl Shell {
         let mut c: u8 = 0;
 
         if let Some(ch) = keyboard::try_getchar() {
+            if crate::compositor::client::keyboard(ch) {
+                return;
+            }
             c = ch;
             got_char = true;
         } else if crate::drivers::serial::has_char() {
@@ -1077,6 +1080,21 @@ impl Shell {
         // If in editor mode, handle editor line
         if self.editor_mode {
             self.do_edit_cmd(line);
+            return;
+        }
+
+        if let Some(id) = line.strip_prefix("launch ") {
+            match crate::kernel::app_runtime::launch(id.trim()) {
+                Ok(pid) => {
+                    serial::print("Application started, PID ");
+                    serial::print_u64(u64::from(pid));
+                    serial::println("");
+                }
+                Err(reason) => {
+                    serial::print("Launch rejected: ");
+                    serial::println(reason);
+                }
+            }
             return;
         }
 
@@ -1663,7 +1681,7 @@ impl Shell {
                     target = parts.next().unwrap_or("");
                 }
                 if target.is_empty() {
-                    serial::println("Usage: ping <ip_address> (e.g. ping 10.0.2.2 or ping 8.8.8.8)");
+                    serial::println("Usage: ping <IPv4 address, hostname, or HTTP(S) URL>");
                 } else {
                     self.do_ping(target);
                 }
@@ -1838,7 +1856,24 @@ impl Shell {
             "compositor" | "gui" => self.show_compositor(&mut parts),
             "window" => self.show_window(&mut parts),
             "font" | "fonts" => self.show_font(&mut parts),
-            "ifconfig" => self.show_network(),
+            "ifconfig" => {
+                if let Some(address) = parts.next() {
+                    let route = parts.next().and_then(crate::net::parse_ipv4);
+                    let mask = parts.next().and_then(crate::net::parse_ipv4);
+                    let dns = parts.next().map(crate::net::parse_ipv4);
+                    match (crate::net::parse_ipv4(address), route, mask, dns, parts.next()) {
+                        (Some(ip), Some(gateway), Some(mask), dns @ (None | Some(Some(_))), None) => {
+                            match crate::net::configure(ip, gateway, mask, dns.flatten()) {
+                                Ok(()) => self.show_network(),
+                                Err(reason) => serial::println(reason),
+                            }
+                        }
+                        _ => serial::println("Usage: ifconfig <IPv4 address> <gateway or 0.0.0.0> <netmask> [DNS IPv4 address]"),
+                    }
+                } else {
+                    self.show_network();
+                }
+            },
 
             // Driver Modules & Symbols
             "lsmod" | "modules" => crate::kernel::apdrv::list_modules(),
@@ -2037,9 +2072,9 @@ impl Shell {
                 serial::print("\x1b[2J\x1b[H");
             }
             "reboot" | "restart" => {
-                serial::println("Rebooting Aegis64 system via 8042 keyboard controller...");
-                unsafe {
-                    crate::arch::x86_64::io::outb(0x64, 0xFE);
+                if let Err(reason) = crate::kernel::power::execute(crate::kernel::power::Action::Restart) {
+                    serial::print("Restart cancelled: ");
+                    serial::println(reason);
                 }
             }
             "exit" => {
@@ -2929,24 +2964,16 @@ impl Shell {
         let mut path_buf = [0u8; 128];
         let resolved = self.resolve_path(file, &mut path_buf);
 
-        let mut buf = [0u8; 4096];
-        let read_len = if resolved.starts_with("/tmp/") {
-            crate::fs::vfs::read(resolved, &mut buf).unwrap_or(0)
-        } else {
-            let clean = resolved.trim_start_matches('/');
-            crate::kernel::storage::with_fs(|fs| {
-                if let Some(ino) = fs.lookup(clean) {
-                    fs.read_file(ino, &mut buf)
-                } else {
-                    0
-                }
-            }).unwrap_or(0)
+        const MAX_SCRIPT_SIZE: usize = 4096;
+        let mut buf = [0u8; MAX_SCRIPT_SIZE + 1];
+        let Ok(read_len @ 1..=MAX_SCRIPT_SIZE) = crate::fs::vfs::read(resolved, &mut buf) else {
+            serial::println("source: Script missing, empty, or too large");
+            return;
         };
-
-        if read_len == 0 {
-            serial::print("source: Cannot open or empty script file '");
-            serial::print(file);
-            serial::println("'");
+        if !crate::security::aegis_detect::verify_control_file(
+            resolved, b"PurpleOS/SHELL-SCRIPT/v1\0", &buf[..read_len],
+        ) {
+            serial::println("AegisDetect: Script rejected by signature policy");
             return;
         }
 
@@ -4145,24 +4172,29 @@ impl Shell {
 
     fn show_network(&self) {
         serial::println("\nNetwork Interface Configuration:");
-        if crate::drivers::e1000::is_ready() {
-            let mac = crate::drivers::e1000::get_mac();
-            serial::print("  eth0: Intel 82540EM Gigabit Ethernet, MAC=");
-            for (i, b) in mac.iter().enumerate() {
-                serial::print_hex(*b as u64);
-                if i < 5 { serial::print(":"); }
-            }
-            let ip = crate::net::get_ip();
-            serial::print(", IP=");
-            serial::print_u64(ip[0] as u64); serial::print(".");
-            serial::print_u64(ip[1] as u64); serial::print(".");
-            serial::print_u64(ip[2] as u64); serial::print(".");
-            serial::print_u64(ip[3] as u64);
-            serial::println(", Status: UP");
-        } else if crate::drivers::rtl8139::is_ready() {
-            serial::println("  eth0: Realtek RTL8139 Fast Ethernet, Status: UP");
-        } else {
+        let Some(mac) = crate::net::get_my_mac() else {
             serial::println("  No active network interfaces detected.");
+            return;
+        };
+        let adapter = if crate::drivers::e1000::is_ready() {
+            "  eth0: Intel 82540EM, MAC="
+        } else {
+            "  eth0: Realtek RTL8139, MAC="
+        };
+        serial::print(adapter);
+        for (index, byte) in mac.iter().enumerate() {
+            if index > 0 { serial::print(":"); }
+            serial::print_hex(u64::from(*byte));
+        }
+        let ip = crate::net::get_ip();
+        if ip == [0; 4] {
+            serial::println(", IPv4 unconfigured");
+            return;
+        }
+        serial::print(", IPv4=");
+        for (index, octet) in ip.into_iter().enumerate() {
+            if index > 0 { serial::print("."); }
+            serial::print_u64(u64::from(octet));
         }
         serial::println("");
     }
@@ -4590,35 +4622,24 @@ impl Shell {
     }
 
     fn do_ping(&self, target_ip_str: &str) {
-        let mut ip = [0u8; 4];
-        let mut octet = 0usize;
-        let mut cur_val: u16 = 0;
-        let mut has_digit = false;
-
-        for b in target_ip_str.bytes() {
-            if b == b'.' {
-                if octet < 4 {
-                    ip[octet] = cur_val as u8;
-                    octet += 1;
-                    cur_val = 0;
-                    has_digit = false;
+        let host = crate::net::dns::host(target_ip_str);
+        let ip = match crate::net::parse_ipv4(host) {
+            Some(ip) => ip,
+            None => {
+                let server = crate::net::NET_CONFIG.lock().dns;
+                let Some(server) = server else {
+                    serial::println("Configure a DNS server with ifconfig before pinging a hostname");
+                    return;
+                };
+                match crate::net::dns::resolve(host, server) {
+                    Ok(ip) => ip,
+                    Err(reason) => {
+                        serial::println(reason);
+                        return;
+                    }
                 }
-            } else if b.is_ascii_digit() {
-                cur_val = cur_val * 10 + (b - b'0') as u16;
-                has_digit = true;
             }
-        }
-        if octet == 3 && has_digit {
-            ip[3] = cur_val as u8;
-            octet += 1;
-        }
-
-        if octet != 4 {
-            serial::print("Invalid IP address: '");
-            serial::print(target_ip_str);
-            serial::println("'. Example: ping 10.0.2.2");
-            return;
-        }
+        };
 
         serial::print("PING ");
         serial::print(target_ip_str);
@@ -4641,7 +4662,13 @@ impl Shell {
 
     pub fn run(&mut self) -> ! {
         self.init();
+        let mut network_tick = None;
         loop {
+            let tick = crate::drivers::pit::get_ticks();
+            if network_tick != Some(tick) {
+                network_tick = Some(tick);
+                crate::net::poll();
+            }
             crate::compositor::service();
             self.step();
             crate::kernel::task::yield_now();

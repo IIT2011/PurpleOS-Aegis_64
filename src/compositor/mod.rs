@@ -11,6 +11,7 @@
 //! - Pure Rust `#![no_std]` implementation with zero external crates
 
 pub mod blend;
+pub mod client;
 pub mod cursor;
 pub mod desktop;
 pub mod icons;
@@ -26,7 +27,6 @@ pub use surface::{DamageTracker, Rect, Surface};
 pub use wallpaper::Wallpaper;
 pub use window::{Window, WindowHitArea, MAX_WINDOWS};
 
-use crate::drivers::gpu::GPU;
 use crate::drivers::video::{self, VIDEO};
 use crate::sync::Spinlock;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -62,6 +62,10 @@ pub struct CompositorEngine {
     pub frame_count: u64,
     animation_start: u64,
     rendered_tick: u64,
+    panel: desktop::Panel,
+    painted_panel: desktop::Panel,
+    pending_power: Option<crate::kernel::power::Action>,
+    pending_launch: Option<crate::kernel::app_runtime::AppId>,
     dock_lift: [u8; desktop::DOCK_NUM_ICONS],
 }
 
@@ -94,6 +98,10 @@ impl CompositorEngine {
             frame_count: 0,
             animation_start: 0,
             rendered_tick: 0,
+            panel: desktop::Panel::Closed,
+            painted_panel: desktop::Panel::Closed,
+            pending_power: None,
+            pending_launch: None,
             dock_lift: [0; desktop::DOCK_NUM_ICONS],
         }
     }
@@ -170,6 +178,10 @@ impl CompositorEngine {
 
         POINTER_EVENTS.lock().1 = 0;
         self.last_mouse_buttons = 0;
+        self.panel = desktop::Panel::Closed;
+        self.painted_panel = desktop::Panel::Closed;
+        self.pending_power = None;
+        self.pending_launch = None;
         self.dock_lift.fill(0);
         self.animation_start = crate::drivers::pit::get_ticks();
         self.running = true;
@@ -213,7 +225,7 @@ impl CompositorEngine {
     ) -> Option<usize> {
         let slot = self.windows.iter().position(|w| w.is_none())?;
         let id = self.next_window_id;
-        self.next_window_id += 1;
+        self.next_window_id = id.checked_add(1).filter(|next| *next <= i64::MAX as usize)?;
 
         let mut win = Window::new(id, title, x, y, width, height)?;
         self.highest_z += 1;
@@ -222,6 +234,7 @@ impl CompositorEngine {
 
         // Unfocus previous windows
         for other in self.windows.iter_mut().flatten() {
+            if other.is_focused { other.client_event([client::EVENT_FOCUS, 0, 0, 0]); }
             other.is_focused = false;
         }
 
@@ -271,12 +284,16 @@ impl CompositorEngine {
         let new_z = self.highest_z;
 
         for win in self.windows.iter_mut().flatten() {
+            let was_focused = win.is_focused;
             if win.id == id {
                 win.z_order = new_z;
                 win.is_focused = true;
                 found = true;
             } else {
                 win.is_focused = false;
+            }
+            if was_focused != win.is_focused {
+                win.client_event([client::EVENT_FOCUS, u32::from(win.is_focused), 0, 0]);
             }
         }
 
@@ -296,7 +313,7 @@ impl CompositorEngine {
         let mut top_id = None;
 
         for win in self.windows.iter().flatten() {
-            if win.z_order >= max_z {
+            if win.is_visible && !win.is_minimized && win.z_order >= max_z {
                 max_z = win.z_order;
                 top_id = Some(win.id);
             }
@@ -335,6 +352,15 @@ impl CompositorEngine {
         let left_released = (buttons & 0x01) == 0 && (self.last_mouse_buttons & 0x01) != 0;
         self.last_mouse_buttons = buttons;
 
+        if self.panel == desktop::Panel::Closed {
+            if let Some(id) = self.focused_window_id {
+                if self.windows.iter().flatten().any(|win| win.id == id && win.owner.is_some()
+                    && (!left_clicked && (win.client_rect().contains(x, y) || left_released))) {
+                    self.client_pointer(id, x, y, buttons);
+                }
+            }
+        }
+
         if left_released {
             self.dragging_window_id = None;
         }
@@ -355,20 +381,45 @@ impl CompositorEngine {
 
         // Handle left click hit-testing
         if left_clicked {
-            // 1. First hit-test the desktop shell UI (Purple Bar and Purple Dock)
-            let action = desktop::hit_test(x, y, self.width, self.height, self.rendered_tick, &self.dock_lift);
-            match action {
-                desktop::DesktopAction::PurpleLogoClick => {
+            use desktop::{DesktopAction, Panel};
+            if self.panel == Panel::PowerBusy {
+                return;
+            }
+            let panel_rect = desktop::panel_region(self.width, self.height, self.painted_panel);
+            let action = if panel_rect.w != 0 && panel_rect.contains(x, y) {
+                desktop::panel_action(self.painted_panel, panel_rect, x, y)
+            } else if self.painted_panel.is_power() {
+                DesktopAction::ShowPanel(Panel::QuickSettings)
+            } else {
+                desktop::hit_test(x, y, self.width, self.height, self.rendered_tick, &self.dock_lift)
+            };
+            let next = match action {
+                DesktopAction::PurpleLogoClick => {
                     crate::drivers::serial::println("Compositor: Purple logo clicked");
-                    return;
+                    Some(if matches!(self.panel, Panel::Applications(_)) { Panel::Closed } else { Panel::Applications(0) })
                 }
-                desktop::DesktopAction::DockIconClick(i) => {
-                    crate::drivers::serial::print("Compositor: Dock launcher icon ");
-                    crate::drivers::serial::print_u64(i as u64);
-                    crate::drivers::serial::println(" clicked");
-                    return;
+                DesktopAction::TrayClick => {
+                    Some(match self.panel {
+                        Panel::QuickSettings | Panel::Detail(_) => Panel::Closed,
+                        _ => Panel::QuickSettings,
+                    })
                 }
-                desktop::DesktopAction::None => {}
+                DesktopAction::DockIconClick(index) => Some(desktop::app_panel(index)),
+                DesktopAction::ShowPanel(panel) => Some(panel),
+                DesktopAction::LaunchApp(id) => {
+                    self.pending_launch = Some(id);
+                    Some(Panel::Closed)
+                }
+                DesktopAction::Power(action) => {
+                    self.pending_power = Some(action);
+                    Some(Panel::PowerBusy)
+                }
+                DesktopAction::None if self.panel != Panel::Closed => Some(Panel::Closed),
+                DesktopAction::None => None,
+            };
+            if let Some(panel) = next {
+                self.panel = panel;
+                return;
             }
 
             // 2. Find window clicked under cursor, searching from highest Z to lowest Z
@@ -397,11 +448,28 @@ impl CompositorEngine {
 
                 match hit_area {
                     WindowHitArea::CloseButton => {
-                        self.close_window(win_id);
+                        if let Some(win) = self.get_window_mut(win_id).filter(|win| win.owner.is_some()) {
+                            win.client_event([client::EVENT_CLOSE, 0, 0, 0]);
+                        } else {
+                            self.close_window(win_id);
+                        }
                     }
+                    WindowHitArea::Client(_, _) => self.client_pointer(win_id, x, y, buttons),
                     WindowHitArea::MaximizeButton => {
                         for win in self.windows.iter_mut().flatten() {
                             if win.id == win_id {
+                                if win.owner.is_some() {
+                                    let (width, height) = if win.is_maximized {
+                                        (win.prev_w, win.prev_h)
+                                    } else {
+                                        (self.width.saturating_sub(4), self.height.saturating_sub(134))
+                                    };
+                                    let Some(mut surface) = Surface::new(width, height) else { break; };
+                                    surface.clear(window::COLOR_CLIENT_BG);
+                                    win.surface.destroy();
+                                    win.surface = surface;
+                                    win.client_event([client::EVENT_RESIZE, width as u32, height as u32, 0]);
+                                }
                                 if win.is_maximized {
                                     win.x = win.prev_x;
                                     win.y = win.prev_y;
@@ -414,9 +482,9 @@ impl CompositorEngine {
                                     win.prev_w = win.client_w;
                                     win.prev_h = win.client_h;
                                     win.x = 0;
-                                    win.y = 26; // Below top menu bar
+                                    win.y = if win.owner.is_some() { (desktop::BAR_HEIGHT + 16) as i32 } else { 26 };
                                     win.client_w = self.width.saturating_sub(4);
-                                    win.client_h = self.height.saturating_sub(26 + 28 + 32);
+                                    win.client_h = if win.owner.is_some() { win.surface.height } else { self.height.saturating_sub(26 + 28 + 32) };
                                     win.is_maximized = true;
                                 }
                                 break;
@@ -455,18 +523,23 @@ impl CompositorEngine {
 
         let tick = self.animation_tick();
         let elapsed = tick.saturating_sub(self.rendered_tick).min(desktop::DOCK_LIFT as u64) as u8;
+        self.cursor.grabbing = self.dragging_window_id.is_some();
+        self.cursor.monochrome = self.panel.is_power();
         desktop::update_dock_lift(self.width, self.height, &self.cursor, &mut self.dock_lift, elapsed);
         self.rendered_tick = tick;
         self.frame_count = self.frame_count.saturating_add(1);
 
-        if desktop_only && self.window_count() == 0 {
+        if desktop_only && self.window_count() == 0 && !self.panel.is_power() && !self.painted_panel.is_power() {
             let [bar, dock] = desktop::animated_regions(self.width, self.height);
+            let old_panel = desktop::panel_region(self.width, self.height, self.painted_panel);
+            let panel = desktop::panel_region(self.width, self.height, self.panel);
             let previous_pointer = self.cursor.saved_bounds();
             self.cursor.restore(&mut self.back_buffer);
-            Wallpaper::restore_regions(&mut self.back_buffer, &[bar, dock]);
+            Wallpaper::restore_regions(&mut self.back_buffer, &[bar, dock, old_panel, panel]);
             desktop::render_desktop_shell(&mut self.back_buffer, tick, &self.dock_lift);
+            desktop::render_panel(&mut self.back_buffer, self.panel, &self.cursor);
             self.cursor.draw(&mut self.back_buffer);
-            self.present_frame(&[bar, dock, previous_pointer, self.cursor.bounds()]);
+            self.present_frame(&[bar, dock, old_panel, panel, previous_pointer, self.cursor.bounds()]);
         } else {
             CompositorPipeline::render_scene(
                 &mut self.back_buffer,
@@ -474,9 +547,11 @@ impl CompositorEngine {
                 &mut self.cursor,
                 tick,
                 &self.dock_lift,
+                self.panel,
             );
             self.present_frame(&[Rect::new(0, 0, self.width, self.height)]);
         }
+        self.painted_panel = self.panel;
     }
 
     fn animation_tick(&self) -> u64 {
@@ -505,15 +580,9 @@ impl CompositorEngine {
                 }
             }
         };
-        let gpu = GPU.lock();
-        if gpu.is_ready && !gpu.fb_ptr.is_null() {
-            copy(gpu.fb_ptr, gpu.width, gpu.height, gpu.pitch);
-        } else {
-            drop(gpu);
-            let v = VIDEO.lock();
-            if v.available && !v.fb_ptr.is_null() {
-                copy(v.fb_ptr, v.width, v.height, v.pitch);
-            }
+        let v = VIDEO.lock();
+        if v.available && !v.fb_ptr.is_null() {
+            copy(v.fb_ptr, v.width, v.height, v.pitch);
         }
     }
 
@@ -646,6 +715,7 @@ pub fn handle_mouse_event(x: i32, y: i32, buttons: u8) {
 /// Service pointer input and draw at most once per animation tick.
 pub fn service() {
     if !is_running() {
+        crate::kernel::task::reap_native();
         return;
     }
     let mut compositor = COMPOSITOR.lock();
@@ -661,7 +731,28 @@ pub fn service() {
     for &(x, y, buttons) in &events[..count] {
         compositor.handle_mouse_event(x, y, buttons);
     }
+    compositor.reap_client_windows();
     compositor.draw(true);
+    let power = compositor.pending_power.take();
+    let launch = compositor.pending_launch.take();
+    drop(compositor);
+    if let Some(id) = launch {
+        if let Err(reason) = crate::kernel::app_runtime::launch(id.as_str()) {
+            let mut compositor = COMPOSITOR.lock();
+            compositor.panel = desktop::Panel::AppError(reason);
+            compositor.draw(false);
+        }
+    }
+    if let Some(action) = power {
+        if let Err(reason) = crate::kernel::power::execute(action) {
+            crate::drivers::serial::print("Power: request cancelled: ");
+            crate::drivers::serial::println(reason);
+            let mut compositor = COMPOSITOR.lock();
+            compositor.panel = desktop::Panel::PowerError(reason);
+            compositor.draw(false);
+        }
+    }
+    crate::kernel::task::reap_native();
 }
 
 pub fn create_window(title: &str, x: i32, y: i32, w: usize, h: usize) -> Option<usize> {

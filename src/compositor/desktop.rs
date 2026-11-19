@@ -99,7 +99,11 @@ pub fn update_dock_lift(
 pub enum DesktopAction {
     None,
     PurpleLogoClick,
+    TrayClick,
     DockIconClick(usize),
+    ShowPanel(Panel),
+    Power(crate::kernel::power::Action),
+    LaunchApp(crate::kernel::app_runtime::AppId),
 }
 
 #[inline(always)]
@@ -198,49 +202,12 @@ fn render_purple_bar(target: &mut Surface, anim_tick: u64) {
         COLOR_GLASS_BORDER,
     );
 
-    // 3. Slick Animation: Specular Horizon Light Ray (Gleam Shimmer Sweep)
-    let shimmer_period = (bar_w as u64 + 200).max(1);
-    let shimmer_center = bar_x - 100 + (anim_tick.wrapping_mul(6) % shimmer_period) as i32;
-    let shimmer_radius = 45;
-
-    let sheen_x1 = (bar_x + 12).max(shimmer_center - shimmer_radius);
-    let sheen_x2 = (bar_x + bar_w as i32 - 12).min(shimmer_center + shimmer_radius);
-    if sheen_x1 < sheen_x2 && bar_y >= 0 && (bar_y as usize) < target.height {
-        for px in sheen_x1..sheen_x2 {
-            let dist = (px - shimmer_center).abs();
-            let alpha = (((shimmer_radius - dist) * 0x90) / shimmer_radius) as u8;
-            target.blend_pixel(px as usize, bar_y as usize, (alpha as u32) << 24 | 0x00FFFFFF);
-        }
-    }
-
-    // 4. Left Region: Glowing Stylish Purple 'P' Brand Emblem with Breathing Amethyst Aura
     let logo = logo_rect(bar);
-    let (btn_x, btn_y, btn_size) = (logo.x, logo.y, logo.w);
-
-    // Breathing aura pulse: alpha oscillates smoothly between 0x60 and 0xD0 (frequency ~0.5Hz)
-    let half_cycle = ANIMATION_HZ;
-    let phase = (anim_tick % (half_cycle * 2)).abs_diff(half_cycle);
-    let pulse = phase * phase * (3 * half_cycle - 2 * phase) / half_cycle.pow(2);
-    let aura_alpha = 0x60 + (pulse * 0x70 / half_cycle) as u32;
-    let aura_border_color = (aura_alpha << 24) | 0x00C084FC; // Neon Violet pulsing border
-    let aura_base_color = 0xEE220C3A;
-
     render_rounded_glass_rect(
-        target,
-        btn_x,
-        btn_y,
-        btn_size,
-        btn_size,
-        7,
-        aura_base_color,
-        aura_border_color,
+        target, logo.x, logo.y, logo.w, logo.h, 7, 0xEE201132, 0x807C59AE,
     );
-
-    // Blit the Anti-Aliased Stylish 'Amethyst Prism P' Logo (18x18 ARGB)
-    let logo_x = btn_x + (btn_size as i32 - 18) / 2;
-    let logo_y = btn_y + (btn_size as i32 - 18) / 2;
-    let logo_alpha = (232 + pulse * 23 / half_cycle) as u32;
-    super::icons::render_logo_argb(target, logo_x, logo_y, &super::icons::STYLISH_P_LOGO, logo_alpha);
+    let mark_inset = (logo.w as i32 - super::icons::PURPLE_MARK_SIZE as i32) / 2;
+    super::icons::render_purple_mark(target, logo.x + mark_inset, logo.y + mark_inset);
 
     // 5. Center Region: Clean Centered Digital Clock Capsule (No green dot)
     let time = crate::drivers::rtc::get_time();
@@ -275,10 +242,10 @@ fn render_purple_bar(target: &mut Surface, anim_tick: u64) {
     let pill_h = FONT_HEIGHT + 8;
     let pill_x = bar_x + (bar_w as i32 - pill_w as i32) / 2;
     let pill_y = bar_y + (bar_h - pill_h) as i32 / 2;
-    let tray_x = bar.right() - TRAY_WIDTH as i32 - LOGO_INSET;
-    let show_tray = tray_x >= pill_x + pill_w as i32 + LOGO_INSET;
+    let tray = tray_rect(bar);
+    let show_tray = tray.x >= logo.right() + LOGO_INSET;
 
-    if pill_x >= logo.right() + LOGO_INSET {
+    if pill_x >= logo.right() + LOGO_INSET && (!show_tray || pill_x + pill_w as i32 + LOGO_INSET <= tray.x) {
         render_rounded_glass_rect(
             target, pill_x, pill_y, pill_w, pill_h, pill_h / 2, 0x90110722, 0x40A855F7,
         );
@@ -296,14 +263,16 @@ fn render_purple_bar(target: &mut Surface, anim_tick: u64) {
     }
 
     if show_tray {
-        // These glyphs are shell affordances. Their colors do not report hardware state.
-        render_rounded_glass_rect(target, tray_x, pill_y, TRAY_WIDTH, pill_h, pill_h / 2, 0x80110722, 0x389333EA);
-        let icon_y = pill_y + 4;
-        use super::icons::{render_icon_mask, ICON_BATTERY_SHELL, ICON_SLIDERS, ICON_VOLUME_FULL, ICON_WIFI_FULL};
-        render_icon_mask(target, tray_x + 10, icon_y, &ICON_SLIDERS, COLOR_NEON_VIOLET);
-        render_icon_mask(target, tray_x + 36, icon_y, &ICON_WIFI_FULL, COLOR_TEXT_MUTED);
-        render_icon_mask(target, tray_x + 60, icon_y, &ICON_VOLUME_FULL, COLOR_TEXT_MUTED);
-        render_icon_mask(target, tray_x + 86, pill_y + 6, &ICON_BATTERY_SHELL, COLOR_TEXT_MUTED);
+        tile(target, tray, false, 0xFF261A36);
+        let network = if network_ready() { 0xFF89BAFF } else { COLOR_TEXT_MUTED };
+        for (icon, offset, color) in [
+            (ShellIcon::Wifi, 10, network),
+            (ShellIcon::Bluetooth, 36, COLOR_TEXT_MUTED),
+            (ShellIcon::Power, 62, COLOR_TEXT_PRIMARY),
+            (ShellIcon::Chevron, 88, COLOR_TEXT_MUTED),
+        ] {
+            shell_icon(target, icon, tray.x + offset, tray.y + 5, 16, color);
+        }
     }
 }
 
@@ -324,62 +293,11 @@ fn render_purple_dock(target: &mut Surface, lift: &[u8; DOCK_NUM_ICONS]) {
             render_rounded_glass_rect(target, ix - 2, iy - 2, icon.w + 4, icon.h + 4, 12, scale_alpha(glow, 64), glow);
         }
 
-        match i {
-            0 => {
-                // Card 0: Terminal Icon (Deep violet card with electric cyan prompt & amethyst cursor)
-                render_rounded_glass_rect(target, ix, iy, DOCK_ICON_SIZE, DOCK_ICON_SIZE, 10, 0xEE160A2B, 0x808B5CF6);
-                // Chevron '>'
-                target.draw_line(ix + 9, iy + 13, ix + 15, iy + 19, COLOR_CYAN_ACCENT);
-                target.draw_line(ix + 9, iy + 14, ix + 15, iy + 20, COLOR_CYAN_ACCENT);
-                target.draw_line(ix + 15, iy + 19, ix + 9, iy + 25, COLOR_CYAN_ACCENT);
-                target.draw_line(ix + 15, iy + 20, ix + 9, iy + 26, COLOR_CYAN_ACCENT);
-                // Underscore '_'
-                target.draw_line(ix + 19, iy + 25, ix + 27, iy + 25, COLOR_NEON_VIOLET);
-                target.draw_line(ix + 19, iy + 26, ix + 27, iy + 26, COLOR_NEON_VIOLET);
-            }
-            1 => {
-                // Card 1: Files Icon (Purple folder)
-                render_rounded_glass_rect(target, ix, iy, DOCK_ICON_SIZE, DOCK_ICON_SIZE, 10, 0xEE240E44, 0x80A855F7);
-                // Folder tab
-                target.fill_rect(Rect::new(ix + 8, iy + 11, 9, 3), 0xFFE9D5FF);
-                target.fill_rect(Rect::new(ix + 8, iy + 14, 22, 13), 0xFFA855F7);
-                target.draw_line(ix + 8, iy + 14, ix + 29, iy + 14, 0xFFD8B4FE);
-            }
-            2 => {
-                // Card 2: System Monitor Icon (Pulse waveform / ECG)
-                render_rounded_glass_rect(target, ix, iy, DOCK_ICON_SIZE, DOCK_ICON_SIZE, 10, 0xEE100D2A, 0x806366F1);
-                // Waveform
-                target.draw_line(ix + 6, iy + 19, ix + 11, iy + 19, COLOR_CYAN_ACCENT);
-                target.draw_line(ix + 11, iy + 19, ix + 14, iy + 9, COLOR_CYAN_ACCENT);
-                target.draw_line(ix + 14, iy + 9, ix + 18, iy + 28, COLOR_NEON_VIOLET);
-                target.draw_line(ix + 18, iy + 28, ix + 22, iy + 13, COLOR_CYAN_ACCENT);
-                target.draw_line(ix + 22, iy + 13, ix + 25, iy + 22, COLOR_CYAN_ACCENT);
-                target.draw_line(ix + 25, iy + 22, ix + 31, iy + 19, COLOR_CYAN_ACCENT);
-            }
-            3 => {
-                // Card 3: Code Studio Icon (Brackets </>)
-                render_rounded_glass_rect(target, ix, iy, DOCK_ICON_SIZE, DOCK_ICON_SIZE, 10, 0xEE1A0C35, 0x80C084FC);
-                // '<'
-                target.draw_line(ix + 10, iy + 19, ix + 14, iy + 14, COLOR_AMETHYST_ACCENT);
-                target.draw_line(ix + 10, iy + 19, ix + 14, iy + 24, COLOR_AMETHYST_ACCENT);
-                // '/'
-                target.draw_line(ix + 17, iy + 25, ix + 20, iy + 13, 0xFFCBD5E1);
-                // '>'
-                target.draw_line(ix + 27, iy + 19, ix + 23, iy + 14, COLOR_AMETHYST_ACCENT);
-                target.draw_line(ix + 27, iy + 19, ix + 23, iy + 24, COLOR_AMETHYST_ACCENT);
-            }
-            4 => {
-                // Card 4: Settings Icon (Precision gear)
-                render_rounded_glass_rect(target, ix, iy, DOCK_ICON_SIZE, DOCK_ICON_SIZE, 10, 0xEE1C0E38, 0x809333EA);
-                let cx = ix + 19;
-                let cy = iy + 19;
-                target.fill_rect(Rect::new(cx - 6, cy - 6, 13, 13), COLOR_NEON_VIOLET);
-                target.draw_line(cx - 8, cy, cx + 8, cy, COLOR_NEON_VIOLET);
-                target.draw_line(cx, cy - 8, cx, cy + 8, COLOR_NEON_VIOLET);
-                target.fill_rect(Rect::new(cx - 2, cy - 2, 5, 5), 0xFF1C0E38);
-            }
-            _ => {}
-        }
+        let (_, glyph, accent) = APPS[i];
+        let base = interpolate_color(0xFF191120, accent, 1, 5);
+        render_rounded_glass_rect(target, ix, iy, icon.w, icon.h, 11, base, scale_alpha(accent, 120));
+        let inset = (DOCK_ICON_SIZE as i32 - 24) / 2;
+        shell_icon(target, glyph, ix + inset, iy + inset, 24, accent);
     }
 
     // 4. Inverted mirror reflection pass below dock (Looking Glass heritage)
@@ -400,6 +318,11 @@ pub fn hit_test(
         && logo_rect(bar_rect(width, tick)).contains(x, y)
     {
         return DesktopAction::PurpleLogoClick;
+    }
+    let bar = bar_rect(width, tick);
+    let tray = tray_rect(bar);
+    if tray.x >= logo_rect(bar).right() + LOGO_INSET && tray.contains(x, y) {
+        return DesktopAction::TrayClick;
     }
     if let Some(dock) = dock_rect(width, height) {
         for (index, offset) in lift.iter().copied().enumerate() {
@@ -451,4 +374,338 @@ fn month_name(month: u8) -> &'static str {
         12 => "Dec",
         _ => "---",
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel {
+    Closed,
+    Applications(usize),
+    AppError(&'static str),
+    QuickSettings,
+    Detail(QuickItem),
+    DockInfo(usize),
+    Power,
+    PowerBusy,
+    PowerError(&'static str),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuickItem { Wifi, Bluetooth, Power, Settings, Resources }
+
+use super::icons::{shell_icon, ShellIcon};
+
+const APPS: [(&str, ShellIcon, u32); DOCK_NUM_ICONS] = [
+    ("Terminal", ShellIcon::Terminal, 0xFF63DFC9),
+    ("Files", ShellIcon::Files, 0xFFFFC078),
+    ("System Monitor", ShellIcon::Resources, 0xFF83B8FF),
+    ("Code Studio", ShellIcon::Code, 0xFFFFA5D4),
+    ("Settings", ShellIcon::Settings, 0xFFCBB0FF),
+];
+
+const QUICK_ITEMS: [(QuickItem, &str, ShellIcon, &str, u32); 5] = [
+    (QuickItem::Wifi, "Wi-Fi", ShellIcon::Wifi, "Unavailable", 0xFF89BAFF),
+    (QuickItem::Bluetooth, "Bluetooth", ShellIcon::Bluetooth, "Unavailable", 0xFFB8A3FF),
+    (QuickItem::Power, "Power", ShellIcon::Power, "Shut down", 0xFFFFB39E),
+    (QuickItem::Settings, "Settings", ShellIcon::Settings, "Display info", 0xFFCBB0FF),
+    (QuickItem::Resources, "System Monitor", ShellIcon::Resources, "Memory usage", 0xFF63DFC9),
+];
+
+fn network_ready() -> bool {
+    crate::drivers::e1000::is_ready() || crate::drivers::rtl8139::is_ready()
+}
+
+fn tray_rect(bar: Rect) -> Rect {
+    Rect::new(bar.right() - TRAY_WIDTH as i32 - LOGO_INSET, bar.y + 4, TRAY_WIDTH, 26)
+}
+
+pub fn panel_region(width: usize, height: usize, panel: Panel) -> Rect {
+    let bar = bar_rect(width, BAR_ENTRANCE_TICKS);
+    let y = bar.bottom() + 9;
+    let (w, h) = match panel {
+        Panel::Closed => return Rect::new(0, 0, 0, 0),
+        Panel::Applications(_) => (300, 314),
+        Panel::AppError(_) => (376, 88),
+        Panel::QuickSettings => (342, 270),
+        Panel::Detail(_) => (342, 174),
+        Panel::Power | Panel::PowerBusy | Panel::PowerError(_) => {
+            let w = 340;
+            let h = 196;
+            return if width >= w && height >= h {
+                Rect::new(((width - w) / 2) as i32, ((height - h) / 2) as i32, w, h)
+            } else {
+                Rect::new(0, 0, 0, 0)
+            };
+        }
+        Panel::DockInfo(_) => (224, 76),
+    };
+    if bar.w < w || height < y as usize + h {
+        return Rect::new(0, 0, 0, 0);
+    }
+    match panel {
+        Panel::Applications(_) | Panel::AppError(_) => Rect::new(bar.x, y, w, h),
+        Panel::DockInfo(_) => {
+            let bottom = DOCK_HEIGHT + REFLECTION_HEIGHT + h + 14;
+            if height < y as usize + bottom {
+                return Rect::new(0, 0, 0, 0);
+            }
+            Rect::new(((width - w) / 2) as i32, (height - bottom) as i32, w, h)
+        }
+        _ => Rect::new(bar.right() - w as i32, y, w, h),
+    }
+}
+
+fn tile(target: &mut Surface, rect: Rect, hover: bool, fill: u32) {
+    render_rounded_glass_rect(
+        target, rect.x, rect.y, rect.w, rect.h, 11,
+        if hover { 0xFF473364 } else { fill }, 0x604C395F,
+    );
+}
+
+fn text(target: &mut Surface, x: i32, y: i32, label: &str, color: u32, bold: bool) {
+    if bold {
+        target.draw_text_bold(x as usize, y as usize, label, color, 0, true);
+    } else {
+        target.draw_text(x as usize, y as usize, label, color, 0, true);
+    }
+}
+
+fn app_row(panel: Rect, index: usize) -> Rect {
+    Rect::new(panel.x + 12, panel.y + 47 + index as i32 * 46, panel.w - 24, 41)
+}
+
+fn app_pages(panel: Rect) -> [Rect; 2] {
+    let y = panel.bottom() - 35;
+    [Rect::new(panel.x + 12, y, 88, 25), Rect::new(panel.right() - 100, y, 88, 25)]
+}
+
+fn quick_tile(panel: Rect, index: usize) -> Rect {
+    let column = (panel.w - 43) / 2;
+    let x = panel.x + 16 + (index % 2 * (column + 11)) as i32;
+    Rect::new(x, panel.y + 66 + (index / 2) as i32 * 64,
+        if index == 4 { panel.w - 32 } else { column }, 55)
+}
+
+fn detail_back(panel: Rect) -> Rect {
+    Rect::new(panel.x + 16, panel.bottom() - 48, 92, 32)
+}
+
+impl Panel {
+    pub fn is_power(self) -> bool {
+        matches!(self, Self::Power | Self::PowerBusy | Self::PowerError(_))
+    }
+}
+
+fn power_buttons(panel: Rect) -> [Rect; 2] {
+    let width = (panel.w - 52) / 2;
+    [
+        Rect::new(panel.x + 20, panel.y + 57, width, 76),
+        Rect::new(panel.x + 32 + width as i32, panel.y + 57, width, 76),
+    ]
+}
+
+fn power_cancel(panel: Rect) -> Rect {
+    Rect::new(panel.right() - 112, panel.bottom() - 46, 92, 28)
+}
+
+fn grayscale(target: &mut Surface, area: Rect, dim: bool) {
+    for y in area.y as usize..area.bottom() as usize {
+        for x in area.x as usize..area.right() as usize {
+            let pixel = target.get_pixel(x, y);
+            let mut gray = super::blend::gray_level(pixel);
+            if dim { gray = gray * 3 / 4; }
+            target.set_pixel(x, y, 0xff00_0000 | gray * 0x0001_0101);
+        }
+    }
+}
+
+fn render_power(target: &mut Surface, panel: Panel, area: Rect, cursor: &Cursor) {
+    grayscale(target, Rect::new(0, 0, target.width, target.height), true);
+    render_rounded_glass_rect(target, area.x, area.y, area.w, area.h, 16, 0xFF262626, 0xFF8C8C8C);
+    grayscale(target, area, false);
+    text(target, area.x + 20, area.y + 16, "Power", 0xFFF6F6F6, true);
+
+    let buttons = power_buttons(area);
+    for (i, (label, icon, color, fill)) in [
+        ("Shutdown", ShellIcon::Power, 0xFFFFB8A8, 0xFF662D36),
+        ("Restart", ShellIcon::Restart, 0xFFB9EAB8, 0xFF285342),
+    ].into_iter().enumerate() {
+        let button = buttons[i];
+        let fill = if panel != Panel::PowerBusy && button.contains(cursor.x, cursor.y) {
+            interpolate_color(fill, color, 1, 4)
+        } else {
+            fill
+        };
+        tile(target, button, false, fill);
+        shell_icon(target, icon, button.x + (button.w as i32 - 24) / 2, button.y + 10, 24, color);
+        text(target, button.x + (button.w as i32 - (label.len() * FONT_WIDTH) as i32) / 2,
+            button.y + 45, label, COLOR_TEXT_PRIMARY, true);
+    }
+
+    match panel {
+        Panel::PowerBusy => text(target, area.x + 20, area.bottom() - 37, "Syncing system disk...", 0xFFE1E1E1, false),
+        _ => {
+            if let Panel::PowerError(message) = panel {
+                text(target, area.x + 20, area.y + 136, "Power action cancelled", 0xFFFFFFFF, true);
+                let label = if message.len() > 24 { "Check serial log" } else { message };
+                text(target, area.x + 20, area.bottom() - 31, label, 0xFFE1E1E1, false);
+            }
+            let cancel = power_cancel(area);
+            tile(target, cancel, cancel.contains(cursor.x, cursor.y), 0xFF393939);
+            grayscale(target, cancel, false);
+            text(target, cancel.x + 20, cancel.y + 6, "Cancel", 0xFFF6F6F6, false);
+        }
+    }
+}
+
+pub fn render_panel(target: &mut Surface, panel: Panel, cursor: &Cursor) {
+    let area = panel_region(target.width, target.height, panel);
+    if area.w == 0 { return; }
+    if panel.is_power() {
+        render_power(target, panel, area, cursor);
+        return;
+    }
+    let hovered = |rect: Rect| rect.contains(cursor.x, cursor.y);
+    render_rounded_glass_rect(target, area.x, area.y, area.w, area.h, 18, 0xFF21162E, 0xA4705692);
+    let x = area.x + 16;
+    let y = area.y + 14;
+    match panel {
+        Panel::Closed => {}
+        Panel::Applications(page) => {
+            text(target, x, y, "Applications", COLOR_TEXT_PRIMARY, true);
+            let (entries, more) = crate::kernel::app_runtime::launcher_page::<5>(page);
+            if entries[0].is_none() {
+                text(target, x, y + 36, "No installed applications", COLOR_TEXT_MUTED, false);
+            }
+            for (index, entry) in entries.iter().enumerate() {
+                if let Some(entry) = entry {
+                    let row = app_row(area, index);
+                    tile(target, row, hovered(row), 0xFF261B36);
+                    shell_icon(target, ShellIcon::Files, row.x + 9, row.y + 10, 21, COLOR_NEON_VIOLET);
+                    text(target, row.x + 40, row.y + 12, entry.as_str(), COLOR_TEXT_PRIMARY, true);
+                }
+            }
+            let pages = app_pages(area);
+            for (button, enabled, label) in [(pages[0], page > 0, "Previous"), (pages[1], more, "Next")] {
+                if enabled {
+                    tile(target, button, hovered(button), 0xFF261B36);
+                    text(target, button.x + 9, button.y + 5, label, COLOR_TEXT_PRIMARY, false);
+                }
+            }
+        }
+        Panel::AppError(error) => {
+            text(target, x, y, "Application could not start", COLOR_TEXT_PRIMARY, true);
+            text(target, x, y + 28, error, COLOR_TEXT_MUTED, false);
+        }
+        Panel::QuickSettings => {
+            text(target, x, y, "Quick Settings", COLOR_TEXT_PRIMARY, true);
+            let status = if network_ready() { "Wired adapter detected" } else { "No network adapter" };
+            text(target, x, y + 21, status, COLOR_TEXT_MUTED, false);
+            for (index, (_, label, icon, subtitle, accent)) in QUICK_ITEMS.iter().copied().enumerate() {
+                let row = quick_tile(area, index);
+                tile(target, row, hovered(row), 0xFF2D203F);
+                shell_icon(target, icon, row.x + 10, row.y + 16, 22, accent);
+                text(target, row.x + 40, row.y + 8, label, COLOR_TEXT_PRIMARY, true);
+                text(target, row.x + 40, row.y + 28, subtitle, COLOR_TEXT_MUTED, false);
+            }
+        }
+        Panel::Detail(item) => {
+            let (_, title, icon, _, accent) = QUICK_ITEMS.iter().copied().find(|entry| entry.0 == item).unwrap();
+            text(target, x, y, title, COLOR_TEXT_PRIMARY, true);
+            shell_icon(target, icon, area.right() - 41, y, 24, accent);
+            match item {
+                QuickItem::Wifi => {
+                    text(target, x, y + 34, "Wi-Fi controls unavailable", COLOR_TEXT_MUTED, false);
+                    let wired = if network_ready() { "Wired adapter detected" } else { "No wired adapter detected" };
+                    text(target, x, y + 55, wired, COLOR_TEXT_MUTED, false);
+                }
+                QuickItem::Bluetooth => text(target, x, y + 34, "Bluetooth controls unavailable", COLOR_TEXT_MUTED, false),
+                QuickItem::Power => {}
+                QuickItem::Settings => {
+                    text(target, x, y + 34, "Display: linear framebuffer", COLOR_TEXT_MUTED, false);
+                    text(target, x, y + 55, "Pointer: PS/2 mouse", COLOR_TEXT_MUTED, false);
+                }
+                QuickItem::Resources => {
+                    let total = crate::mm::pmm::total_frames_count();
+                    let used = total.saturating_sub(crate::mm::pmm::free_frames_count());
+                    let mut number = [0; 20];
+                    let len = crate::fs::vfs::format_u64((used / 256) as u64, &mut number);
+                    text(target, x, y + 33, "Memory used (MiB)", COLOR_TEXT_MUTED, false);
+                    if let Ok(value) = core::str::from_utf8(&number[..len]) {
+                        text(target, x + 158, y + 33, value, COLOR_TEXT_PRIMARY, true);
+                    }
+                    let meter = area.w - 32;
+                    target.fill_rect(Rect::new(x, y + 65, meter, 6), 0xFF463854);
+                    let filled = used.saturating_mul(meter).checked_div(total).unwrap_or(0);
+                    target.fill_rect(Rect::new(x, y + 65, filled, 6), accent);
+                }
+            }
+            let back = detail_back(area);
+            tile(target, back, hovered(back), 0xFF312342);
+            text(target, back.x + 13, back.y + 8, "Back", COLOR_TEXT_PRIMARY, false);
+        }
+        Panel::DockInfo(index) => {
+            let (label, icon, accent) = APPS[index];
+            shell_icon(target, icon, x, y + 9, 24, accent);
+            text(target, x + 37, y + 3, label, COLOR_TEXT_PRIMARY, true);
+            text(target, x + 37, y + 25, "Not installed", COLOR_TEXT_MUTED, false);
+        }
+        Panel::Power | Panel::PowerBusy | Panel::PowerError(_) => {}
+    }
+}
+
+pub fn app_panel(index: usize) -> Panel {
+    match index {
+        2 => Panel::Detail(QuickItem::Resources),
+        4 => Panel::Detail(QuickItem::Settings),
+        _ => Panel::DockInfo(index),
+    }
+}
+
+/// A click inside a popup is always consumed, including its background.
+pub fn panel_action(panel: Panel, area: Rect, x: i32, y: i32) -> DesktopAction {
+    match panel {
+        Panel::Applications(page) => {
+            let (entries, more) = crate::kernel::app_runtime::launcher_page::<5>(page);
+            for (index, entry) in entries.into_iter().enumerate() {
+                if let Some(entry) = entry.filter(|_| app_row(area, index).contains(x, y)) {
+                    return DesktopAction::LaunchApp(entry);
+                }
+            }
+            let buttons = app_pages(area);
+            if page > 0 && buttons[0].contains(x, y) {
+                return DesktopAction::ShowPanel(Panel::Applications(page - 1));
+            }
+            if more && buttons[1].contains(x, y) {
+                return DesktopAction::ShowPanel(Panel::Applications(page + 1));
+            }
+        }
+        Panel::QuickSettings => {
+            if let Some(index) = (0..QUICK_ITEMS.len()).find(|&i| quick_tile(area, i).contains(x, y)) {
+                let item = QUICK_ITEMS[index].0;
+                return DesktopAction::ShowPanel(if item == QuickItem::Power {
+                    Panel::Power
+                } else {
+                    Panel::Detail(item)
+                });
+            }
+        }
+        Panel::Detail(_) => {
+            if detail_back(area).contains(x, y) {
+                return DesktopAction::ShowPanel(Panel::QuickSettings);
+            }
+        }
+        Panel::Power | Panel::PowerError(_) => {
+            use crate::kernel::power::Action;
+            if power_cancel(area).contains(x, y) {
+                return DesktopAction::ShowPanel(Panel::QuickSettings);
+            }
+            for (button, action) in power_buttons(area).into_iter().zip([Action::Shutdown, Action::Restart]) {
+                if button.contains(x, y) {
+                    return DesktopAction::Power(action);
+                }
+            }
+        }
+        _ => {}
+    }
+    DesktopAction::ShowPanel(panel)
 }

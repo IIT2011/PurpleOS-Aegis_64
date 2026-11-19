@@ -20,6 +20,7 @@ syscall_entry_asm:
     movq %gs:0, %rsp            /* Load dedicated kernel stack top from per-CPU kernel_rsp */
 
     pushq %gs:8                 /* Push user RSP onto dedicated task kernel stack */
+    swapgs                      /* Dispatch can schedule; keep GS consistent across kernel contexts. */
     pushq %r11                  /* Push saved user RFLAGS */
     pushq %rcx                  /* Push saved user RIP */
 
@@ -55,7 +56,5 @@ syscall_entry_asm:
     popq %rcx                   /* Restore user RIP */
     popq %r11                   /* Restore user RFLAGS */
     popq %rsp                   /* Restore user RSP directly from task's private kernel stack */
-
-    swapgs                      /* Restore user GS base */
 
     sysretq

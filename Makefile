@@ -25,10 +25,10 @@ check:
 	$(CARGO) check --target $(TARGET)
 
 run: build
-	$(QEMU) -kernel $(KERNEL_ELF) -serial stdio -vga std -m 256M -smp 4 -drive file=$(DISK_IMG),format=raw,index=0,media=disk -no-reboot
+	$(QEMU) -kernel $(KERNEL_ELF) -serial stdio -vga std -m 256M -smp 4 -drive file=$(DISK_IMG),format=raw,index=0,media=disk
 
 run-headless: build
-	$(QEMU) -kernel $(KERNEL_ELF) -serial stdio -display none -m 256M -smp 4 -drive file=$(DISK_IMG),format=raw,index=0,media=disk -no-reboot
+	$(QEMU) -kernel $(KERNEL_ELF) -serial stdio -display none -m 256M -smp 4 -drive file=$(DISK_IMG),format=raw,index=0,media=disk
 
 clean:
 	$(CARGO) clean

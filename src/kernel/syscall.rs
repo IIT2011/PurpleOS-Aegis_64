@@ -8,6 +8,7 @@ const MSR_LSTAR: u32 = 0xC0000082;
 const MSR_SFMASK: u32 = 0xC0000084;
 const MSR_KERNEL_GS_BASE: u32 = 0xC0000102;
 const EFER_SCE: u64 = 0x00000001;
+const KERNEL_FLAG_MASK: u64 = (1 << 8) | (1 << 9) | (1 << 10) | (1 << 18);
 
 // Standard Linux / POSIX.1-2024 x86_64 Syscall Numbers
 pub const SYS_READ: u64            = 0;
@@ -90,8 +91,8 @@ pub fn init() {
 
     wrmsr(MSR_LSTAR, syscall_entry_asm as *const () as usize as u64);
 
-    // SFMASK: Clear IF (0x200) on syscall entry to disable interrupts
-    wrmsr(MSR_SFMASK, 0x200);
+    // Clear user TF, IF, DF, and AC before entering the kernel.
+    wrmsr(MSR_SFMASK, KERNEL_FLAG_MASK);
 
     // Configure per-CPU kernel GS base with dedicated kernel syscall stack
     let stack_top = crate::arch::x86_64::gdt::get_default_stack_top(0);
@@ -110,7 +111,7 @@ pub fn init_ap(cpu_id: usize) {
     let star = (0x0010u64 << 48) | (0x0008u64 << 32);
     wrmsr(MSR_STAR, star);
     wrmsr(MSR_LSTAR, syscall_entry_asm as *const () as usize as u64);
-    wrmsr(MSR_SFMASK, 0x200);
+    wrmsr(MSR_SFMASK, KERNEL_FLAG_MASK);
 
     let cpu = cpu_id.min(7);
     let stack_top = crate::arch::x86_64::gdt::get_default_stack_top(cpu);
@@ -157,6 +158,9 @@ pub extern "C" fn syscall_dispatch(
     a5: u64,
     a6: u64,
 ) -> i64 {
+    if let Some((id, native)) = crate::kernel::task::current_native() {
+        return crate::kernel::app_runtime::dispatch(id, native, sys_no, a1, a2, a3);
+    }
     // PurpleOS Native First-Class System Calls (Strictly non-POSIX, native ABI)
     if sys_no >= crate::kernel::purple_abi::SYS_PURPLE_BASE && sys_no <= crate::kernel::purple_abi::SYS_PURPLE_MAX {
         return crate::kernel::purple_abi::dispatch_native_syscall(sys_no, a1, a2, a3, a4, a5, a6);

@@ -46,8 +46,87 @@ pub fn init() {
     serial::println("AegisDetect: RSA-2048 trust anchor initialized; storage checks run when a filesystem is mounted");
 }
 
+/// Gate startup before external drivers, the desktop, or the shell can run.
+pub fn enforce_boot_policy() {
+    if !crate::kernel::storage::is_mounted() {
+        halt_boot("required system volume is unavailable");
+    }
+    let (verified, required, _, _) = verify_storage();
+    if verified != required {
+        halt_boot("required system files failed integrity verification");
+    }
+    const MANIFEST_PATH: &str = "/System/components.manifest";
+    let has_manifest = crate::fs::vfs::file_size(MANIFEST_PATH).is_ok();
+    if (has_manifest || cfg!(feature = "signed-components")) && !verify_component_manifest(MANIFEST_PATH) {
+        halt_boot("native component manifest failed verification");
+    }
+    if !crate::kernel::cmddb::init() {
+        halt_boot("required command database failed signature verification");
+    }
+    crate::kernel::pathdb::init();
+}
+
+fn verify_component_manifest(path: &str) -> bool {
+    const MAX_MANIFEST: usize = 16_384;
+    let mut bytes = alloc::vec::Vec::new();
+    if bytes.try_reserve_exact(MAX_MANIFEST + 1).is_err() {
+        return false;
+    }
+    bytes.resize(MAX_MANIFEST + 1, 0);
+    let Ok(len @ 1..=MAX_MANIFEST) = crate::fs::vfs::read(path, &mut bytes) else {
+        return false;
+    };
+    let payload = &bytes[..len];
+    if !verify_control_file(path, b"PurpleOS/COMPONENTS/v1\0", payload) {
+        return false;
+    }
+    let mut previous = "";
+    let mut scratch = [0; 4096];
+    let Ok(records) = core::str::from_utf8(payload) else { return false };
+    for line in records.lines() {
+        let Some((digest, name)) = line.split_once("  ") else { return false };
+        if digest.len() != 64 || name <= previous || name == "System/CLI/path.dtbase"
+            || name.split('/').any(|part| part.is_empty() || matches!(part, "." | ".."))
+        {
+            return false;
+        }
+        previous = name;
+        let verified = crate::kernel::storage::with_fs(|fs| {
+            let inode = fs.lookup(name)?;
+            let size = fs.get_file_size(inode)?;
+            let mut hash = sha256::Sha256::new();
+            let mut offset = 0;
+            while offset < size {
+                let count = (size - offset).min(scratch.len());
+                if fs.read_file_at(inode, offset, &mut scratch[..count]) != count {
+                    return None;
+                }
+                hash.update(&scratch[..count]);
+                offset += count;
+            }
+            Some(hash.finalize().iter().zip(digest.as_bytes().chunks_exact(2)).all(|(&byte, hex)| {
+                hex_val(hex[0]).zip(hex_val(hex[1])).is_some_and(|(hi, lo)| byte == (hi << 4 | lo))
+            }))
+        });
+        if verified != Some(Some(true)) {
+            return false;
+        }
+    }
+    serial::println("AegisDetect: Native component manifest verified");
+    !previous.is_empty()
+}
+
+fn halt_boot(reason: &str) -> ! {
+    serial::print("AegisDetect: Boot blocked: ");
+    serial::println(reason);
+    crate::arch::x86_64::cpu::cli();
+    loop {
+        crate::arch::x86_64::cpu::hlt();
+    }
+}
+
 /// Verify a declared 512-hex-character RSA-2048 PKCS#1 v1.5 signature against payload using Creator Public Key
-pub fn verify_signature(payload: &[u8], signature_hex: &[u8]) -> bool {
+fn verify_signature(payload: &[u8], signature_hex: &[u8]) -> bool {
     if signature_hex.len() != 512 {
         return false;
     }
@@ -66,6 +145,49 @@ pub fn verify_signature(payload: &[u8], signature_hex: &[u8]) -> bool {
     }
 
     rsa::verify_rsa_2048_pkcs1_v15(&CREATOR_RSA_MODULUS, payload, &sig_bytes)
+}
+
+/// Authenticate the exact command records passed to the database parser.
+pub fn verify_command_database(data: &[u8]) -> Option<&[u8]> {
+    let mut signature = None;
+    let mut offset = 0;
+    for raw_line in data.split_inclusive(|&byte| byte == b'\n') {
+        let line = raw_line.trim_ascii();
+        if let Some(value) = line.strip_prefix(b"# SIGNATURE:") {
+            let value = value.trim_ascii();
+            if signature.is_some() || value.len() != APDRV_SIGNATURE_HEX_SIZE {
+                return None;
+            }
+            signature = Some(value);
+        } else if !line.is_empty() && !line.starts_with(b"#") {
+            let payload = &data[offset..];
+            return verify_signature(payload, signature?).then_some(payload);
+        }
+        offset += raw_line.len();
+    }
+    None
+}
+
+/// Verify a detached Creator signature over a purpose tag and the complete file.
+pub fn verify_control_file(path: &str, purpose: &[u8], payload: &[u8]) -> bool {
+    use alloc::{string::String, vec::Vec};
+
+    let mut sidecar = String::new();
+    let mut message = Vec::new();
+    if sidecar.try_reserve_exact(path.len() + 4).is_err()
+        || message.try_reserve_exact(purpose.len() + payload.len()).is_err()
+    {
+        return false;
+    }
+    sidecar.push_str(path);
+    sidecar.push_str(".sig");
+    let mut signature = [0; APDRV_SIGNATURE_HEX_SIZE + 1];
+    if crate::fs::vfs::read(&sidecar, &mut signature) != Ok(APDRV_SIGNATURE_HEX_SIZE) {
+        return false;
+    }
+    message.extend_from_slice(purpose);
+    message.extend_from_slice(payload);
+    verify_signature(&message, &signature[..APDRV_SIGNATURE_HEX_SIZE])
 }
 
 /// Verify an APDRV package whose final 512 ASCII bytes hold an RSA signature
@@ -192,4 +314,63 @@ pub fn verify_storage() -> (usize, usize, usize, usize) {
     serial::println(" missing)");
 
     (verified_count, TRUSTED_MANIFEST.len(), unverified_present, missing)
+}
+
+/// An active signer authorization obtained from trusted system policy.
+pub struct AppSigner<'a> {
+    pub public_key: &'a [u8; 32],
+    pub app_id: &'a str,
+    pub scope: crate::kernel::apapplication::Scope,
+    pub capability_ceiling: u32,
+    pub priority_ceiling: u32,
+}
+
+pub struct VerifiedApplication<'a> {
+    pub(crate) bundle: crate::kernel::apapplication::Bundle<'a>,
+    pub(crate) image: crate::kernel::apexec::Image<'a>,
+}
+
+pub fn verify_application<'a>(
+    bytes: &'a [u8],
+    requested_id: &str,
+    scope: crate::kernel::apapplication::Scope,
+    signers: &[AppSigner<'_>],
+    local_policy: (u32, u32),
+    size_limit: usize,
+    max_surface: (u32, u32),
+) -> Result<VerifiedApplication<'a>, crate::kernel::apapplication::Error> {
+    use crate::kernel::apapplication::{Bundle, Error, Scope, SYSADMIN};
+    use alloc::vec::Vec;
+    use ed25519_dalek::{Signature, VerifyingKey};
+
+    const DOMAIN: &[u8] = b"PurpleOS/APAPPLICATION/v2\0";
+    let bundle = Bundle::parse(bytes, size_limit, max_surface)?;
+    let mut trusted = signers.iter().filter(|signer| {
+        signer.app_id == requested_id && signer.scope == scope
+            && crate::crypto::sha256::hash(signer.public_key) == *bundle.key_id
+    });
+    let signer = trusted.next().ok_or(Error::Trust)?;
+    if trusted.next().is_some() {
+        return Err(Error::Trust);
+    }
+    let key = VerifyingKey::from_bytes(signer.public_key).map_err(|_| Error::Trust)?;
+    let mut message = Vec::new();
+    let capacity = DOMAIN.len().checked_add(bytes.len()).ok_or(Error::Memory)?;
+    message.try_reserve_exact(capacity).map_err(|_| Error::Memory)?;
+    message.extend_from_slice(DOMAIN);
+    message.extend_from_slice(&bytes[..0x110]);
+    message.extend_from_slice(&[0; 64]);
+    message.extend_from_slice(&bytes[0x150..]);
+    key.verify_strict(&message, &Signature::from_bytes(bundle.signature))
+        .map_err(|_| Error::Signature)?;
+
+    if bundle.id != requested_id
+        || bundle.capabilities & !(local_policy.0 & signer.capability_ceiling) != 0
+        || bundle.priority > local_policy.1.min(signer.priority_ceiling)
+        || (scope != Scope::System && bundle.capabilities & SYSADMIN != 0)
+    {
+        return Err(Error::Policy);
+    }
+    let image = crate::kernel::apexec::Image::parse(bundle.executable).map_err(Error::Executable)?;
+    Ok(VerifiedApplication { bundle, image })
 }

@@ -105,6 +105,9 @@ pub fn init() {
 }
 
 pub fn poll_hardware() {
+    // Both IRQs and shell polling consume the same controller output buffer.
+    static CONTROLLER_READ: Spinlock<()> = Spinlock::new(());
+    let _controller = CONTROLLER_READ.lock();
     unsafe {
         let mut limit = 64;
         while limit > 0 {
@@ -113,7 +116,11 @@ pub fn poll_hardware() {
                 break;
             }
             let data = inb(KBD_DATA_PORT);
-            if (status & 0x20) == 0 {
+            if status & 0xC0 != 0 {
+                if status & 0x20 != 0 {
+                    crate::drivers::mouse::reset_packet();
+                }
+            } else if (status & 0x20) == 0 {
                 // First PS/2 port (Keyboard)
                 process_scancode(data);
             } else {

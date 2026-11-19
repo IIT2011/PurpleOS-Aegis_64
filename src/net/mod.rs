@@ -14,21 +14,27 @@ pub mod ipv4;
 pub mod icmp;
 pub mod udp;
 pub mod tcp;
+mod https_roots;
+pub mod dns;
 
 use crate::sync::Spinlock;
 
 pub const IPV4_DEFAULT_MTU: usize = 1500;
+const RX_POLL_BUDGET: usize = 16;
 
+#[derive(Clone, Copy)]
 pub struct NetConfig {
     pub ip: [u8; 4],
     pub gateway: [u8; 4],
     pub subnet: [u8; 4],
+    pub dns: Option<[u8; 4]>,
 }
 
 pub static NET_CONFIG: Spinlock<NetConfig> = Spinlock::new(NetConfig {
-    ip: [10, 0, 2, 15],       // Standard QEMU User Networking (SLIRP) guest IP
-    gateway: [10, 0, 2, 2],   // QEMU SLIRP router
-    subnet: [255, 255, 255, 0],
+    ip: [0; 4],
+    gateway: [0; 4],
+    subnet: [0; 4],
+    dns: None,
 });
 
 pub struct PendingPing {
@@ -53,7 +59,8 @@ impl Drop for PingGuard {
 }
 
 pub fn init() {
-    crate::drivers::serial::println("Network: Pure Rust L2/L3/L4 TCP/IP Stack initialized");
+    https_roots::init();
+    crate::drivers::serial::println("Network: Ethernet and IPv4 initialized; IPv4 configuration required");
 }
 
 pub fn get_ip() -> [u8; 4] {
@@ -68,15 +75,48 @@ pub fn get_subnet() -> [u8; 4] {
     NET_CONFIG.lock().subnet
 }
 
-pub fn set_ip(ip: [u8; 4]) {
-    NET_CONFIG.lock().ip = ip;
+pub fn parse_ipv4(text: &str) -> Option<[u8; 4]> {
+    let mut parts = text.split('.');
+    let mut address = [0; 4];
+    for octet in &mut address {
+        let part = parts.next()?;
+        if part.is_empty() || part.len() > 3 || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        *octet = part.parse().ok()?;
+    }
+    parts.next().is_none().then_some(address)
 }
 
-pub fn set_config(ip: [u8; 4], gw: [u8; 4], subnet: [u8; 4]) {
+fn unicast(ip: [u8; 4]) -> bool {
+    ip[0] != 0 && ip[0] != 127 && ip[0] < 224
+}
+
+pub fn set_config(ip: [u8; 4], gw: [u8; 4], subnet: [u8; 4]) -> Result<(), &'static str> {
+    configure(ip, gw, subnet, None)
+}
+
+pub fn configure(ip: [u8; 4], gw: [u8; 4], subnet: [u8; 4], dns: Option<[u8; 4]>) -> Result<(), &'static str> {
+    if dns.is_some_and(|server| !unicast(server) || server == ip) {
+        return Err("Invalid DNS server address");
+    }
+    let mask = u32::from_be_bytes(subnet);
+    let found = u32::from_be_bytes(ip);
+    let gateway = u32::from_be_bytes(gw);
+    let host = !mask;
+    let valid_host = |address: u32| host <= 1 || (address & host != 0 && address & host != host);
+    if mask == 0 || mask.leading_ones() != mask.count_ones() || !unicast(ip) || !valid_host(found)
+        || (gateway != 0 && (!unicast(gw) || gateway == found || gateway & mask != found & mask || !valid_host(gateway)))
+    {
+        return Err("Invalid IPv4 address, subnet mask, or gateway");
+    }
     let mut cfg = NET_CONFIG.lock();
     cfg.ip = ip;
     cfg.gateway = gw;
     cfg.subnet = subnet;
+    cfg.dns = dns;
+    arp::clear();
+    Ok(())
 }
 
 pub fn get_my_mac() -> Option<[u8; 6]> {
@@ -91,17 +131,17 @@ pub fn get_my_mac() -> Option<[u8; 6]> {
 
 pub fn poll() {
     let mut rx_buf = [0u8; 2048];
-    if crate::drivers::e1000::is_ready() {
-        let len = crate::drivers::e1000::recv(&mut rx_buf);
-        if len > 0 {
-            process_packet(&rx_buf[..len]);
-        }
-    }
-    if crate::drivers::rtl8139::is_ready() {
-        let len = crate::drivers::rtl8139::recv(&mut rx_buf);
-        if len > 0 {
-            process_packet(&rx_buf[..len]);
-        }
+    let receive = if crate::drivers::e1000::is_ready() {
+        crate::drivers::e1000::recv
+    } else if crate::drivers::rtl8139::is_ready() {
+        crate::drivers::rtl8139::recv
+    } else {
+        return;
+    };
+    for _ in 0..RX_POLL_BUDGET {
+        let len = receive(&mut rx_buf);
+        if len == 0 { break; }
+        process_packet(&rx_buf[..len]);
     }
 }
 
@@ -110,22 +150,27 @@ pub fn process_packet(data: &[u8]) {
         Some(res) => res,
         None => return,
     };
+    let Some(my_mac) = get_my_mac() else { return };
+    if eth_hdr.dst_mac != my_mac && eth_hdr.dst_mac != [0xff; 6] { return; }
+    let my_ip = get_ip();
+    if my_ip == [0; 4] { return; }
 
     match eth_hdr.ether_type {
         eth::ETHERTYPE_ARP => {
             if let Some(arp_pkt) = arp::ArpPacket::parse(payload) {
-                if arp_pkt.sender_ip != [0; 4] {
-                    arp::update_arp_cache(arp_pkt.sender_ip, arp_pkt.sender_mac);
+                if arp_pkt.target_ip != my_ip || arp_pkt.sender_mac != eth_hdr.src_mac
+                    || (arp_pkt.opcode == arp::ARP_OP_REPLY && arp_pkt.target_mac != my_mac)
+                {
+                    return;
+                }
+                if arp_pkt.opcode == arp::ARP_OP_REPLY
+                    && unicast(arp_pkt.sender_ip) && arp_pkt.sender_ip != my_ip
+                {
+                    arp::accept_reply(arp_pkt.sender_ip, arp_pkt.sender_mac);
                 }
 
-                let my_ip = get_ip();
                 if arp_pkt.opcode == arp::ARP_OP_REQUEST && arp_pkt.target_ip == my_ip {
                     // Send ARP reply
-                    let my_mac = match get_my_mac() {
-                        Some(m) => m,
-                        None => return,
-                    };
-
                     let reply_arp = arp::ArpPacket {
                         htype: 1,
                         ptype: eth::ETHERTYPE_IPV4,
@@ -154,16 +199,18 @@ pub fn process_packet(data: &[u8]) {
         }
         eth::ETHERTYPE_IPV4 => {
             if let Some((ip_hdr, ip_payload)) = ipv4::Ipv4Header::parse(payload) {
-                let my_ip = get_ip();
-                if ip_hdr.dst_ip != my_ip && ip_hdr.dst_ip != [255, 255, 255, 255] {
+                if ip_hdr.dst_ip != my_ip || eth_hdr.dst_mac != my_mac || !unicast(ip_hdr.src_ip)
+                    || eth_hdr.src_mac == [0; 6] || eth_hdr.src_mac[0] & 1 != 0 {
                     return;
                 }
 
-                if ip_hdr.protocol == ipv4::IP_PROTO_ICMP {
+                if ip_hdr.protocol == ipv4::IP_PROTO_UDP {
+                    dns::receive(ip_hdr.src_ip, my_ip, ip_payload);
+                } else if ip_hdr.protocol == ipv4::IP_PROTO_ICMP {
                     if let Some((icmp_pkt, icmp_payload)) = icmp::IcmpEcho::parse(ip_payload) {
                         if icmp_pkt.msg_type == icmp::ICMP_TYPE_ECHO_REQUEST {
                             // Automatically answer ping directed at us
-                            send_icmp_reply(ip_hdr.src_ip, icmp_pkt.identifier, icmp_pkt.seq_no, icmp_payload);
+                            send_icmp_reply(ip_hdr.src_ip, eth_hdr.src_mac, icmp_pkt.identifier, icmp_pkt.seq_no, icmp_payload);
                         } else if icmp_pkt.msg_type == icmp::ICMP_TYPE_ECHO_REPLY {
                             let mut pending = PENDING_PING.lock();
                             if let Some(ref mut p) = *pending {
@@ -185,18 +232,13 @@ pub fn process_packet(data: &[u8]) {
     }
 }
 
-pub fn send_icmp_reply(dst_ip: [u8; 4], id: u16, seq: u16, payload: &[u8]) {
+fn send_icmp_reply(dst_ip: [u8; 4], dst_mac: [u8; 6], id: u16, seq: u16, payload: &[u8]) {
     let my_ip = get_ip();
     let my_mac = match get_my_mac() {
         Some(m) => m,
         None => return,
     };
-    let dst_mac = match arp::lookup_mac(dst_ip) {
-        Some(m) => m,
-        None => return,
-    };
-
-    let mut buf = [0u8; IPV4_DEFAULT_MTU];
+    let mut buf = [0u8; eth::ETH_HEADER_LEN + IPV4_DEFAULT_MTU];
     let eth_hdr = eth::EthHeader {
         dst_mac,
         src_mac: my_mac,
@@ -250,8 +292,10 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         return Err("Another ping is already in progress");
     }
     let _ping_guard = PingGuard;
-    let my_ip = get_ip();
-    if target_ip == [127, 0, 0, 1] || target_ip == my_ip {
+    let config = *NET_CONFIG.lock();
+    let my_ip = config.ip;
+    if my_ip == [0; 4] { return Err("Configure an IPv4 address before sending packets"); }
+    if !unicast(target_ip) || target_ip == my_ip {
         return Err("Loopback routing is not implemented");
     }
 
@@ -260,10 +304,8 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         None => return Err("No active Ethernet NIC online"),
     };
 
-    let net_cfg = NET_CONFIG.lock();
-    let subnet = net_cfg.subnet;
-    let gateway = net_cfg.gateway;
-    drop(net_cfg);
+    let subnet = config.subnet;
+    let gateway = config.gateway;
 
     let is_local = (target_ip[0] & subnet[0] == my_ip[0] & subnet[0])
         && (target_ip[1] & subnet[1] == my_ip[1] & subnet[1])
@@ -271,11 +313,12 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         && (target_ip[3] & subnet[3] == my_ip[3] & subnet[3]);
 
     let next_hop = if is_local { target_ip } else { gateway };
+    if next_hop == [0; 4] { return Err("No IPv4 route to destination"); }
 
     // Resolve next-hop MAC via dynamic ARP cache or request
     let mut dst_mac_opt = arp::lookup_mac(next_hop);
     if dst_mac_opt.is_none() {
-        let _ = arp::send_arp_request(next_hop);
+        arp::send_arp_request(next_hop)?;
         for _ in 0..60 {
             poll();
             if let Some(m) = arp::lookup_mac(next_hop) {

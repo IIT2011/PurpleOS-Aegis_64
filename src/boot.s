@@ -123,6 +123,55 @@ long_mode_entry:
     hlt
     jmp .halt_loop
 
+/* Native UEFI loader handoff, already in long mode. RCX is the boot info. */
+.global aegis_uefi_entry
+.type aegis_uefi_entry, @function
+aegis_uefi_entry:
+    cli
+    cld
+    movl %ecx, boot_mb_info(%rip)
+    movl $0x55454741, boot_mb_magic(%rip)
+    leaq boot_stack_top(%rip), %rsp
+
+    leaq boot_pdpt(%rip), %rax
+    orq $3, %rax
+    movq %rax, boot_pml4(%rip)
+    leaq boot_pd_0(%rip), %rax
+    orq $3, %rax
+    leaq boot_pdpt(%rip), %rdi
+    movl $4, %ecx
+1:
+    stosq
+    addq $4096, %rax
+    loop 1b
+    leaq boot_pd_0(%rip), %rdi
+    movl $0x83, %eax
+    movl $2048, %ecx
+2:
+    stosq
+    addq $0x200000, %rax
+    loop 2b
+
+    movq %cr0, %rax
+    andq $~(1 << 2), %rax
+    orq $(1 << 1), %rax
+    movq %rax, %cr0
+    movq %cr4, %rax
+    orq $((1 << 9) | (1 << 10)), %rax
+    movq %rax, %cr4
+    movl $0xC0000080, %ecx
+    rdmsr
+    orl $(1 << 11), %eax
+    wrmsr
+    leaq boot_pml4(%rip), %rax
+    movq %rax, %cr3
+
+    lgdt boot_gdt64_ptr(%rip)
+    pushq $0x08
+    leaq long_mode_entry(%rip), %rax
+    pushq %rax
+    lretq
+
 .section .rodata
 .align 8
 boot_gdt64:

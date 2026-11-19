@@ -1279,8 +1279,7 @@ pub fn dispatch_native_syscall(
             let ip = [(ip_u32 >> 24) as u8, (ip_u32 >> 16) as u8, (ip_u32 >> 8) as u8, ip_u32 as u8];
             let gw = [(gw_u32 >> 24) as u8, (gw_u32 >> 16) as u8, (gw_u32 >> 8) as u8, gw_u32 as u8];
             let sub = [(sub_u32 >> 24) as u8, (sub_u32 >> 16) as u8, (sub_u32 >> 8) as u8, sub_u32 as u8];
-            crate::net::set_config(ip, gw, sub);
-            0
+            if crate::net::set_config(ip, gw, sub).is_ok() { 0 } else { -EINVAL }
         }
 
         /* =====================================================================

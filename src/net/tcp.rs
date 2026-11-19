@@ -21,6 +21,12 @@ pub struct TcpHeader {
 }
 
 impl TcpHeader {
+    pub fn parse_ipv4(data: &[u8], source: [u8; 4], destination: [u8; 4]) -> Option<(Self, &[u8])> {
+        let parsed = Self::parse(data)?;
+        (super::ipv4::transport_checksum(source, destination, super::ipv4::IP_PROTO_TCP, data)? == 0)
+            .then_some(parsed)
+    }
+
     pub fn parse(data: &[u8]) -> Option<(Self, &[u8])> {
         if data.len() < TCP_HEADER_MIN_LEN {
             return None;

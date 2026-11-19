@@ -98,5 +98,5 @@ When the shell or desktop launcher attempts to launch an application by ID (e.g.
 
 1. **System Core Search:** `/System/Applications/<name>.apapplication`
 2. **User Local Search:** `/System/Users/<active_user>/Applications/<name>.apapplication`
-3. **Fail-Closed Enforcement:** Any application not verified by `AegisDetect` against the cryptographic manifest is blocked from execution.
+3. **Fail-Closed Enforcement:** AegisDetect verifies the complete [application bundle](APAPPLICATION_SPECIFICATION.md) and authorizes its requested capabilities before launch. If an existing system candidate fails verification, launch fails without searching for a user copy.
 4. **Invalid Locations:** Any path referencing `/System/Kernel/Applications` is rejected immediately with an invalid path error (`PFS3_ERR_INVALID_PATH`).

@@ -28,58 +28,77 @@ pub fn set_position(x: i32, y: i32) {
     state.y = y;
 }
 
-unsafe fn mouse_wait(a_type: u8) {
-    let mut timeout = 100000;
-    while timeout > 0 {
-        let status = inb(MOUSE_CMD);
-        if a_type == 0 && (status & 1) == 1 {
-            return;
-        }
-        if a_type == 1 && (status & 2) == 0 {
-            return;
-        }
-        timeout -= 1;
+unsafe fn wait_status(mask: u8, expected: u8) -> bool {
+    (0..100_000).any(|_| inb(MOUSE_CMD) & mask == expected)
+}
+
+unsafe fn write(port: u16, value: u8) -> bool {
+    if !wait_status(2, 0) {
+        return false;
     }
+    outb(port, value);
+    true
 }
 
-unsafe fn mouse_write(write: u8) {
-    mouse_wait(1);
-    outb(MOUSE_CMD, 0xD4);
-    mouse_wait(1);
-    outb(MOUSE_DATA, write);
+unsafe fn mouse_command(command: u8) -> bool {
+    for _ in 0..3 {
+        if !write(MOUSE_CMD, 0xD4) || !write(MOUSE_DATA, command) {
+            return false;
+        }
+        for _ in 0..64 {
+            if !wait_status(1, 1) {
+                return false;
+            }
+            let status = inb(MOUSE_CMD);
+            let byte = inb(MOUSE_DATA);
+            if status & 0x20 == 0 {
+                crate::drivers::keyboard::process_scancode(byte);
+                continue;
+            }
+            match byte {
+                0xFA => return true,
+                0xFE => break,
+                _ => continue,
+            }
+        }
+    }
+    false
 }
 
-unsafe fn mouse_read() -> u8 {
-    mouse_wait(0);
-    inb(MOUSE_DATA)
+unsafe fn configure() -> bool {
+    // Pause the keyboard port while reading the controller configuration byte.
+    if !write(MOUSE_CMD, 0xAD) {
+        return false;
+    }
+    crate::drivers::keyboard::poll_hardware();
+    let configured = if write(MOUSE_CMD, 0x20) && wait_status(1, 1) {
+        let config = inb(MOUSE_DATA);
+        write(MOUSE_CMD, 0x60)
+            && write(MOUSE_DATA, (config | 0x02) & !0x20)
+            && write(MOUSE_CMD, 0xA8)
+    } else {
+        false
+    };
+    let keyboard_enabled = write(MOUSE_CMD, 0xAE);
+    configured && keyboard_enabled && mouse_command(0xF6) && mouse_command(0xF4)
 }
 
 pub fn init() {
     unsafe {
-        mouse_wait(1);
-        outb(MOUSE_CMD, 0xA8); // Enable auxiliary device (mouse)
-
-        mouse_wait(1);
-        outb(MOUSE_CMD, 0x20); // Get compo pack
-        mouse_wait(0);
-        let status = inb(MOUSE_DATA) | 2; // Enable mouse interrupt
-        mouse_wait(1);
-        outb(MOUSE_CMD, 0x60);
-        mouse_wait(1);
-        outb(MOUSE_DATA, status);
-
-        mouse_write(0xF6); // Set default settings
-        let _ = mouse_read();
-
-        mouse_write(0xF4); // Enable packet streaming
-        let _ = mouse_read();
-
+        if !configure() {
+            crate::drivers::serial::println("Mouse: PS/2 initialization failed");
+            return;
+        }
+        crate::arch::x86_64::idt::register_handler(44, on_interrupt);
         crate::arch::x86_64::pic::clear_mask(2); // Slave PIC cascade line
         crate::arch::x86_64::pic::clear_mask(12); // Unmask IRQ 12
-        crate::arch::x86_64::idt::register_handler(44, on_interrupt);
     }
 
     crate::drivers::serial::println("Mouse: PS/2 Mouse Initialized");
+}
+
+pub fn reset_packet() {
+    MOUSE.lock().cycle = 0;
 }
 
 fn on_interrupt(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {

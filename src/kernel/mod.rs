@@ -14,3 +14,6 @@ pub mod uaccess;
 pub mod ring3;
 pub mod cmddb;
 pub mod pathdb;
+pub mod apapplication;
+pub mod power;
+pub mod app_runtime;

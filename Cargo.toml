@@ -19,5 +19,8 @@ codegen-units = 1
 debug = false
 overflow-checks = false
 
+[features]
+signed-components = []
+
 [dependencies]
-# Completely self-contained bare-metal kernel with zero external crate dependencies
+ed25519-dalek = { version = "2.2.0", default-features = false }

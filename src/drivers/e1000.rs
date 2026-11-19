@@ -102,6 +102,7 @@ pub struct E1000Device {
     rx_descs_phys: u64,
     rx_buffers: [*mut u8; NUM_RX_DESCRIPTORS],
     rx_tail: usize,
+    rx_discarding: bool,
     tx_descs: *mut E1000TxDesc,
     tx_descs_phys: u64,
     tx_buffers: [*mut u8; NUM_TX_DESCRIPTORS],
@@ -121,6 +122,7 @@ impl E1000Device {
             rx_descs_phys: 0,
             rx_buffers: [core::ptr::null_mut(); NUM_RX_DESCRIPTORS],
             rx_tail: 0,
+            rx_discarding: false,
             tx_descs: core::ptr::null_mut(),
             tx_descs_phys: 0,
             tx_buffers: [core::ptr::null_mut(); NUM_TX_DESCRIPTORS],
@@ -278,13 +280,18 @@ impl E1000Device {
 
     /// Transmit raw ethernet frame
     pub fn transmit(&mut self, packet: &[u8]) -> Result<(), &'static str> {
-        if !self.is_ready || packet.len() > RX_BUFFER_SIZE {
+        if !self.is_ready || !(crate::net::eth::ETH_HEADER_LEN..=RX_BUFFER_SIZE).contains(&packet.len()) {
             return Err("E1000 not ready or packet too large");
         }
 
         unsafe {
             let tail = self.tx_tail;
             let desc = self.tx_descs.add(tail);
+            let status = core::ptr::addr_of_mut!((*desc).status);
+            if status.read_volatile() & 1 == 0 {
+                return Err("E1000 transmit ring is full");
+            }
+            core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
 
             // Copy payload to DMA buffer
             let buf = self.tx_buffers[tail];
@@ -293,18 +300,12 @@ impl E1000Device {
             // Setup TX descriptor (EOP = End of Packet 0x01, IFCS = Insert FCS 0x02, RS = Report Status 0x08)
             (*desc).length = packet.len() as u16;
             (*desc).cmd = 0x01 | 0x02 | 0x08;
-            (*desc).status = 0;
+            status.write_volatile(0);
+            core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
 
             // Advance tail pointer
             self.tx_tail = (tail + 1) % NUM_TX_DESCRIPTORS;
             self.write_reg(E1000_TDT, self.tx_tail as u32);
-
-            // Poll for completion (RS bit)
-            let mut timeout = 10000;
-            while ((*desc).status & 0x01) == 0 && timeout > 0 {
-                core::hint::spin_loop();
-                timeout -= 1;
-            }
         }
 
         Ok(())
@@ -316,26 +317,39 @@ impl E1000Device {
             return 0;
         }
 
-        unsafe {
-            let tail = self.rx_tail;
-            let desc = self.rx_descs.add(tail);
+        for _ in 0..NUM_RX_DESCRIPTORS {
+            unsafe {
+                let tail = self.rx_tail;
+                let desc = self.rx_descs.add(tail);
 
-            // Check if DD (Descriptor Done) bit 0 is set
-            if ((*desc).status & 0x01) == 0 {
-                return 0; // No packet ready
+                // Check if DD (Descriptor Done) bit 0 is set
+                let status = core::ptr::addr_of_mut!((*desc).status);
+                let flags = status.read_volatile();
+                if flags & 0x01 == 0 {
+                    return 0; // No packet ready
+                }
+                core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
+
+                let len = usize::from(core::ptr::addr_of!((*desc).length).read_volatile());
+                let errors = core::ptr::addr_of!((*desc).errors).read_volatile();
+                let end = flags & 0x02 != 0;
+                let valid = end && !self.rx_discarding && errors == 0
+                    && (crate::net::eth::ETH_HEADER_LEN..=RX_BUFFER_SIZE.min(buf.len())).contains(&len);
+                self.rx_discarding = !end;
+                if valid {
+                    core::ptr::copy_nonoverlapping(self.rx_buffers[tail], buf.as_mut_ptr(), len);
+                }
+
+                // Clear status and replenish descriptor to ring
+                status.write_volatile(0);
+                core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
+                self.write_reg(E1000_RDT, tail as u32);
+                self.rx_tail = (tail + 1) % NUM_RX_DESCRIPTORS;
+
+                if valid { return len; }
             }
-
-            let len = ((*desc).length as usize).min(buf.len());
-            let src_buf = self.rx_buffers[tail];
-            core::ptr::copy_nonoverlapping(src_buf, buf.as_mut_ptr(), len);
-
-            // Clear status and replenish descriptor to ring
-            (*desc).status = 0;
-            self.write_reg(E1000_RDT, tail as u32);
-            self.rx_tail = (tail + 1) % NUM_RX_DESCRIPTORS;
-
-            len
         }
+        0
     }
 }
 
@@ -343,9 +357,12 @@ pub static E1000: Spinlock<E1000Device> = Spinlock::new(E1000Device::new());
 
 pub fn init() {
     if let Some(dev) = find_device(E1000_VENDOR_INTEL, E1000_DEV_82540EM) {
-        crate::drivers::pci::enable_bus_mastering(dev.bus, dev.slot, dev.func);
         let bar0 = (dev.bar0 & !0xF) as u64;
-        let _ = crate::mm::vmm::map_mmio_range(bar0, 128 * 1024);
+        if dev.bar0 & 1 != 0 || bar0 == 0 || crate::mm::vmm::map_mmio_range(bar0, 128 * 1024).is_err() {
+            crate::drivers::serial::println("E1000: PCI MMIO aperture is unavailable");
+            return;
+        }
+        crate::drivers::pci::enable_bus_mastering(dev.bus, dev.slot, dev.func);
         let mut nic = E1000.lock();
         if nic.init_hw(bar0).is_ok() {
             crate::drivers::serial::print("E1000: Intel 82540EM initialized (MAC: ");

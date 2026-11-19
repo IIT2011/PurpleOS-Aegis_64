@@ -100,7 +100,22 @@ impl Ipv4Header {
 }
 
 pub fn compute_checksum(data: &[u8]) -> u16 {
-    let mut sum: u32 = 0;
+    checksum_from(0, data)
+}
+
+/// IPv4 TCP/UDP checksum including the pseudo-header. A packet that already
+/// carries a correct checksum yields zero.
+pub fn transport_checksum(source: [u8; 4], destination: [u8; 4], protocol: u8, segment: &[u8]) -> Option<u16> {
+    let length = u16::try_from(segment.len()).ok()?;
+    let mut sum = u32::from(length) + u32::from(protocol);
+    for address in [source, destination] {
+        sum += u32::from(u16::from_be_bytes([address[0], address[1]]));
+        sum += u32::from(u16::from_be_bytes([address[2], address[3]]));
+    }
+    Some(checksum_from(sum, segment))
+}
+
+fn checksum_from(mut sum: u32, data: &[u8]) -> u16 {
     let mut i = 0;
     while i + 1 < data.len() {
         let word = u16::from_be_bytes([data[i], data[i + 1]]) as u32;

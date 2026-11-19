@@ -5,7 +5,7 @@
 //! from `/System/CLI/cmd.dtbase` on the filesystem rather than hardcoded in the kernel.
 //!
 //! Integrity is enforced via a Cryptographic Signature specifically signed by the
-//! Creator (Aegis Root Developer) using HMAC-SHA256 with the Creator Root Signing Key.
+//! Creator (Aegis Root Developer) using RSA-2048 PKCS#1 v1.5 with SHA-256.
 
 use crate::drivers::serial;
 use crate::sync::Spinlock;
@@ -86,7 +86,6 @@ pub struct CmdTable {
     pub entries: [CmdRecord; MAX_COMMANDS],
     pub count: usize,
     pub signature_verified: bool,
-    pub signature_expected: [u8; 512],
     pub payload_hash: [u8; 32],
     pub signer_name: [u8; 32],
     pub signer_len: u8,
@@ -100,7 +99,6 @@ impl CmdTable {
             entries: [CmdRecord::empty(); MAX_COMMANDS],
             count: 0,
             signature_verified: false,
-            signature_expected: [0; 512],
             payload_hash: [0; 32],
             signer_name: [0; 32],
             signer_len: 0,
@@ -115,7 +113,9 @@ impl CmdTable {
 }
 
 static CMD_TABLE: Spinlock<CmdTable> = Spinlock::new(CmdTable::new());
-static RAW_BUFFER: Spinlock<[u8; 24576]> = Spinlock::new([0u8; 24576]);
+const MAX_DATABASE_SIZE: usize = 24_576;
+static RAW_BUFFER: Spinlock<[u8; MAX_DATABASE_SIZE + 1]> =
+    Spinlock::new([0u8; MAX_DATABASE_SIZE + 1]);
 
 /// Initialize the command database by reading `/System/CLI/cmd.dtbase` from storage,
 /// verifying its Cryptographic Creator Signature, and parsing all command records.
@@ -123,20 +123,17 @@ pub fn init() -> bool {
     let mut raw_buf = RAW_BUFFER.lock();
     raw_buf.fill(0);
 
-    let read_bytes = match crate::fs::vfs::read(CMD_DATABASE_PATH, &mut *raw_buf) {
-        Ok(b) if b > 0 => b,
-        _ => match crate::fs::vfs::read(FALLBACK_DATABASE_PATH, &mut *raw_buf) {
-            Ok(b) if b > 0 => b,
-            _ => {
-                serial::print("[CMDDB] Warning: Command database '");
-                serial::print(CMD_DATABASE_PATH);
-                serial::println("' not found on storage.");
-                return false;
-            }
-        },
-    };
-
+    let read_bytes = read_database(&mut *raw_buf).unwrap_or(0);
     parse_and_verify(&raw_buf[..read_bytes])
+}
+
+fn read_database(buffer: &mut [u8]) -> Result<usize, &'static str> {
+    let path = if crate::fs::vfs::file_size(CMD_DATABASE_PATH).is_ok() {
+        CMD_DATABASE_PATH
+    } else {
+        FALLBACK_DATABASE_PATH
+    };
+    crate::fs::vfs::read(path, buffer)
 }
 
 /// Hot-reload the command database dynamically from `/System/CLI/cmd.dtbase`.
@@ -151,78 +148,36 @@ pub fn reload() -> Result<usize, &'static str> {
 fn parse_and_verify(data: &[u8]) -> bool {
     let mut table = CMD_TABLE.lock();
     table.count = 0;
+    table.initialized = false;
+    table.payload_bytes = 0;
     table.signature_verified = false;
-    table.signature_expected.fill(0);
     table.payload_hash.fill(0);
     table.signer_name.fill(0);
     table.signer_len = 0;
 
-    // 1. Locate `# SIGNATURE: ` and `# SIGNER: ` lines in header
-    let mut expected_hex = [0u8; 512];
-    let mut payload_start = 0usize;
-    let mut found_sig = false;
-
-    let mut line_start = 0usize;
-    while line_start < data.len() {
-        let mut line_end = line_start;
-        while line_end < data.len() && data[line_end] != b'\n' {
-            line_end += 1;
-        }
-
-        let line = &data[line_start..line_end];
-        let trimmed = trim_slice(line);
-
-        if trimmed.starts_with(b"# SIGNATURE:") {
-            let rest = trim_slice(&trimmed[12..]);
-            if rest.len() >= 512 {
-                expected_hex.copy_from_slice(&rest[..512]);
-                table.signature_expected = expected_hex;
-                found_sig = true;
-            }
-        } else if trimmed.starts_with(b"# SIGNER:") {
-            let rest = trim_slice(&trimmed[9..]);
-            let len = rest.len().min(32);
-            table.signer_name[..len].copy_from_slice(&rest[..len]);
-            table.signer_len = len as u8;
-        } else if found_sig && !trimmed.starts_with(b"#") && !trimmed.is_empty() {
-            // Found start of payload
-            payload_start = line_start;
-            break;
-        }
-
-        line_start = if line_end < data.len() { line_end + 1 } else { line_end };
-    }
-
-    if !found_sig || payload_start >= data.len() {
-        serial::println("[CMDDB] Error: Missing or invalid Creator Signature header in cmd.dtbase");
+    if data.len() > MAX_DATABASE_SIZE {
+        serial::println("[CMDDB] Rejected oversized command database.");
         return false;
     }
 
-    // 2. Cryptographic Creator Signature Verification (RSA-2048 PKCS#1 v1.5 / SHA-256)
-    let payload = &data[payload_start..];
+    let Some(payload) = crate::security::aegis_detect::verify_command_database(data) else {
+        serial::println("[CMDDB] Rejected command database: missing or invalid Creator signature.");
+        return false;
+    };
+
     table.payload_bytes = payload.len();
     table.payload_hash = crate::crypto::sha256::hash(payload);
-
-    let is_verified = crate::security::aegis_detect::verify_signature(payload, &expected_hex);
-    table.signature_verified = is_verified;
-
-    if is_verified {
-        serial::print("[CMDDB] Authenticated ");
-        serial::print(CMD_DATABASE_PATH);
-        serial::println(" — Cryptographically Signed by Creator!");
-        serial::print("[CMDDB] Verified Signer: ");
-        if table.signer_len > 0 {
-            serial::println(table.signer());
-        } else {
-            serial::println("Creator (Aegis Root Developer)");
-        }
-    } else {
-        serial::println("[SECURITY] ALERT: /System/CLI/cmd.dtbase Signature INVALID! Not signed by Creator!");
-    }
+    table.signature_verified = true;
+    let signer = CREATOR_SIGNER.as_bytes();
+    let signer_len = signer.len().min(table.signer_name.len());
+    table.signer_name[..signer_len].copy_from_slice(&signer[..signer_len]);
+    table.signer_len = signer_len as u8;
+    serial::println("[CMDDB] Authenticated /System/CLI/cmd.dtbase \u{2014} Cryptographically Signed by Creator!");
 
     // 3. Parse Command Records from payload
     let mut current_idx: Option<usize> = None;
-    line_start = payload_start;
+    let data = payload;
+    let mut line_start = 0;
 
     while line_start < data.len() {
         let mut line_end = line_start;
@@ -324,48 +279,19 @@ pub fn is_verified() -> bool {
 /// Verify integrity of the command database currently in memory against on-disk file.
 pub fn verify_integrity() -> bool {
     let mut raw_buf = RAW_BUFFER.lock();
-    let read_bytes = match crate::fs::vfs::read(CMD_DATABASE_PATH, &mut *raw_buf) {
-        Ok(b) if b > 0 => b,
-        _ => match crate::fs::vfs::read(FALLBACK_DATABASE_PATH, &mut *raw_buf) {
-            Ok(b) if b > 0 => b,
-            _ => return false,
-        },
+    let Ok(read_bytes) = read_database(&mut *raw_buf) else {
+        return false;
     };
 
     let table = CMD_TABLE.lock();
-    if !table.initialized {
+    if !table.initialized || read_bytes > MAX_DATABASE_SIZE {
         return false;
     }
 
-    // Compute fresh HMAC-SHA256 signature on disk payload
-    let data = &raw_buf[..read_bytes];
-    let mut payload_start = 0usize;
-    let mut line_start = 0usize;
-    let mut found_sig = false;
-
-    while line_start < data.len() {
-        let mut line_end = line_start;
-        while line_end < data.len() && data[line_end] != b'\n' {
-            line_end += 1;
-        }
-        let line = &data[line_start..line_end];
-        let trimmed = trim_slice(line);
-        if trimmed.starts_with(b"# SIGNATURE:") {
-            found_sig = true;
-        } else if found_sig && !trimmed.starts_with(b"#") && !trimmed.is_empty() {
-            payload_start = line_start;
-            break;
-        }
-        line_start = if line_end < data.len() { line_end + 1 } else { line_end };
-    }
-
-    if !found_sig || payload_start >= data.len() {
+    let Some(payload) = crate::security::aegis_detect::verify_command_database(&raw_buf[..read_bytes]) else {
         return false;
-    }
-
-    let disk_payload = &data[payload_start..];
-    let disk_hash = crate::crypto::sha256::hash(disk_payload);
-    disk_hash == table.payload_hash && table.signature_verified
+    };
+    crate::crypto::sha256::hash(payload) == table.payload_hash && table.signature_verified
 }
 
 /// Autocomplete matching for interactive shell Tab completion.

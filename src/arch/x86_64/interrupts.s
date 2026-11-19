@@ -1529,6 +1529,7 @@ isr_255:
     jmp isr_common
 
 isr_common:
+    cld
     pushq %rax
     pushq %rbx
     pushq %rcx

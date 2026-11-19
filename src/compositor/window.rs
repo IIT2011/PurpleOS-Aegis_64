@@ -53,6 +53,8 @@ pub struct Window {
     pub is_maximized: bool,
     pub is_visible: bool,
     pub surface: Surface,
+    pub(crate) owner: Option<u32>,
+    pub(crate) events: super::client::ClientEvents,
 
     // Saved geometry for maximize toggle
     pub prev_x: i32,
@@ -87,6 +89,8 @@ impl Window {
             is_maximized: false,
             is_visible: true,
             surface,
+            owner: None,
+            events: super::client::ClientEvents::new(),
             prev_x: x,
             prev_y: y,
             prev_w: client_w,

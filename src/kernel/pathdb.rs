@@ -1,8 +1,7 @@
 //! PurpleOS Search Path Database Subsystem (/System/CLI/path.dtbase)
 //!
 //! Provides dynamic search path configuration for executables, applications, and scripts.
-//! Unlike `cmd.dtbase`, this file deliberately omits cryptographic signature checks
-//! so that users and system management scripts can configure search directories frequently.
+//! Search paths are user-editable. Resolved executables enforce their own signatures.
 
 use crate::drivers::serial;
 use crate::sync::Spinlock;
@@ -49,29 +48,26 @@ impl PathTable {
 }
 
 static PATH_TABLE: Spinlock<PathTable> = Spinlock::new(PathTable::new());
-static PATH_SCRATCH: Spinlock<[u8; 4096]> = Spinlock::new([0u8; 4096]);
+const MAX_DATABASE_SIZE: usize = 4096;
+static PATH_SCRATCH: Spinlock<[u8; MAX_DATABASE_SIZE + 1]> =
+    Spinlock::new([0u8; MAX_DATABASE_SIZE + 1]);
 
 /// Initialize search paths by reading `/System/CLI/path.dtbase` from storage.
-/// No security checks are performed on this file as per system specification.
 pub fn init() -> bool {
     let mut scratch = PATH_SCRATCH.lock();
     scratch.fill(0);
 
-    let read_bytes = match crate::fs::vfs::read(PATH_DATABASE_PATH, &mut *scratch) {
-        Ok(b) if b > 0 => b,
-        _ => match crate::fs::vfs::read(FALLBACK_PATH_DATABASE, &mut *scratch) {
-            Ok(b) if b > 0 => b,
-            _ => {
-                serial::print("[PATHDB] Notice: Path database '");
-                serial::print(PATH_DATABASE_PATH);
-                serial::println("' not found; using fallback root paths.");
-                setup_fallback_paths();
-                return false;
-            }
-        },
+    let path = if crate::fs::vfs::file_size(PATH_DATABASE_PATH).is_ok() {
+        PATH_DATABASE_PATH
+    } else {
+        FALLBACK_PATH_DATABASE
     };
-
-    parse_paths(&scratch[..read_bytes])
+    if let Ok(size @ 1..=MAX_DATABASE_SIZE) = crate::fs::vfs::read(path, &mut *scratch) {
+        return parse_paths(&scratch[..size]);
+    }
+    serial::println("[PATHDB] No usable path database; using built-in paths.");
+    setup_fallback_paths();
+    false
 }
 
 fn setup_fallback_paths() {

@@ -9,6 +9,7 @@ Rasterizes Inter-Regular.ttf and Inter-Bold.ttf vector outlines into:
 """
 
 import os
+import re
 import sys
 import struct
 
@@ -197,23 +198,12 @@ def parse_ttf(font_path):
 def load_vga_font(vga_path):
     with open(vga_path, 'r') as f:
         content = f.read()
-    # Parse FONT8X16
-    lines = content.split('\n')
-    glyphs = []
-    curr = []
-    in_font = False
-    for line in lines:
-        if 'FONT8X16' in line:
-            in_font = True
-            continue
-        if in_font:
-            if '];' in line:
-                break
-            line = line.strip()
-            if line.startswith('['):
-                parts = line.strip('[],').split(',')
-                row = [int(p.strip(), 16) if '0x' in p else int(p.strip()) for p in parts if p.strip()]
-                glyphs.append(row)
+    glyphs = [
+        [int(value, 16) for value in re.findall(r'0x[0-9a-fA-F]{2}', row)]
+        for row in re.findall(r'/\*[^\n]*?\*/\s*\[([^\]\n]+)\]', content)
+    ]
+    if len(glyphs) != 256 or any(len(row) != 16 for row in glyphs):
+        raise ValueError("invalid VGA fallback glyph table")
     return glyphs
 
 def main():
@@ -232,8 +222,8 @@ def main():
     print(f"Rasterizing Inter Bold from {bold_path}...")
     bold_bits, bold_alpha = parse_ttf(bold_path)
 
-    # Fill fallback for non-printable ASCII or empty glyphs
-    for cp in range(256):
+    # Fill printable glyphs the outline decoder cannot rasterize.
+    for cp in range(33, 127):
         if cp < len(vga_glyphs):
             vga_row = vga_glyphs[cp]
             # If Inter is empty, use VGA
