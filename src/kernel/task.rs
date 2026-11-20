@@ -555,7 +555,9 @@ pub(crate) fn install_user_task(
     let home = account.home(&mut home).as_bytes();
     t.cwd[..home.len()].copy_from_slice(home);
     t.cwd_len = home.len();
-    t.cap_mask = 0;
+    t.cap_mask = crate::kernel::purple_abi::PURPLE_CAP_DIRECT_AUDIO
+        | crate::kernel::purple_abi::PURPLE_CAP_DIRECT_GPU
+        | crate::kernel::purple_abi::PURPLE_CAP_MULTI_CORE;
     t.native = native;
     t.cr3 = pml4 as u64;
 

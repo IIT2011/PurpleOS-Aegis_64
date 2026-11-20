@@ -6,6 +6,7 @@ target/
 *.log
 *.elf
 *.bin
+*.o
 /tmp/
 tmp/
 scratch/

@@ -185,7 +185,9 @@ pub extern "C" fn syscall_dispatch(
     a6: u64,
 ) -> i64 {
     if let Some((id, native)) = crate::kernel::task::current_native() {
-        return crate::kernel::app_runtime::dispatch(id, native, sys_no, a1, a2, a3);
+        if sys_no >= crate::kernel::app_runtime::SYS_ABI_VERSION && sys_no <= 0x110f {
+            return crate::kernel::app_runtime::dispatch(id, native, sys_no, a1, a2, a3);
+        }
     }
     // PurpleOS Native First-Class System Calls (Strictly non-POSIX, native ABI)
     if sys_no >= crate::kernel::purple_abi::SYS_PURPLE_BASE

@@ -42,8 +42,14 @@ def find_creator_private_key(cli_key_file: str = None) -> str:
 
 def sign_payload_rsa(payload: bytes, key_path: str) -> str:
     openssl = get_openssl_bin()
+    cmd = [openssl, "dgst", "-sha256", "-sign", key_path]
+    pass_file = Path(key_path).parent / "creator_key.txt"
+    if pass_file.is_file():
+        cmd.extend(["-passin", f"file:{pass_file}"])
+    elif os.environ.get("AEGIS_CREATOR_KEY_PASSPHRASE"):
+        cmd.extend(["-passin", f"env:AEGIS_CREATOR_KEY_PASSPHRASE"])
     p = subprocess.Popen(
-        [openssl, "dgst", "-sha256", "-sign", key_path],
+        cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE

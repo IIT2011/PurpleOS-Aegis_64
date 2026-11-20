@@ -862,9 +862,21 @@ pub fn dispatch_native_syscall(
             }
         }
 
-        SYS_PURPLE_AUDIO_STREAM_START | SYS_PURPLE_AUDIO_STREAM_STOP => -EOPNOTSUPP,
+        SYS_PURPLE_AUDIO_STREAM_START | SYS_PURPLE_AUDIO_STREAM_STOP => 0,
 
-        SYS_PURPLE_AUDIO_SUBMIT_PCM => -EOPNOTSUPP,
+        SYS_PURPLE_AUDIO_SUBMIT_PCM => {
+            let buf_ptr = a1;
+            let len = a2 as usize;
+            if len == 0 {
+                return 0;
+            }
+            if let Err(e) = uaccess::validate_user_range(buf_ptr, len, false) {
+                return e;
+            }
+            let chunk_len = len.min(crate::drivers::audio::HDA_DMA_BUFFER_SIZE);
+            let user_slice = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, chunk_len) };
+            crate::drivers::audio::submit_pcm(user_slice) as i64
+        },
 
         SYS_PURPLE_AUDIO_SET_VOLUME => {
             if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {

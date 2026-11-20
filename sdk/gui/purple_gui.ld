@@ -11,6 +11,6 @@ SECTIONS {
     .text : ALIGN(4096) { *(.text .text.* .ltext .ltext.*) } :code
     .rodata : ALIGN(4096) { *(.rodata .rodata.* .lrodata .lrodata.*) } :rodata
     .data : ALIGN(4096) { *(.data .data.* .ldata .ldata.* .got .got.*) } :data
-    .bss (NOLOAD) : ALIGN(16) { *(.bss .bss.* .lbss .lbss.*) *(COMMON) } :data
+    .bss (NOLOAD) : ALIGN(4096) { *(.bss .bss.* .lbss .lbss.*) *(COMMON) } :data
     /DISCARD/ : { *(.eh_frame .eh_frame.* .note .note.* .comment) }
 }

@@ -149,7 +149,12 @@ pub extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
         if (frame.cs & 3) == 3 {
             // User mode exception - terminate task safely
             crate::drivers::serial::print("[SECURITY] User Process Exception: ");
-            crate::drivers::serial::println(EXCEPTION_MESSAGES[int_no]);
+            crate::drivers::serial::print(EXCEPTION_MESSAGES[int_no]);
+            crate::drivers::serial::print(" at RIP 0x");
+            crate::drivers::serial::print_hex(frame.rip);
+            crate::drivers::serial::print(" ERR 0x");
+            crate::drivers::serial::print_hex(frame.err_code);
+            crate::drivers::serial::println("");
             crate::kernel::syscall::prepare_user_entry();
             crate::kernel::task::exit();
         }
