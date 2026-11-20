@@ -1,15 +1,39 @@
-# Official VLC Media Player for PurpleOS / Aegis64
+# VLC Media Player for PurpleOS / Aegis64 (`Apps Sources/VLC`)
 
-Native port of VideoLAN's official VLC Media Player architecture to PurpleOS / Aegis64.
+Pure Rust native conversion and port of VideoLAN's official VLC Media Player architecture for PurpleOS / Aegis64.
 
-## Architecture
+---
 
-The VLC port strictly adheres to official upstream VLC modular architecture:
-- **Video Output:** `modules/video_output/purple.c` implements `vout_display_t` delivering zero-copy linear ARGB8888 presentation to the PurpleOS Compositor via `PURPLE_GUI_PRESENT` (0x1104) and `PURPLE_GUI_WINDOW_GLASS` (0x110c).
-- **Audio Output:** `modules/audio_output/purple.c` implements `audio_output_t` streaming real-time 44.1 kHz 16-bit PCM stereo audio directly into the kernel HDA hardware ring via `SYS_PURPLE_AUDIO_SUBMIT_PCM` (0x1023) and `SYS_PURPLE_AUDIO_SET_VOLUME` (0x1024).
-- **Window Management:** `modules/video_output/window_purple.c` implements `vlc_window_t` operations, polling compositor events via `PURPLE_GUI_POLL` (0x1105).
-- **Platform Layer:** `src/purple/` (`dirs.c`, `timer.c`, `filesystem.c`, `thread.c`) provides high-resolution timing via `SYS_PURPLE_CLOCK_NANOS` (0x1052) and native filesystem access.
-- **Frontend Player:** `bin/purple_vlc.c` provides the iconic VLC player interface featuring real-time audio spectrum visualization, seekable timeline scrub bar, volume slider, playback controls, and mathematical rendering of the official VLC traffic cone logo.
+## Architecture & Subsystems
+
+This directory houses the complete pure Rust VLC workspace:
+- **`vlccore`**: The core VLC engine:
+  - `tick`: High-precision nanosecond tick definitions and conversions (`vlc_tick_t`).
+  - `fourcc`: Container and codec FourCC tags (`s16l`, `f32l`, `mp3`, `I420`, etc.).
+  - `es`: Elementary Stream definitions (`EsFormat`, `AudioFormat`, `VideoFormat`).
+  - `block`: Sliced memory blocks (`Block`) and thread-safe queues (`BlockFifo`).
+  - `clock`: Clock drift compensation, rate scaling, and PTS synchronization (`vlc_clock_t`).
+  - `stream`: Abstract seekable byte streams (`MemoryStream`, `FileStream`).
+  - `aout`: Audio device abstraction, format negotiation, volume control (`AudioOutput`).
+  - `vout`: Video presentation pipeline and picture framebuffers (`VideoOutput`).
+  - `player`: Play/Pause/Stop/Seek state machine and playback controller (`VlcPlayer`).
+- **`vlc-demux`**: Pure Rust demuxers:
+  - `wav`: Header and chunk parser for uncompressed PCM and IEEE float WAV.
+  - `raw`: Raw PCM streaming demuxer.
+  - `mp3`: MPEG-1 Layer 3 sync-word search and frame header decoding.
+- **`vlc-codec`**: Pure Rust decoders & format converters:
+  - `pcm`: Float32 to Signed 16-bit integer and 8-bit to 16-bit PCM conversion.
+- **`vlc-platform-purple`**: Native PurpleOS platform provider:
+  - `audio`: Direct Ring 3 hardware DMA PCM streaming (`0x1021`, `0x1023`).
+  - `video`: Double-buffered compositor presentation (`0x1101`..`0x1105`).
+  - `syscall`: Raw assembly syscall dispatch for PurpleOS.
+- **`vlc-app`**: Native executable frontend player:
+  - Modern acrylic glass titlebar with VLC cone logo icon.
+  - Center stage mathematical rendering of the iconic VLC cone logo.
+  - Real-time 64-band audio spectrum visualizer.
+  - Transport controls (Play/Pause, Stop, Seek scrub bar, Volume slider).
+
+---
 
 ## Packaging & Cryptographic Authentication
 
@@ -18,6 +42,23 @@ The VLC port strictly adheres to official upstream VLC modular architecture:
 - Authorized in `APTRUST1` policy signed with Creator RSA-2048 offline private key (`keys/creator_private_key.pem`).
 - Verified at boot by AegisDetect before execution.
 
-## Building
+---
 
-Run `./build.sh` from this directory.
+## Directory Structure
+
+```
+Apps Sources/VLC/
+├── Cargo.toml                  # Workspace manifest
+├── Cargo.lock
+├── README.md                   # This documentation
+├── build.sh                    # Build and packaging script
+├── build/                      # Packaged .apapplication and signed trust policy
+│   ├── vlc.apapplication
+│   ├── trust.policy
+│   └── trust.policy.sig
+├── vlccore/                    # Pure Rust Core Engine
+├── vlc-demux/                  # Container demuxers (WAV, Raw, MP3)
+├── vlc-codec/                  # Audio/Video decoders
+├── vlc-platform-purple/        # Native PurpleOS platform provider
+└── vlc-app/                    # VLC executable & UI renderer
+```
