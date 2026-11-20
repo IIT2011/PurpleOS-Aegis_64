@@ -1,0 +1,17 @@
+[package]
+name = "vlc-app"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure Rust Native VLC Media Player Application for PurpleOS"
+
+[[bin]]
+name = "vlc"
+path = "src/main.rs"
+
+[dependencies]
+vlccore = { path = "../vlccore" }
+vlc-demux = { path = "../vlc-demux" }
+vlc-codec = { path = "../vlc-codec" }
+vlc-platform-purple = { path = "../vlc-platform-purple" }

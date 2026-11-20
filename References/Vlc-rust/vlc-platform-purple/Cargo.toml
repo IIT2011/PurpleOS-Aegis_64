@@ -1,0 +1,10 @@
+[package]
+name = "vlc-platform-purple"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure Rust native PurpleOS platform modules for VLC (Audio HDA DMA, Video Compositor, Window)"
+
+[dependencies]
+vlccore = { path = "../vlccore" }

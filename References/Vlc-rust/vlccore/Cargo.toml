@@ -1,0 +1,9 @@
+[package]
+name = "vlccore"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure Rust port of VideoLAN VLC Core engine (libvlccore)"
+
+[dependencies]

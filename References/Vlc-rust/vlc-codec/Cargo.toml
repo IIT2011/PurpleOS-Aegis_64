@@ -1,0 +1,10 @@
+[package]
+name = "vlc-codec"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure Rust port of VLC audio and video decoders (PCM, Float, Color conversion)"
+
+[dependencies]
+vlccore = { path = "../vlccore" }

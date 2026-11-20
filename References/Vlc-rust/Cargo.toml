@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "vlccore",
+    "vlc-demux",
+    "vlc-codec",
+    "vlc-platform-purple",
+    "vlc-app",
+]
+resolver = "2"
+
+[workspace.package]
+version = "3.0.21"
+authors = ["VideoLAN", "PurpleOS Project"]
+edition = "2021"
+license = "LGPL-2.1-or-later"
