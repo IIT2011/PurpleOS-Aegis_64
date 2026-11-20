@@ -1,0 +1,17 @@
+[package]
+name = "purple-terminal"
+version = "0.9.16"
+edition = "2021"
+
+[[bin]]
+name = "terminal"
+path = "../src/purple.rs"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+[dependencies]
+ttf-parser = { version = "0.25.1", default-features = false, features = ["no-std-float"] }
