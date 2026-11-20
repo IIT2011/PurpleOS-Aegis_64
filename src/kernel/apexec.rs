@@ -7,8 +7,11 @@ const PAGE_SIZE: u64 = 4096;
 pub const USER_MIN: u64 = 1 << 39;
 pub const STACK_TOP: u64 = 0x0000_7fff_f000_0000;
 const MAX_STACK: u64 = 1024 * 1024;
-pub const RESOURCE_BASE: u64 = STACK_TOP - MAX_STACK - 2 * 1024 * 1024;
-pub const HEAP_SIZE: u64 = 32 * 1024 * 1024;
+pub const RESOURCE_BASE: u64 = STACK_TOP
+    - MAX_STACK
+    - crate::kernel::apapplication::MAX_BUNDLE_BYTES as u64
+    - 3 * PAGE_SIZE;
+pub const HEAP_SIZE: u64 = 256 * 1024 * 1024;
 pub const HEAP_BASE: u64 = RESOURCE_BASE - HEAP_SIZE - PAGE_SIZE;
 const MAX_IMAGE: u64 = 64 * 1024 * 1024;
 

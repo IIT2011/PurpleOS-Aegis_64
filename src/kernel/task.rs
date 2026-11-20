@@ -57,7 +57,7 @@ pub struct NativeContext {
     pub capabilities: u32,
 }
 
-const NATIVE_MAPPINGS: usize = 32;
+pub(crate) const NATIVE_MAPPINGS: usize = 512;
 
 pub struct Task {
     pub id: u32,
@@ -72,6 +72,8 @@ pub struct Task {
     pub cpu_affinity: u64,
     pub last_cpu: u32,
     pub is_user: bool,
+    pub(crate) uid: u16,
+    pub(crate) gid: u16,
     pub cr3: u64,
     // POSIX Process Control Block
     pub ppid: u32,
@@ -90,7 +92,7 @@ pub struct Task {
     pub sig_handlers: [u64; 64],
     pub cap_mask: u64,
     pub native: Option<NativeContext>,
-    pub(crate) native_heap: [(u64, u64); NATIVE_MAPPINGS],
+    pub(crate) native_heap: alloc::vec::Vec<(u64, u64)>,
     simd: SimdState,
 }
 
@@ -114,6 +116,8 @@ impl Task {
             cpu_affinity: !0,
             last_cpu: 0,
             is_user: false,
+            uid: 0,
+            gid: 0,
             cr3: 0,
             ppid: 0,
             pgid: 1,
@@ -135,7 +139,7 @@ impl Task {
             sig_handlers: [0; 64],
             cap_mask: 0,
             native: None,
-            native_heap: [(0, 0); NATIVE_MAPPINGS],
+            native_heap: alloc::vec::Vec::new(),
             simd: SimdState::initial(),
         }
     }
@@ -544,6 +548,13 @@ pub(crate) fn install_user_task(
     t.ticks_remaining = t.time_slice_ticks;
     t.cpu_affinity = 1 << get_current_cpu();
     t.is_user = true;
+    let account = crate::kernel::accounts::local();
+    t.uid = account.uid;
+    t.gid = account.gid;
+    let mut home = [0; 28];
+    let home = account.home(&mut home).as_bytes();
+    t.cwd[..home.len()].copy_from_slice(home);
+    t.cwd_len = home.len();
     t.cap_mask = 0;
     t.native = native;
     t.cr3 = pml4 as u64;
@@ -636,6 +647,7 @@ pub fn reap_native() {
         task.cr3 = 0;
         task.stack_base = 0;
         task.native = None;
+        task.native_heap = alloc::vec::Vec::new();
         task.state = TaskState::Unused;
     }
 }

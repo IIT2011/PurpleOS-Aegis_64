@@ -68,12 +68,29 @@ def format_purplefs_v2(total_blocks, label, files):
     allocated_inodes = 1 + len(files)
     cur_data_block = 11
     file_ino = 2
+    pointers_per_block = 4096 // 4
+
+    def allocate_pointer_block(pointers):
+        nonlocal cur_data_block, allocated_blocks
+        block = cur_data_block
+        cur_data_block += 1
+        allocated_blocks += 1
+        set_bit(block)
+        for index, value in enumerate(pointers):
+            struct.pack_into("<I", data, block * 4096 + index * 4, value)
+        return block
 
     for fname, fcontent in files.items():
         if isinstance(fcontent, str):
             fcontent = fcontent.encode("utf-8")
         fsize = len(fcontent)
         nblocks = (fsize + 4095) // 4096 if fsize > 0 else 0
+        double_blocks = max(0, nblocks - 12 - pointers_per_block)
+        leaf_blocks = (double_blocks + pointers_per_block - 1) // pointers_per_block
+        pointer_blocks = int(nblocks > 12) + leaf_blocks + int(double_blocks > 0)
+        if (nblocks > 12 + pointers_per_block + pointers_per_block**2
+                or cur_data_block + nblocks + pointer_blocks > journal_start):
+            raise ValueError(f"File exceeds available PurpleFS capacity: {fname}")
         file_blocks = []
         for _ in range(nblocks):
             file_blocks.append(cur_data_block)
@@ -94,15 +111,16 @@ def format_purplefs_v2(total_blocks, label, files):
         for i, blk in enumerate(file_blocks[:12]):
             struct.pack_into("<I", inodes, ino_offset + 0x2C + i*4, blk)
         if len(file_blocks) > 12:
-            indirect_blk = cur_data_block
-            set_bit(indirect_blk)
-            cur_data_block += 1
-            allocated_blocks += 1
+            single_end = 12 + pointers_per_block
+            indirect_blk = allocate_pointer_block(file_blocks[12:single_end])
             struct.pack_into("<I", inodes, ino_offset + 0x5C, indirect_blk)
-            ind_buf = bytearray(4096)
-            for j, blk in enumerate(file_blocks[12:12+1024]):
-                struct.pack_into("<I", ind_buf, j*4, blk)
-            data[indirect_blk*4096 : (indirect_blk+1)*4096] = ind_buf
+            if double_blocks:
+                leaves = [
+                    allocate_pointer_block(file_blocks[start:start + pointers_per_block])
+                    for start in range(single_end, len(file_blocks), pointers_per_block)
+                ]
+                root = allocate_pointer_block(leaves)
+                struct.pack_into("<I", inodes, ino_offset + 0x60, root)
 
         icrc = zlib.crc32(inodes[ino_offset : ino_offset + 0x7C]) & 0xFFFFFFFF
         struct.pack_into("<I", inodes, ino_offset + 0x7C, icrc)
@@ -141,7 +159,8 @@ def format_purplefs_v2(total_blocks, label, files):
 
     return data
 
-def build_gpt_disk(disk_path, total_disk_sectors=2097152, signing_key=None, applications_dir=None, https_roots=None): # 1024 MiB
+def build_gpt_disk(disk_path, total_disk_sectors=2097152, signing_key=None, applications_dir=None,
+                   https_roots=None, account_profile=None): # 1024 MiB
     os.makedirs(os.path.dirname(os.path.abspath(disk_path)), exist_ok=True)
     
     # Files to seed into PurpleFS
@@ -292,12 +311,24 @@ Library = libcompositor.a
         files[system_path] = bundle.read_bytes()
         files[system_path + ".sig"] = bundle.with_name(bundle.name + ".sig").read_bytes()
 
+    if account_profile and not signing_key:
+        raise ValueError("An account profile requires a Creator signing key")
+
     if signing_key:
         import hashlib
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
         from sign_cmddb import sign_payload_rsa
+
+        if account_profile:
+            payload = Path(account_profile).read_bytes()
+            if not 0 < len(payload) < 128:
+                raise ValueError("Account profile must be 1 to 127 bytes")
+            account_path = "System/Configuration/account.conf"
+            files[account_path] = payload
+            signature = sign_payload_rsa(b"PurpleOS/LOCAL-ACCOUNT/v1\0" + payload, signing_key)
+            files[account_path + ".sig"] = signature.encode("ascii")
 
         manifest_path = "System/components.manifest"
         manifest = b"".join(
@@ -385,6 +416,7 @@ if __name__ == "__main__":
     parser.add_argument("--signing-key")
     parser.add_argument("--applications-dir", help="stage an existing signed application policy and bundles")
     parser.add_argument("--https-roots", help="stage an approved CA bundle and its AegisDetect .sig sidecar")
+    parser.add_argument("--account-profile", help="configure and sign a local account profile")
     args = parser.parse_args()
     build_gpt_disk(args.output_image, signing_key=args.signing_key, applications_dir=args.applications_dir,
-                   https_roots=args.https_roots)
+                   https_roots=args.https_roots, account_profile=args.account_profile)

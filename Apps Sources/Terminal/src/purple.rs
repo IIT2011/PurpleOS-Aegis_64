@@ -27,6 +27,7 @@ const COMMAND_HISTORY: usize = 16;
 const OUTPUT: usize = 4096;
 const CLIPBOARD: usize = 4096;
 const SHELL_COMMAND: u64 = 0x110a;
+const TEST_SUDO: u64 = 0x110d;
 const SHELL_PROMPT: u64 = 0x110b;
 const PROMPT_CAPACITY: usize = 96;
 
@@ -270,6 +271,9 @@ impl Line {
 
 struct Input {
     line: Line,
+    sudo_command: Option<Line>,
+    sudo_password: [u8; 5],
+    sudo_length: usize,
     draft: Line,
     entries: [Line; COMMAND_HISTORY],
     next: usize,
@@ -281,6 +285,9 @@ impl Input {
     const fn new() -> Self {
         Self {
             line: Line::EMPTY,
+            sudo_command: None,
+            sudo_password: [0; 5],
+            sudo_length: 0,
             draft: Line::EMPTY,
             entries: [Line::EMPTY; COMMAND_HISTORY],
             next: 0,
@@ -625,9 +632,20 @@ fn run_command(tab: usize, width: usize, height: usize, terminal: &Terminal, tab
     let (left,edge)=terminal.pane_bounds(width,tab);
     let wrap=edge.saturating_sub(left).max(1);
     let transcript=&mut tabs[tab];
+    if matches!(input.line.text().trim_ascii(), b"clear" | b"cls") {
+        clear_transcript(transcript);
+        input.record();
+        return;
+    }
     transcript.append(prompt.text(),wrap,font);
     transcript.append(input.line.text(),wrap,font);
     transcript.append(b"\n",wrap,font);
+    if input.line.text().trim_ascii().starts_with(b"sudo ") {
+        input.sudo_command = Some(input.line);
+        input.record();
+        transcript.append(b"Aegis test password (Ctrl+C to cancel): ",wrap,font);
+        return;
+    }
     let size=syscall(SHELL_COMMAND,input.line.bytes.as_ptr() as u64,input.line.len as u64,output.as_mut_ptr() as u64);
     if (0..=output.len() as i64).contains(&size) {
         transcript.append(&output[..size as usize],wrap,font);
@@ -814,6 +832,59 @@ pub extern "C" fn purple_terminal_main() -> ! {
                         continue;
                     };
                     let input = &mut inputs[terminal.tab];
+                    if let Some(command) = input.sudo_command {
+                        let (left, edge) = terminal.pane_bounds(width, terminal.tab);
+                        let wrap = edge.saturating_sub(left).max(1);
+                        let transcript = &mut tabs[terminal.tab];
+                        match key {
+                            3 => {
+                                input.sudo_command = None;
+                                transcript.append(b"\nCanceled.\n", wrap, font);
+                            }
+                            b'\r' | b'\n' => {
+                                input.sudo_command = None;
+                                let command = command.text().trim_ascii()
+                                    .strip_prefix(b"sudo ").unwrap_or_default();
+                                let mut request = [0u8; INPUT + 5];
+                                let result = if input.sudo_length == input.sudo_password.len() {
+                                    request[..5].copy_from_slice(&input.sudo_password);
+                                    request[5..5 + command.len()].copy_from_slice(command);
+                                    syscall(TEST_SUDO, request.as_ptr() as u64,
+                                            (command.len() + 5) as u64, output.as_mut_ptr() as u64)
+                                } else {
+                                    -13
+                                };
+                                request.fill(0);
+                                transcript.append(b"\n", wrap, font);
+                                if (0..=output.len() as i64).contains(&result) {
+                                    transcript.append(&output[..result as usize], wrap, font);
+                                } else if result == -13 {
+                                    transcript.append(b"Incorrect test password.\n", wrap, font);
+                                } else {
+                                    transcript.append(b"Test sudo is unavailable.\n", wrap, font);
+                                }
+                            }
+                            8 | 127 if input.sudo_length > 0 => {
+                                input.sudo_length -= 1;
+                                input.sudo_password[input.sudo_length] = 0;
+                            }
+                            32..=126 if input.sudo_length < input.sudo_password.len() => {
+                                input.sudo_password[input.sudo_length] = key;
+                                input.sudo_length += 1;
+                            }
+                            32..=126 => {
+                                input.sudo_command = None;
+                                transcript.append(b"\nIncorrect test password.\n", wrap, font);
+                            }
+                            _ => {}
+                        }
+                        if input.sudo_command.is_none() {
+                            input.sudo_password.fill(0);
+                            input.sudo_length = 0;
+                        }
+                        dirty = true;
+                        continue;
+                    }
                     match key {
                         b'\r' | b'\n' if input.line.len > 0 => {
                             run_command(terminal.tab,width,height,&terminal,tabs,inputs,&mut prompt,&mut output,font);

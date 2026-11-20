@@ -342,15 +342,22 @@ pub struct Shell {
 static GUI_SHELL: crate::sync::Spinlock<(u32, Shell)> =
     crate::sync::Spinlock::new((0, Shell::new()));
 
-const SHELL_USER: &str = "root";
+const SHELL_USER: &str = "Aegis";
 pub const GUI_PROMPT_CAPACITY: usize = 96;
 
 fn gui_session(owner: u32) -> crate::sync::SpinlockGuard<'static, (u32, Shell)> {
     let mut session = GUI_SHELL.lock();
     if session.0 != owner {
         session.0 = owner;
-        session.1.cwd[0] = b'/';
-        session.1.cwd_len = 1;
+        let mut home = [0; 28];
+        let home = super::accounts::local().home(&mut home);
+        session.1.cwd[..home.len()].copy_from_slice(home.as_bytes());
+        session.1.cwd_len = home.len();
+        session.1.history_count = 0;
+        session.1.history_browse = None;
+        session.1.alias_count = 0;
+        session.1.env_count = 0;
+        session.1.custom_prompt_len = 0;
     }
     session
 }
@@ -358,12 +365,19 @@ fn gui_session(owner: u32) -> crate::sync::SpinlockGuard<'static, (u32, Shell)> 
 pub(crate) fn gui_prompt(owner: u32, output: &mut [u8; GUI_PROMPT_CAPACITY]) -> usize {
     let session = gui_session(owner);
     let shell = &session.1;
+    if shell.custom_prompt_len != 0 {
+        let length = shell.custom_prompt_len;
+        output[..length].copy_from_slice(&shell.custom_prompt[..length]);
+        return length;
+    }
     let cwd = &shell.cwd[..shell.cwd_len];
-    let directory: &[u8] = if cwd == b"/" { b"~" } else { cwd };
+    let account = super::accounts::local();
+    let mut home = [0; 28];
+    let directory: &[u8] = if cwd == account.home(&mut home).as_bytes() { b"~" } else { cwd };
     let mut used = 0;
     for part in [
         b"PurpleOS@" as &[u8],
-        SHELL_USER.as_bytes(),
+        account.name().as_bytes(),
         b" ",
         directory,
         b"$ ",
@@ -376,9 +390,172 @@ pub(crate) fn gui_prompt(owner: u32, output: &mut [u8; GUI_PROMPT_CAPACITY]) -> 
 
 pub(crate) fn gui_command(owner: u32, command: &str, output: &mut [u8]) -> usize {
     let mut session = gui_session(owner);
-    match gui_pipeline(&mut session.1, command, output) {
+    session.1.history_push(command);
+    run_gui_command(&mut session.1, command, output)
+}
+
+fn run_gui_command(shell: &mut Shell, command: &str, output: &mut [u8]) -> usize {
+    match gui_pipeline(shell, command, output) {
         Ok(length) => length,
         Err(error) => crate::drivers::serial::capture(output, || serial::println(error)),
+    }
+}
+
+#[cfg(feature = "development-sudo")]
+pub(crate) fn gui_sudo_command(owner: u32, command: &str, output: &mut [u8]) -> usize {
+    let mut session = gui_session(owner);
+    // Resolve aliases through the authenticated database before selecting a handler.
+    let (name, arguments) = command.split_once(' ').unwrap_or((command, ""));
+    let Some(record) = crate::kernel::cmddb::lookup(name) else {
+        return capture_gui_output(output, || serial::println("Command absent from signed cmd.dtbase."));
+    };
+    let target = record.target();
+    if matches!(target, "ring0:reboot" | "ring0:arp" | "ring3:control") {
+        return capture_gui_output(output, || match target {
+            "ring0:reboot" if arguments.trim().is_empty() => {
+                if let Err(reason) = crate::kernel::power::execute(crate::kernel::power::Action::Restart) {
+                    serial::println(reason);
+                }
+            }
+            "ring0:arp" if arguments.trim().is_empty() => crate::net::arp::print_cache(),
+            "ring3:control" if matches!(arguments.trim(), "" | "info" | "status") => {
+                crate::kernel::ring3::print_info();
+            }
+            _ => serial::println("Unsupported arguments for this development sudo command."),
+        });
+    }
+    session.1.history_push(command);
+    if target == "ring0:source" {
+        return gui_source(&mut session.1, arguments, output);
+    }
+    let name = match target {
+        "ring0:whoami" => "whoami",
+        "ring0:sync" => "sync",
+        "ring0:remount" => "remount",
+        "ring0:mkdir" => "mkdir",
+        "ring0:rmdir" => "rmdir",
+        "ring0:touch" => "touch",
+        "ring0:write" => "write",
+        "ring0:append" => "append",
+        "ring0:copy" => "copy",
+        "ring0:move" => "move",
+        "ring0:del" => "del",
+        "ring0:ifconfig" => "ifconfig",
+        "ring0:cmd" => "cmd",
+        "ring0:path" => "path",
+        "ring0:insmod" => "insmod",
+        "ring0:history" => "history",
+        "ring0:alias" => "alias",
+        "ring0:unalias" => "unalias",
+        "ring0:export" => "export",
+        "ring0:env" => "env",
+        "ring0:jobs" => "jobs",
+        "ring0:prompt" => "prompt",
+        "ring0:ksym" => "ksym",
+        _ if gui_builtin(target).is_some() => return run_gui_command(&mut session.1, command, output),
+        _ => return capture_gui_output(output, || {
+            serial::println("This command has no development sudo handler.");
+        }),
+    };
+    let command = alloc::format!("{name} {arguments}");
+    capture_gui_output(output, || session.1.execute_single(command.trim_end()))
+}
+
+#[cfg(feature = "development-sudo")]
+fn gui_source(shell: &mut Shell, arguments: &str, output: &mut [u8]) -> usize {
+    use crate::{fs::vfs, security::aegis_detect};
+
+    let script = (|| {
+        let mut words = arguments.split_ascii_whitespace();
+        let argument = words.next().ok_or("Usage: source <signed script>")?;
+        if words.next().is_some() {
+            return Err("Expected one script path.");
+        }
+        let mut path = [0; 128];
+        let path = shell.resolve_path(argument, &mut path);
+        if vfs::is_storage_path(path) || path == "/dev" || path.starts_with("/dev/") {
+            return Err("Script must be a regular file.");
+        }
+        const MAX_SCRIPT_SIZE: usize = 4096;
+        let size = vfs::file_size(path)?;
+        if !(1..=MAX_SCRIPT_SIZE).contains(&size) {
+            return Err("Script is empty or too large.");
+        }
+        let mut bytes = alloc::vec::Vec::new();
+        bytes.try_reserve_exact(size + 1).map_err(|_| "Not enough memory for script.")?;
+        bytes.resize(size + 1, 0);
+        if vfs::read(path, &mut bytes)? != size
+            || !aegis_detect::verify_control_file(path, b"PurpleOS/SHELL-SCRIPT/v1\0", &bytes[..size])
+        {
+            return Err("AegisDetect: Script rejected by signature policy.");
+        }
+        bytes.truncate(size);
+        alloc::string::String::from_utf8(bytes).map_err(|_| "Script must be UTF-8.")
+    })();
+    let script = match script {
+        Ok(script) => script,
+        Err(error) => return capture_gui_output(output, || serial::println(error)),
+    };
+    let mut length = 0;
+    for line in script.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') || line.starts_with("//") || line.starts_with("rem ") {
+            continue;
+        }
+        if !line.bytes().all(|byte| (b' '..=b'~').contains(&byte) && !b"&;<".contains(&byte)) {
+            length += capture_gui_output(&mut output[length..], || serial::println("Invalid script command."));
+            break;
+        }
+        length += run_gui_command(shell, line, &mut output[length..]);
+        if length >= output.len() {
+            break;
+        }
+    }
+    length
+}
+
+// The Shell capability grants a bounded command interface to Ring 3 clients.
+// Command database authentication alone does not grant access to admin builtins.
+fn gui_builtin(target: &str) -> Option<&'static str> {
+    const BUILTINS: &[&str] = &[
+        "help", "cd", "pwd", "dir", "ls", "tree", "stat", "cat", "head", "tail", "grep", "wc",
+        "dump", "echo", "ver", "uname", "date", "time", "uptime", "mem", "whoami", "sysinfo",
+        "cpuinfo", "smp", "tasks", "disks", "df", "mount", "devices", "pci", "mouse", "gpu3d",
+        "modules", "calc", "seq", "fortune", "which", "peek", "view", "top", "bench",
+        "aegisdetect", "video", "compositor", "window", "ifconfig", "posix", "native",
+        "cmd", "path", "mkdir",
+    ];
+    let name = target.strip_prefix("ring0:")?;
+    BUILTINS.iter().copied().find(|builtin| *builtin == name)
+}
+
+fn gui_subcommand_allowed(builtin: &str, arguments: &str) -> bool {
+    let sub = arguments.split_ascii_whitespace().next().unwrap_or("");
+    match builtin {
+        "tasks" | "devices" | "compositor" | "video" => matches!(sub, "" | "info" | "status"),
+        "window" => matches!(sub, "" | "list"),
+        "ifconfig" => sub.is_empty(),
+        "posix" => matches!(sub, "" | "info"),
+        "native" => matches!(sub, "" | "info" | "list"),
+        "cmd" => matches!(sub, "" | "info" | "verify"),
+        "path" => matches!(sub, "" | "list" | "show"),
+        _ => true,
+    }
+}
+
+fn gui_file_argument<'a>(builtin: &str, arguments: &'a str) -> Option<&'a str> {
+    let mut words = arguments.split_ascii_whitespace();
+    match builtin {
+        "cat" | "wc" | "dump" | "stat" | "peek" | "view" => words.next(),
+        "head" | "tail" => {
+            let first = words.next()?;
+            if first.starts_with("-n") { words.next() } else { Some(first) }
+        }
+        "grep" => words.nth(1),
+        "find" => match words.nth(1)? {
+            "in" => words.next(),
+            path => Some(path),
+        },
+        _ => None,
     }
 }
 
@@ -421,23 +598,22 @@ fn gui_pipeline(
         let (name, arguments) = stage.split_once(' ').unwrap_or((stage, ""));
         let record =
             crate::kernel::cmddb::lookup(name).ok_or("Command absent from signed cmd.dtbase.")?;
-        let builtin = match (count, record.target()) {
-            (0, "ring0:help") => "help",
-            (0, "ring0:ls") => "ls",
-            (0, "ring0:pwd") => "pwd",
-            (0, "ring0:cd") if !commands.contains('|') && redirection.is_none() => "cd",
-            (0, "ring0:cat") => "cat",
-            (0, "ring0:echo") => "echo",
-            (0, "ring0:ver") => "ver",
-            (0, "ring0:date") => "date",
-            (0, "ring0:time") => "time",
-            (0, "ring0:uptime") => "uptime",
-            (0, "ring0:mem") => "free",
-            (_, "ring0:grep") if count != 0 && !arguments.trim().is_empty() => "grep",
-            (_, "ring0:head") if count != 0 => "head",
-            (_, "ring0:tail") if count != 0 => "tail",
-            (_, "ring0:wc") if count != 0 && arguments.trim().is_empty() => "wc",
-            (_, "ring0:cat") if count != 0 && arguments.trim().is_empty() => "cat",
+        let builtin = gui_builtin(record.target())
+            .ok_or("This command is unavailable in Purple Terminal.")?;
+        if !gui_subcommand_allowed(builtin, arguments) {
+            return Err("This subcommand is unavailable in Purple Terminal.");
+        }
+        let builtin = match (count, builtin) {
+            (0, "cd" | "mkdir") if commands.contains('|') || redirection.is_some() => {
+                return Err("Use this command on its own.");
+            }
+            (0, "grep") if name == "find" => "find",
+            (0, builtin) => builtin,
+            (_, "grep") if !arguments.trim().is_empty() => "grep",
+            (_, "head") => "head",
+            (_, "tail") => "tail",
+            (_, "wc") if arguments.trim().is_empty() => "wc",
+            (_, "cat") if arguments.trim().is_empty() => "cat",
             _ => return Err("This command is unavailable at this stage of the GUI shell."),
         };
         *slot = (builtin, arguments);
@@ -445,19 +621,53 @@ fn gui_pipeline(
     }
 
     let (builtin, arguments) = stages[0];
-    if builtin == "cat" {
+    if builtin == "mkdir" {
+        let mut words = arguments.split_ascii_whitespace();
+        let path = words.next().ok_or("Usage: mkdir <directory>")?;
+        if words.next().is_some() || path.len() > 63 {
+            return Err("Expected one directory path of at most 63 bytes.");
+        }
+        let mut buffer = [0; 128];
+        let resolved = shell.resolve_path(path, &mut buffer);
+        let parent = resolved.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+        if resolved.len() > 55 {
+            return Err("Directory path exceeds the PurpleFS limit.");
+        }
+        if !super::posix::normal_home_child(resolved) {
+            return Err("You can create directories only inside your home.");
+        }
+        if !crate::fs::vfs::is_directory(parent) {
+            return Err("Parent directory does not exist.");
+        }
+        let account = super::accounts::local();
+        crate::fs::vfs::mkdir_owned(resolved, account.uid, account.gid)?;
+        return Ok(0);
+    }
+    if let Some(argument) = gui_file_argument(builtin, arguments) {
         let mut path = [0; 128];
-        let file = shell.resolve_path(
-            arguments.split_ascii_whitespace().next().unwrap_or(""),
-            &mut path,
-        );
+        let file = shell.resolve_path(argument, &mut path);
         if crate::fs::vfs::is_storage_path(file) || file == "/dev" || file.starts_with("/dev/") {
             return Err("The GUI shell cannot read device nodes.");
         }
     }
 
     let first = alloc::format!("{builtin} {arguments}");
-    let mut length = capture_gui_output(output, || shell.execute_single(first.trim_end()));
+    let mut length = capture_gui_output(output, || {
+        if builtin == "help" && arguments.trim().is_empty() {
+            crate::kernel::cmddb::print_gui_help(|target| gui_builtin(target).is_some());
+        } else if builtin == "help"
+            && crate::kernel::cmddb::lookup(arguments.split_ascii_whitespace().next().unwrap_or(""))
+                .is_some_and(|record| gui_builtin(record.target()).is_none())
+        {
+            serial::println("This command is unavailable in Purple Terminal.");
+        } else if builtin == "whoami" {
+            serial::println(super::accounts::local().name());
+        } else if builtin == "cd" && matches!(arguments.trim(), "" | "~") {
+            shell.do_cd(super::accounts::local().home(&mut [0; 28]));
+        } else {
+            shell.execute_single(first.trim_end());
+        }
+    });
     if count > 1 {
         let mut scratch = alloc::vec::Vec::new();
         scratch
@@ -1770,7 +1980,7 @@ impl Shell {
             // Whoami
             "whoami" | "id" => {
                 serial::print(SHELL_USER);
-                serial::println(" (uid=0 gid=0 groups=0(root)) - Aegis64 Ring 0 Kernel Supervisor");
+                serial::println(" (uid=0 gid=0) - Aegis64 Ring 0 Kernel Supervisor");
             }
 
             // Natural Grammar: copy <source> to <destination>
@@ -3368,12 +3578,13 @@ impl Shell {
             }
             if cur < 0 {
                 serial::print("-");
-                serial::print_u64((-cur) as u64);
+                serial::print_u64(cur.unsigned_abs());
             } else {
                 serial::print_u64(cur as u64);
             }
             serial::println("");
-            cur += step;
+            let Some(next) = cur.checked_add(step) else { break };
+            cur = next;
             count += 1;
         }
     }

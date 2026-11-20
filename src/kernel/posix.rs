@@ -451,19 +451,20 @@ pub fn fnv1a_64(bytes: &[u8]) -> u64 {
 // ============================================================================
 
 pub fn posix_open(path: &str, flags: u32, _mode: u32) -> Result<usize, i64> {
-    let clean = path.trim();
-    if clean.is_empty() {
-        return Err(-ENOENT);
+    let mut resolved = [0; 128];
+    let clean = resolve_task_path(path, &mut resolved)?;
+    if (flags & 3) != O_RDONLY || flags & (O_CREAT | O_TRUNC) != 0 {
+        require_writable_path(clean)?;
     }
 
     if (flags & O_CREAT) != 0 {
         if crate::fs::vfs::file_size(clean).is_err() {
-            let _ = crate::fs::vfs::write(clean, b"");
+            crate::fs::vfs::write(clean, b"").map_err(|_| -EIO)?;
         }
     }
 
     if (flags & O_TRUNC) != 0 {
-        let _ = crate::fs::vfs::write(clean, b"");
+        crate::fs::vfs::write(clean, b"").map_err(|_| -EIO)?;
     }
 
     let mut oft = OPEN_FILE_TABLE.lock();
@@ -603,6 +604,7 @@ pub fn posix_read(fd: usize, buf: &mut [u8]) -> Result<usize, i64> {
         FdType::ConsoleStdout | FdType::ConsoleStderr => Err(-EBADF),
         FdType::VfsFile => {
             let path_str = core::str::from_utf8(&desc.path[..desc.path_len]).unwrap_or("");
+            require_writable_path(path_str)?;
             let offset = desc.offset;
             match crate::fs::vfs::read_at(path_str, offset, buf) {
                 Ok(read_bytes) => {
@@ -1240,9 +1242,14 @@ pub fn posix_kill(pid: i32, sig: i32) -> Result<(), i64> {
     }
 
     let mut s = crate::kernel::task::SCHED.lock();
+    let cpu = crate::kernel::smp::get_current_cpu();
+    let caller_uid = s.current[cpu].map_or_else(|| super::accounts::local().uid, |index| s.tasks[index].uid);
     for i in 0..crate::kernel::task::MAX_TASKS {
         let t = &mut s.tasks[i];
         if t.id == pid as u32 && t.state != crate::kernel::task::TaskState::Unused {
+            if caller_uid != 0 && caller_uid != t.uid {
+                return Err(-EPERM);
+            }
             if sig == 0 {
                 return Ok(()); // Probing process existence
             }
@@ -1622,16 +1629,77 @@ pub fn posix_getppid() -> i64 {
 }
 
 pub fn posix_getuid() -> i64 {
-    0
+    let scheduler = crate::kernel::task::SCHED.lock();
+    let cpu = crate::kernel::smp::get_current_cpu();
+    i64::from(scheduler.current[cpu].map_or_else(|| super::accounts::local().uid, |index| scheduler.tasks[index].uid))
 }
 pub fn posix_getgid() -> i64 {
-    0
+    let scheduler = crate::kernel::task::SCHED.lock();
+    let cpu = crate::kernel::smp::get_current_cpu();
+    i64::from(scheduler.current[cpu].map_or_else(|| super::accounts::local().gid, |index| scheduler.tasks[index].gid))
 }
 pub fn posix_geteuid() -> i64 {
-    0
+    posix_getuid()
 }
 pub fn posix_getegid() -> i64 {
-    0
+    posix_getgid()
+}
+
+pub(crate) fn normal_home_child(path: &str) -> bool {
+    path_child(path, super::accounts::local().home(&mut [0; 28]))
+}
+
+fn path_child(path: &str, directory: &str) -> bool {
+    path.strip_prefix(directory)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .is_some_and(|rest| rest.split('/').all(|part| {
+            !part.is_empty() && !matches!(part, "." | "..")
+        }))
+}
+
+fn require_writable_path(path: &str) -> Result<(), i64> {
+    if posix_geteuid() == 0 || normal_home_child(path) || path_child(path, "/tmp") {
+        Ok(())
+    } else {
+        Err(-EACCES)
+    }
+}
+
+fn resolve_task_path<'a>(path: &str, buffer: &'a mut [u8; 128]) -> Result<&'a str, i64> {
+    if path.is_empty() {
+        return Err(-ENOENT);
+    }
+    let mut cwd = [0; 64];
+    let base = if path.starts_with('/') {
+        ""
+    } else {
+        let length = posix_getcwd(&mut cwd)?;
+        core::str::from_utf8(&cwd[..length]).map_err(|_| -EINVAL)?
+    };
+    buffer[0] = b'/';
+    let mut length = 1;
+    for part in base.split('/').chain(path.split('/')) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                length = buffer[..length].iter().rposition(|&byte| byte == b'/')
+                    .unwrap_or(0).max(1);
+            }
+            name => {
+                let start = length + usize::from(length > 1);
+                let end = start + name.len();
+                if end >= buffer.len() {
+                    return Err(-ENAMETOOLONG);
+                }
+                if length > 1 {
+                    buffer[length] = b'/';
+                }
+                buffer[start..end].copy_from_slice(name.as_bytes());
+                length = end;
+            }
+        }
+    }
+    core::str::from_utf8(&buffer[..length]).map_err(|_| -EINVAL)
 }
 
 pub fn posix_getcwd(buf: &mut [u8]) -> Result<usize, i64> {
@@ -1651,10 +1719,8 @@ pub fn posix_getcwd(buf: &mut [u8]) -> Result<usize, i64> {
 }
 
 pub fn posix_chdir(path: &str) -> Result<(), i64> {
-    let clean = path.trim();
-    if clean.is_empty() {
-        return Err(-ENOENT);
-    }
+    let mut resolved = [0; 128];
+    let clean = resolve_task_path(path, &mut resolved)?;
 
     if !crate::fs::vfs::is_directory(clean) {
         if crate::fs::vfs::file_size(clean).is_ok() {
@@ -1681,11 +1747,13 @@ pub fn posix_chdir(path: &str) -> Result<(), i64> {
 }
 
 pub fn posix_mkdir(path: &str, _mode: u32) -> Result<(), i64> {
-    let clean = path.trim();
-    if clean.is_empty() {
-        return Err(-ENOENT);
+    let mut resolved = [0; 128];
+    let clean = resolve_task_path(path, &mut resolved)?;
+    let uid = posix_geteuid() as u16;
+    if uid != 0 && !normal_home_child(clean) {
+        return Err(-EACCES);
     }
-    match crate::fs::vfs::mkdir(clean) {
+    match crate::fs::vfs::mkdir_owned(clean, uid, posix_getegid() as u16) {
         Ok(()) => Ok(()),
         Err("Directory already exists") => Err(-EEXIST),
         Err("Cannot create root directory") => Err(-EEXIST),
@@ -1694,9 +1762,10 @@ pub fn posix_mkdir(path: &str, _mode: u32) -> Result<(), i64> {
 }
 
 pub fn posix_rmdir(path: &str) -> Result<(), i64> {
-    let clean = path.trim();
-    if clean.is_empty() {
-        return Err(-ENOENT);
+    let mut resolved = [0; 128];
+    let clean = resolve_task_path(path, &mut resolved)?;
+    if posix_geteuid() != 0 && !normal_home_child(clean) {
+        return Err(-EACCES);
     }
     match crate::fs::vfs::rmdir(clean) {
         Ok(()) => Ok(()),
@@ -1706,9 +1775,10 @@ pub fn posix_rmdir(path: &str) -> Result<(), i64> {
 }
 
 pub fn posix_unlink(path: &str) -> Result<(), i64> {
-    let clean = path.trim();
-    if clean.is_empty() {
-        return Err(-ENOENT);
+    let mut resolved = [0; 128];
+    let clean = resolve_task_path(path, &mut resolved)?;
+    if posix_geteuid() != 0 && !normal_home_child(clean) {
+        return Err(-EACCES);
     }
     if crate::fs::vfs::is_directory(clean) {
         return Err(-EISDIR);

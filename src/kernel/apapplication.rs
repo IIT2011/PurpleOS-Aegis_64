@@ -135,3 +135,4 @@ impl<'a> Bundle<'a> {
         })
     }
 }
+pub const MAX_BUNDLE_BYTES: usize = 32 * 1024 * 1024;

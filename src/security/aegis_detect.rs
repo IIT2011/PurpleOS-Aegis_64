@@ -335,7 +335,6 @@ pub fn verify_application<'a>(
     max_surface: (u32, u32),
 ) -> Result<VerifiedApplication<'a>, crate::kernel::apapplication::Error> {
     use crate::kernel::apapplication::{Bundle, Error, Scope, SYSADMIN};
-    use alloc::vec::Vec;
     use ed25519_dalek::{Signature, VerifyingKey};
 
     const DOMAIN: &[u8] = b"PurpleOS/APAPPLICATION/v2\0";
@@ -350,17 +349,15 @@ pub fn verify_application<'a>(
         return Err(Error::Trust);
     }
     let key = VerifyingKey::from_bytes(signer.public_key).map_err(|_| Error::Trust)?;
-    let mut message = Vec::new();
     let capacity = DOMAIN.len().checked_add(bytes.len()).ok_or(Error::Memory)?;
-    message
-        .try_reserve_exact(capacity)
-        .map_err(|_| Error::Memory)?;
-    message.extend_from_slice(DOMAIN);
-    message.extend_from_slice(&bytes[..0x110]);
-    message.extend_from_slice(&[0; 64]);
-    message.extend_from_slice(&bytes[0x150..]);
+    let mut message = crate::mm::pmm::PageBuffer::new(capacity).ok_or(Error::Memory)?;
+    let (domain, manifest) = message.split_at_mut(DOMAIN.len());
+    domain.copy_from_slice(DOMAIN);
+    manifest[..0x110].copy_from_slice(&bytes[..0x110]);
+    manifest[0x150..].copy_from_slice(&bytes[0x150..]);
     key.verify_strict(&message, &Signature::from_bytes(bundle.signature))
         .map_err(|_| Error::Signature)?;
+    drop(message);
 
     if bundle.id != requested_id
         || bundle.capabilities & !(local_policy.0 & signer.capability_ceiling) != 0

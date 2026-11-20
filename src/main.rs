@@ -93,13 +93,19 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     arch::x86_64::cpu::init_bsp();
 
     // 3. Physical Memory Manager (PMM)
-    mm::pmm::init(mbi, kstart, kend);
+    let Some(info) = mbi else {
+        security::aegis_detect::halt_boot("missing recognized boot handoff");
+    };
+    if let Err(reason) = mm::pmm::init(info, kstart, kend) {
+        security::aegis_detect::halt_boot(reason);
+    }
 
     // 4. Virtual Memory Manager (VMM) & CR0.WP
     mm::vmm::init();
 
     // 4b. Dynamic Kernel Heap Allocator (GlobalAlloc)
     mm::heap::init();
+    drivers::serial::println("Boot milestone: memory ready");
 
     // 5. GDT, TSS and IDT
     arch::x86_64::gdt::init();
@@ -125,6 +131,7 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
 
     // 10. Symmetric Multiprocessing (SMP AP Cores)
     kernel::smp::init();
+    drivers::serial::println("Boot milestone: core initialization complete");
 
     // 11. PCI Bus Enumeration
     drivers::pci::init();
@@ -132,10 +139,17 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     // 12. Storage Subsystem & PurpleFS Auto-Mount
     kernel::storage::init();
     fs::fs_registry::init();
+    if kernel::storage::is_mounted() {
+        drivers::serial::println("Boot milestone: system filesystem mounted");
+    }
 
     // 13. Security & Integrity Subsystems
     security::aegis_detect::enforce_boot_policy();
+    if let Err(reason) = kernel::accounts::init() {
+        security::aegis_detect::halt_boot(reason);
+    }
     kernel::app_runtime::init();
+    drivers::serial::println("Boot milestone: system trust checks complete");
 
     // 14. Peripheral Discovery Daemon
     drivers::purple_detect::init();
@@ -155,6 +169,7 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     drivers::gpu_accel::init();
     kernel::apdrv::init();
     kernel::apexec::init();
+    drivers::serial::println("Boot milestone: device initialization pass complete");
 
     // 16. Linear Framebuffer Driver Initialization
     drivers::font::init_desktop();
@@ -169,6 +184,11 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
 
     // 17. Enable Hardware Interrupts
     arch::x86_64::cpu::sti();
+    if compositor::is_running() {
+        drivers::serial::println("Boot milestone: desktop first frame submitted; input delivery unverified");
+    } else {
+        drivers::serial::println("Boot milestone: desktop unavailable; serial console selected");
+    }
     drivers::serial::println("Interrupts enabled, entering AegisShell 2.0 (Rust Edition)...");
 
     // 18. Launch Interactive Command Shell

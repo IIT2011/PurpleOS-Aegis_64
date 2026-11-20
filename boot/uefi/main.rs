@@ -278,7 +278,9 @@ unsafe fn handoff(image: Handle, table: &SystemTable, services: &BootServices, e
         let mut version = 0;
         let status = (services.get_memory_map)(&mut length, memory_map, &mut key, &mut stride, &mut version);
         if status != 0 { return status; }
-        if stride < 40 || version != 1 || length > BUFFER_PAGES * PAGE - MAP_OFFSET {
+        if stride < 40 || version != 1 || length > BUFFER_PAGES * PAGE - MAP_OFFSET
+            || length % stride != 0
+        {
             return EFI_LOAD_ERROR;
         }
         let mut count = 0;
@@ -286,6 +288,7 @@ unsafe fn handoff(image: Handle, table: &SystemTable, services: &BootServices, e
             let kind = u32_at(descriptor, 0);
             let address = u64_at(descriptor, 8);
             let Some(size) = u64_at(descriptor, 24).checked_mul(PAGE as u64) else { return EFI_LOAD_ERROR };
+            if address.checked_add(size).is_none() { return EFI_LOAD_ERROR; }
             if address >= LIMIT || size == 0 { continue; }
             if count >= (MAP_OFFSET - PAGE) / size_of::<MultibootMmapEntry>() {
                 return EFI_LOAD_ERROR;

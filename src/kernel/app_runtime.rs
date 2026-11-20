@@ -3,12 +3,12 @@ use crate::kernel::{apapplication, apexec, posix, task, uaccess};
 use crate::mm::vmm::{PAGE_NO_EXECUTE, PAGE_WRITABLE};
 use crate::security::aegis_detect::{self, AppSigner};
 use crate::sync::Spinlock;
-use alloc::vec::Vec;
+use crate::mm::pmm::PageBuffer;
 
 const POLICY_PATH: &str = "/System/Applications/trust.policy";
 const POLICY_TAG: &[u8] = b"PurpleOS/APP-TRUST/v1\0";
 const POLICY_LIMIT: usize = 16 * 1024;
-const BUNDLE_LIMIT: usize = 512 * 1024;
+const BUNDLE_LIMIT: usize = apapplication::MAX_BUNDLE_BYTES;
 const CONSOLE: u32 = 1;
 const SHELL: u32 = 4;
 const ALLOWED_CAPABILITIES: u32 = apapplication::GUI | CONSOLE | SHELL;
@@ -33,9 +33,14 @@ pub const SYS_MEMORY_MAP: u64 = 0x1108;
 pub const SYS_MEMORY_UNMAP: u64 = 0x1109;
 pub const SYS_SHELL_COMMAND: u64 = 0x110a;
 pub const SYS_SHELL_PROMPT: u64 = 0x110b;
+#[cfg(feature = "development-sudo")]
+const SYS_TEST_SUDO: u64 = 0x110d;
+
+#[cfg(all(feature = "development-sudo", any(not(debug_assertions), feature = "signed-components")))]
+compile_error!("development-sudo is restricted to unprotected debug kernels");
 pub const SYS_WINDOW_GLASS: u64 = 0x110c;
 
-static POLICY: Spinlock<Option<Vec<u8>>> = Spinlock::new(None);
+static POLICY: Spinlock<Option<PageBuffer>> = Spinlock::new(None);
 const MAX_LAUNCHERS: usize = 32;
 static LAUNCHERS: Spinlock<[Option<AppId>; MAX_LAUNCHERS]> = Spinlock::new([None; MAX_LAUNCHERS]);
 
@@ -66,7 +71,7 @@ pub fn launcher_page<const N: usize>(page: usize) -> ([Option<AppId>; N], bool) 
     )
 }
 
-fn snapshot(path: &str, limit: usize) -> Result<Vec<u8>, &'static str> {
+fn snapshot(path: &str, limit: usize) -> Result<PageBuffer, &'static str> {
     crate::kernel::storage::with_fs(|fs| {
         let inode = fs
             .lookup(path.trim_start_matches('/'))
@@ -75,9 +80,7 @@ fn snapshot(path: &str, limit: usize) -> Result<Vec<u8>, &'static str> {
         if size == 0 || size > limit {
             return Err("File exceeds runtime limits");
         }
-        let mut bytes = Vec::new();
-        bytes.try_reserve_exact(size).map_err(|_| "Out of memory")?;
-        bytes.resize(size, 0);
+        let mut bytes = PageBuffer::new(size).ok_or("Out of memory")?;
         if fs.read_file(inode, &mut bytes) != size {
             return Err("Incomplete file read");
         }
@@ -333,6 +336,8 @@ pub fn dispatch(
         SYS_MEMORY_UNMAP => unmap_memory(a),
         SYS_SHELL_COMMAND if native.capabilities & SHELL != 0 => shell_command(owner, a, b, c),
         SYS_SHELL_PROMPT if native.capabilities & SHELL != 0 => shell_prompt(owner, a, b),
+        #[cfg(feature = "development-sudo")]
+        SYS_TEST_SUDO if native.capabilities & SHELL != 0 => test_sudo(owner, a, b, c),
         _ => Err(-posix::EPERM),
     };
     result.unwrap_or_else(|error| error)
@@ -346,11 +351,10 @@ fn map_memory(length: u64) -> Result<i64, i64> {
     let mut scheduler = task::SCHED.lock();
     let index = scheduler.current[task::get_current_cpu()].ok_or(-posix::ESRCH)?;
     let task = &mut scheduler.tasks[index];
-    let slot = task
-        .native_heap
-        .iter()
-        .position(|&(_, size)| size == 0)
-        .ok_or(-posix::ENOSPC)?;
+    if task.native_heap.len() >= task::NATIVE_MAPPINGS {
+        return Err(-posix::ENOSPC);
+    }
+    task.native_heap.try_reserve(1).map_err(|_| -posix::ENOMEM)?;
     let limit = apexec::HEAP_BASE + apexec::HEAP_SIZE;
     let mut address = apexec::HEAP_BASE;
     loop {
@@ -361,7 +365,7 @@ fn map_memory(length: u64) -> Result<i64, i64> {
         let overlap = task
             .native_heap
             .iter()
-            .filter(|&&(base, size)| size != 0 && address < base + size && base < end)
+            .filter(|&&(base, size)| address < base + size && base < end)
             .map(|&(base, size)| base + size)
             .max();
         let Some(after) = overlap else {
@@ -377,7 +381,7 @@ fn map_memory(length: u64) -> Result<i64, i64> {
         PAGE_WRITABLE | PAGE_NO_EXECUTE,
     )
     .ok_or(-posix::ENOMEM)?;
-    task.native_heap[slot] = (address, length);
+    task.native_heap.push((address, length));
     Ok(address as i64)
 }
 
@@ -385,13 +389,13 @@ fn unmap_memory(address: u64) -> Result<i64, i64> {
     let mut scheduler = task::SCHED.lock();
     let index = scheduler.current[task::get_current_cpu()].ok_or(-posix::ESRCH)?;
     let task = &mut scheduler.tasks[index];
-    let region = task
+    let index = task
         .native_heap
-        .iter_mut()
-        .find(|(base, size)| *base == address && *size != 0)
+        .iter()
+        .position(|&(base, _)| base == address)
         .ok_or(-posix::EINVAL)?;
-    crate::mm::vmm::free_user_range(task.cr3 as *mut _, address, address + region.1);
-    *region = (0, 0);
+    let (_, length) = task.native_heap.swap_remove(index);
+    crate::mm::vmm::free_user_range(task.cr3 as *mut _, address, address + length);
     Ok(0)
 }
 
@@ -434,6 +438,33 @@ fn shell_command(owner: u32, source: u64, length: u64, destination: u64) -> Resu
     let length = crate::kernel::shell::gui_command(owner, line, &mut output);
     uaccess::copy_to_user(&output[..length], destination)?;
     Ok(length as i64)
+}
+
+#[cfg(feature = "development-sudo")]
+fn test_sudo(owner: u32, source: u64, length: u64, destination: u64) -> Result<i64, i64> {
+    const PASSWORD: &[u8] = b"12345";
+    let mut request = [0u8; 245];
+    let request = request.get_mut(..length as usize).ok_or(-posix::EINVAL)?;
+    uaccess::copy_from_user(source, request)?;
+    let (password, command) = request.split_at_checked(PASSWORD.len()).ok_or(-posix::EINVAL)?;
+    if password != PASSWORD {
+        return Err(-posix::EACCES);
+    }
+    let command = core::str::from_utf8(command).map_err(|_| -posix::EINVAL)?;
+    let command = command.trim();
+    if command.is_empty()
+        || !command.bytes().all(|byte| (b' '..=b'~').contains(&byte) && !b"&;<>|".contains(&byte))
+    {
+        return Err(-posix::EINVAL);
+    }
+    let capacity = crate::drivers::serial::CAPTURE_LIMIT;
+    uaccess::validate_user_range(destination, capacity, true)?;
+    let mut output = alloc::vec::Vec::new();
+    output.try_reserve_exact(capacity).map_err(|_| -posix::ENOMEM)?;
+    output.resize(capacity, 0);
+    let size = crate::kernel::shell::gui_sudo_command(owner, command, &mut output);
+    uaccess::copy_to_user(&output[..size], destination)?;
+    Ok(size as i64)
 }
 
 fn shell_prompt(owner: u32, destination: u64, capacity: u64) -> Result<i64, i64> {

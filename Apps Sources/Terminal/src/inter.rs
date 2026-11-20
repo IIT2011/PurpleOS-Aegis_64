@@ -1,4 +1,4 @@
-#[path = "../../../OS/sdk/gui/inter.rs"]
+#[path = "../../../sdk/gui/inter.rs"]
 mod rasterizer;
 
 pub use rasterizer::{Glyph, Inter, HEIGHT, SUBPIXELS};

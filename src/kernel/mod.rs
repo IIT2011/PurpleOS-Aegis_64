@@ -1,4 +1,5 @@
 pub mod acpi;
+pub(crate) mod accounts;
 pub mod apapplication;
 pub mod apdrv;
 pub mod apexec;

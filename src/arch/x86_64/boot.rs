@@ -7,6 +7,58 @@ pub struct MultibootMmapEntry {
     pub entry_type: u32,
 }
 
+/// Walk the size-prefixed Multiboot memory map without reading past a record.
+pub fn memory_map_entries(
+    mut bytes: &[u8],
+) -> impl Iterator<Item = Result<MultibootMmapEntry, &'static str>> + '_ {
+    core::iter::from_fn(move || {
+        if bytes.is_empty() {
+            return None;
+        }
+        let record = (|| {
+            let size = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?);
+            let end = (size as usize).checked_add(4)?;
+            if end < core::mem::size_of::<MultibootMmapEntry>() || end > bytes.len() {
+                return None;
+            }
+            let addr = u64::from_le_bytes(bytes[4..12].try_into().ok()?);
+            let len = u64::from_le_bytes(bytes[12..20].try_into().ok()?);
+            addr.checked_add(len)?;
+            let entry_type = u32::from_le_bytes(bytes[20..24].try_into().ok()?);
+            bytes = &bytes[end..];
+            Some(MultibootMmapEntry { size, addr, len, entry_type })
+        })();
+        if record.is_none() {
+            bytes = &[];
+        }
+        Some(record.ok_or("malformed boot memory-map record"))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_extended_multiboot_records() {
+        let mut bytes = [0; 52];
+        bytes[..4].copy_from_slice(&24u32.to_le_bytes());
+        bytes[28..32].copy_from_slice(&20u32.to_le_bytes());
+        assert_eq!(memory_map_entries(&bytes).filter(Result::is_ok).count(), 2);
+    }
+
+    #[test]
+    fn rejects_truncated_short_and_overflowing_entries() {
+        assert!(memory_map_entries(&[20, 0, 0, 0]).next().unwrap().is_err());
+        assert!(memory_map_entries(&[0; 24]).next().unwrap().is_err());
+        let mut bytes = [0; 24];
+        bytes[..4].copy_from_slice(&20u32.to_le_bytes());
+        bytes[4..12].copy_from_slice(&u64::MAX.to_le_bytes());
+        bytes[12..20].copy_from_slice(&1u64.to_le_bytes());
+        assert!(memory_map_entries(&bytes).next().unwrap().is_err());
+    }
+}
+
 pub const MULTIBOOT_MEMORY_AVAILABLE: u32 = 1;
 pub const MULTIBOOT_MEMORY_RESERVED: u32 = 2;
 pub const MULTIBOOT_MEMORY_ACPI_RECLAIMABLE: u32 = 3;

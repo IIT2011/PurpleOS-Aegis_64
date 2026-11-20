@@ -99,6 +99,21 @@ fn current(entry: ArpEntry, now: u64) -> bool {
     crate::drivers::pit::ticks_to_millis(now.saturating_sub(entry.seen)) < ARP_CACHE_LIFETIME_MS
 }
 
+#[cfg(feature = "development-sudo")]
+pub(crate) fn print_cache() {
+    use crate::drivers::serial;
+    let entries = *ARP_CACHE.lock();
+    let now = crate::drivers::pit::get_ticks();
+    serial::println("IPv4 address        Ethernet address");
+    for entry in entries.into_iter().flatten().filter(|entry| current(*entry, now)) {
+        serial::println(&alloc::format!(
+            "{}.{}.{}.{}  {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            entry.ip[0], entry.ip[1], entry.ip[2], entry.ip[3],
+            entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
+        ));
+    }
+}
+
 pub fn update_arp_cache(ip: [u8; 4], mac: [u8; 6]) {
     let now = crate::drivers::pit::get_ticks();
     let mut cache = ARP_CACHE.lock();

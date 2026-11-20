@@ -10,6 +10,8 @@ pub const PFS2_ROOT_DIR_BLOCK: u32 = 10;
 pub const PFS2_FIRST_DATA_BLOCK: u32 = 11;
 pub const PFS2_DIRECT_BLOCKS: usize = 12;
 pub const PFS2_INDIRECT_POINTERS: usize = PFS2_BLOCK_SIZE / core::mem::size_of::<u32>();
+const PFS2_SINGLE_END: usize = PFS2_DIRECT_BLOCKS + PFS2_INDIRECT_POINTERS;
+const PFS2_MAX_FILE_BLOCKS: usize = PFS2_SINGLE_END + PFS2_INDIRECT_POINTERS * PFS2_INDIRECT_POINTERS;
 pub const PFS2_SUPERBLOCK_CRC_OFFSET: usize = 0x80;
 
 pub struct PurpleFsV2<'a> {
@@ -259,14 +261,17 @@ impl<'a> PurpleFsV2<'a> {
         let mut bytes_copied = 0;
         let mut block_buf = [0u8; PFS2_BLOCK_SIZE];
         let mut indirect_buf = [0u8; PFS2_BLOCK_SIZE];
-        let mut indirect_loaded = false;
+        let mut loaded_group = None;
         let indirect_blk = u32::from_le_bytes(
             inode_block[ino_off + 0x5C..ino_off + 0x60]
                 .try_into()
                 .unwrap(),
         );
+        let double_indirect = u32::from_le_bytes(
+            inode_block[ino_off + 0x60..ino_off + 0x64].try_into().unwrap(),
+        );
 
-        for i in 0..total_file_blocks.min(PFS2_DIRECT_BLOCKS + PFS2_INDIRECT_POINTERS) {
+        for i in offset / PFS2_BLOCK_SIZE..total_file_blocks.min(PFS2_MAX_FILE_BLOCKS) {
             if bytes_copied >= buf.len() {
                 break;
             }
@@ -289,24 +294,29 @@ impl<'a> PurpleFsV2<'a> {
                 let ptr_off = ino_off + 0x2C + i * 4;
                 u32::from_le_bytes(inode_block[ptr_off..ptr_off + 4].try_into().unwrap())
             } else {
-                if indirect_blk == 0 {
-                    0
+                let (group, index) = if i < PFS2_SINGLE_END {
+                    (0, i - PFS2_DIRECT_BLOCKS)
                 } else {
-                    if !indirect_loaded {
-                        if self.read_fs_block(indirect_blk, &mut indirect_buf).is_ok() {
-                            indirect_loaded = true;
-                        } else {
+                    let index = i - PFS2_SINGLE_END;
+                    (1 + index / PFS2_INDIRECT_POINTERS, index % PFS2_INDIRECT_POINTERS)
+                };
+                if loaded_group != Some(group) {
+                    let leaf = if group == 0 {
+                        indirect_blk
+                    } else {
+                        if double_indirect == 0 || self.read_fs_block(double_indirect, &mut indirect_buf).is_err() {
                             break;
                         }
+                        let pointer = (group - 1) * size_of::<u32>();
+                        u32::from_le_bytes(indirect_buf[pointer..pointer + 4].try_into().unwrap())
+                    };
+                    if leaf == 0 || self.read_fs_block(leaf, &mut indirect_buf).is_err() {
+                        break;
                     }
-                    let ind_idx = i - PFS2_DIRECT_BLOCKS;
-                    u32::from_le_bytes(
-                        indirect_buf[ind_idx * core::mem::size_of::<u32>()
-                            ..(ind_idx + 1) * core::mem::size_of::<u32>()]
-                            .try_into()
-                            .unwrap(),
-                    )
+                    loaded_group = Some(group);
                 }
+                let pointer = index * size_of::<u32>();
+                u32::from_le_bytes(indirect_buf[pointer..pointer + 4].try_into().unwrap())
             };
             if data_blk == 0 {
                 break;
@@ -451,12 +461,19 @@ impl<'a> PurpleFsV2<'a> {
     }
 
     pub fn mkdir(&mut self, dirname: &str) -> Result<u32, &'static str> {
+        self.mkdir_owned(dirname, 0, 0)
+    }
+
+    pub fn mkdir_owned(&mut self, dirname: &str, uid: u16, gid: u16) -> Result<u32, &'static str> {
         if self.read_only {
             return Err("Filesystem is mounted read-only");
         }
         let clean = dirname.trim_start_matches('/').trim_end_matches('/');
         if clean.is_empty() {
             return Err("Cannot create directory with empty name");
+        }
+        if clean.len() > 55 {
+            return Err("Directory path exceeds the PurpleFS limit");
         }
         if self.lookup(clean).is_some() {
             return Err("Directory already exists");
@@ -486,8 +503,8 @@ impl<'a> PurpleFsV2<'a> {
 
         // Initialize new directory inode (Directory, 0755, size PFS2_BLOCK_SIZE, links 2)
         inode_block[target_ino_off..target_ino_off + 2].copy_from_slice(&0x41EDu16.to_le_bytes());
-        inode_block[target_ino_off + 2..target_ino_off + 4].copy_from_slice(&0u16.to_le_bytes()); // uid=0
-        inode_block[target_ino_off + 4..target_ino_off + 6].copy_from_slice(&0u16.to_le_bytes()); // gid=0
+        inode_block[target_ino_off + 2..target_ino_off + 4].copy_from_slice(&uid.to_le_bytes());
+        inode_block[target_ino_off + 4..target_ino_off + 6].copy_from_slice(&gid.to_le_bytes());
         inode_block[target_ino_off + 6..target_ino_off + 8].copy_from_slice(&2u16.to_le_bytes()); // links=2
         inode_block[target_ino_off + 8..target_ino_off + 16]
             .copy_from_slice(&(PFS2_BLOCK_SIZE as u64).to_le_bytes()); // size=PFS2_BLOCK_SIZE
@@ -765,9 +782,30 @@ impl<'a> PurpleFsV2<'a> {
                 release(u32::from_le_bytes(ptr.try_into().unwrap()))?;
             }
         }
+        let double_indirect = u32::from_le_bytes(
+            inode_block[direct_end + 4..direct_end + 8].try_into().unwrap(),
+        );
+        if double_indirect != 0 {
+            release(double_indirect)?;
+            let mut pointers = crate::mm::pmm::PageBuffer::new(PFS2_BLOCK_SIZE)
+                .ok_or("Not enough memory to remove indirect blocks")?;
+            let pointers: &mut [u8; PFS2_BLOCK_SIZE] = (&mut *pointers).try_into().unwrap();
+            self.read_fs_block(double_indirect, pointers)?;
+            for pointer in pointers.chunks_exact(4) {
+                let leaf = u32::from_le_bytes(pointer.try_into().unwrap());
+                if leaf == 0 {
+                    continue;
+                }
+                release(leaf)?;
+                self.read_fs_block(leaf, &mut dir_block)?;
+                for pointer in dir_block.chunks_exact(4) {
+                    release(u32::from_le_bytes(pointer.try_into().unwrap()))?;
+                }
+            }
+        }
 
         // Remove the reference before allowing the inode or any data blocks to be reused.
-        if indirect != 0 {
+        if indirect != 0 || double_indirect != 0 {
             self.read_fs_block(PFS2_ROOT_DIR_BLOCK, &mut dir_block)?;
         }
         Self::clear_dirent(&mut dir_block, entry_offset, entry_len);

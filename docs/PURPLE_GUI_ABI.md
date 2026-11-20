@@ -4,6 +4,10 @@ Purple Desktop owns the framebuffer. Native clients run in isolated x86-64 Ring 
 
 ## Build and deploy
 
+An unprotected debug kernel can opt into `development-sudo` for Terminal testing. The matching Terminal build prompts for a test password without echoing or recording it. It authenticates one invocation at a time. The broker accepts normal Terminal commands and explicit administrative handlers for identity, filesystem operations, network configuration, and command database and search path maintenance. Protected and release kernels reject builds with this feature enabled.
+
+To set the local account, pass a text file to `build/mkpfs2_disk --account-profile <file> --signing-key <creator-key>`. The file contains one record in the form `APACCOUNT1 <username> <uid> <gid>`. Use a nonzero UID and GID and a username of up to 21 ASCII letters, digits, hyphens, or underscores. The image builder signs the record, and the kernel verifies it before starting native apps. The account starts in `/Users/<username>`. Older images without a profile use `User` with UID and GID 1000.
+
 Build a freestanding, statically linked x86-64 ELF with entry symbol `_start` using `sdk/gui/purple_gui.ld`. Use `sdk/gui/purple_gui.h` for the C interface. The entry point starts with a 16-byte-aligned stack and cleared general registers. Query the ABI version and startup record with syscalls before using the desktop. The kernel preserves x87 and SSE state between userspace tasks. AVX, ELF TLS, dynamic libraries, and a hosted C runtime are outside ABI v1.
 
 Use `scripts/package_gui_app.py pack` to convert the ELF to APEXEC and sign its `.apapplication` bundle with an Ed25519 private key. The tool prints the public-key policy entry. The system administrator puts the approved entries in an `APTRUST1` policy and signs it with `scripts/package_gui_app.py sign-policy` and the Creator key. Do not put private keys in the bundle or disk image.
@@ -12,7 +16,7 @@ The policy is UTF-8 ASCII text. Its first line is `APTRUST1`. Each subsequent li
 
 Stage the bundle, `trust.policy` and `trust.policy.sig` using `build/mkpfs2_disk --applications-dir <directory> --signing-key <creator-key>`. The disk builder installs the files in `/System/Applications/` and includes them in the signed system component manifest. Rebuild the system image to deploy changes. Launch with the P menu or `launch <app-id>` in AegisShell. Menu entries come from the boot policy and installed filenames. Every launch still verifies the actual bundle and executable. The system launches with an empty application catalog when no trust policy is installed.
 
-PurpleFS v2 limits the canonical app ID to 21 bytes. Bundles are limited to 512 KiB. The first client window uses the signed title and dimensions, constrained by the active framebuffer. Up to four windows per task share the compositor's global window limit.
+PurpleFS v2 limits the canonical app ID to 21 bytes. The signed bundle limit is 32 MiB, including the executable, resources, metadata and manifest. The first client window uses the signed title and dimensions, constrained by the active framebuffer. Up to four windows per task share the compositor's global window limit.
 
 ## Calls
 
@@ -36,7 +40,9 @@ Call `0x110a` is available to applications with the Shell capability (bit `0x04`
 
 Call `0x110b` takes a writable buffer pointer and its capacity, and returns the byte length of the current Shell prompt. It requires the Shell capability. Use a 96-byte buffer and refresh after each command to reflect changes to the working directory.
 
-Calls 24, 39, 60 and 231 provide yield, process ID and termination. The startup record is eight little-endian u64 fields in header order and points to read-only resource and metadata bytes. A zero pointer and length indicate an empty section. Heap mappings round up to a page; at most 32 regions and 32 MiB are allowed per process. Mapped windows are kernel surfaces. The pixel source remains user-owned; the compositor copies it before returning.
+In Purple Terminal, `help` lists the signed commands available through the GUI shell. This includes directory listing, standalone text filters, file inspection, system diagnostics, and aliases from the signed database. The Shell capability keeps device reads, driver loading, reboot, and other administrative operations outside the GUI shell.
+
+Calls 24, 39, 60 and 231 provide yield, process ID and termination. The startup record is eight little-endian u64 fields in header order and points to read-only resource and metadata bytes. A zero pointer and length indicate an empty section. Heap mappings round up to a page. The per-process limits are 512 regions and 256 MiB of address space. Backing pages come from available guest RAM. Mapped windows are kernel surfaces. The pixel source remains user-owned and the compositor copies it before returning.
 
 The event record is four little-endian 32-bit words. The fields are kind, x, y and detail. Pointer events report signed client-relative x and y and the PS/2 button mask in detail. Key events place a cooked keyboard byte in x. Focus uses x=1 for gain and x=0 for loss. Resize uses width in x and height in y; query the current window size before submitting the next frame. The close request asks the app to close its window or exit, and has priority over queued input. Overflow indicates that older input was dropped. Motion with an identical button state may be coalesced.
 

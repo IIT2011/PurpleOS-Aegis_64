@@ -387,6 +387,17 @@ pub fn print_categorized_help() {
     );
 }
 
+pub(crate) fn print_gui_help(available: impl Fn(&str) -> bool) {
+    let table = CMD_TABLE.lock();
+    serial::println("Purple Terminal commands:");
+    for entry in &table.entries[..table.count] {
+        if available(entry.target()) {
+            serial::println(entry.usage());
+        }
+    }
+    serial::println("Use help <command> for details.");
+}
+
 /// Print manual entry for a specific command from the database.
 pub fn print_command_help(name: &str) -> bool {
     if let Some(entry) = lookup(name) {

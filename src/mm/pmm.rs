@@ -1,5 +1,6 @@
 use crate::arch::x86_64::boot::{
-    MultibootInfo, MultibootMmapEntry, MULTIBOOT_INFO_MEM_MAP, MULTIBOOT_MEMORY_AVAILABLE,
+    memory_map_entries, MultibootInfo, MULTIBOOT_INFO_FRAMEBUFFER, MULTIBOOT_INFO_MEM_MAP,
+    MULTIBOOT_MEMORY_AVAILABLE,
 };
 use crate::sync::Spinlock;
 
@@ -65,87 +66,82 @@ fn mark_region_reserved(state: &mut PmmState, start_addr: usize, end_addr: usize
     }
 }
 
-pub fn init(mbi: Option<&MultibootInfo>, kernel_start: usize, kernel_end: usize) {
-    let mut state = PMM.lock();
+pub fn init(info: &MultibootInfo, kernel_start: usize, kernel_end: usize) -> Result<(), &'static str> {
+    if info.flags & MULTIBOOT_INFO_MEM_MAP == 0 || info.mmap_length == 0 {
+        return Err("boot memory map unavailable");
+    }
+    let map_start = info.mmap_addr as usize;
+    let map_length = info.mmap_length as usize;
+    let map_end = map_start.checked_add(map_length).ok_or("boot memory map overflows")?;
+    if map_start < PAGE_SIZE || map_end > MAX_PHYS_ADDR {
+        return Err("boot memory map outside the identity mapping");
+    }
 
+    // The boot ABI supplies this physical range within the early identity map.
+    let map = unsafe { core::slice::from_raw_parts(map_start as *const u8, map_length) };
+    let mut state = PMM.lock();
     state.alloc_bitmap.fill(0xFF);
     state.reserved_bitmap.fill(0xFF);
     state.total_frames = 0;
     state.free_frames = 0;
     state.allocated_frames = 0;
     state.reserved_frames = 0;
+    state.last_alloc_frame = 0;
 
-    let mut detected_max_addr: usize = 0;
-
-    if let Some(info) = mbi {
-        if (info.flags & MULTIBOOT_INFO_MEM_MAP) != 0 && info.mmap_length > 0 {
-            let mut cur = info.mmap_addr as usize;
-            let end = cur + info.mmap_length as usize;
-
-            while cur < end {
-                let entry = unsafe { core::ptr::read_unaligned(cur as *const MultibootMmapEntry) };
-                if entry.size == 0 {
-                    break;
-                }
-
-                if entry.entry_type == MULTIBOOT_MEMORY_AVAILABLE {
-                    let base = entry.addr as usize;
-                    let len = entry.len as usize;
-
-                    if base < MAX_PHYS_ADDR {
-                        let limit = (base + len).min(MAX_PHYS_ADDR);
-                        if limit > detected_max_addr {
-                            detected_max_addr = limit;
-                        }
-                        let start_f = (base + PAGE_SIZE - 1) / PAGE_SIZE;
-                        let end_f = limit / PAGE_SIZE;
-
-                        for f in start_f..end_f.min(TOTAL_FRAMES) {
-                            if bitmap_test(&state.reserved_bitmap, f) {
-                                bitmap_clear(&mut state.reserved_bitmap, f);
-                                bitmap_clear(&mut state.alloc_bitmap, f);
-                                state.free_frames += 1;
-                            }
-                        }
-                    }
-                }
-
-                cur += entry.size as usize + 4;
+    for record in memory_map_entries(map) {
+        let entry = record?;
+        if entry.entry_type != MULTIBOOT_MEMORY_AVAILABLE || entry.len == 0 {
+            continue;
+        }
+        let base = entry.addr as usize;
+        let limit = ((entry.addr + entry.len) as usize).min(MAX_PHYS_ADDR);
+        if base >= limit {
+            continue;
+        }
+        let first = base.div_ceil(PAGE_SIZE);
+        let end = limit / PAGE_SIZE;
+        state.total_frames = state.total_frames.max(end);
+        for frame in first..end {
+            if bitmap_test(&state.reserved_bitmap, frame) {
+                bitmap_clear(&mut state.reserved_bitmap, frame);
+                bitmap_clear(&mut state.alloc_bitmap, frame);
+                state.free_frames += 1;
             }
         }
     }
 
-    if state.free_frames == 0 {
-        crate::drivers::serial::println("PMM: Safe fallback memory pool (16 MiB - 256 MiB)");
-        let start_f = (16 * 1024 * 1024) / PAGE_SIZE;
-        let end_f = (256 * 1024 * 1024) / PAGE_SIZE;
-        detected_max_addr = 256 * 1024 * 1024;
-        for f in start_f..end_f {
-            bitmap_clear(&mut state.reserved_bitmap, f);
-            bitmap_clear(&mut state.alloc_bitmap, f);
-            state.free_frames += 1;
+    // A reserved descriptor wins even when firmware also reports overlapping RAM.
+    for record in memory_map_entries(map) {
+        let entry = record?;
+        if entry.entry_type != MULTIBOOT_MEMORY_AVAILABLE && entry.len != 0 {
+            mark_region_reserved(&mut state, entry.addr as usize, (entry.addr + entry.len) as usize);
         }
     }
 
-    state.total_frames = (detected_max_addr + PAGE_SIZE - 1) / PAGE_SIZE;
-    if state.total_frames == 0 {
-        state.total_frames = TOTAL_FRAMES;
+    // Keep the firmware handoff and live framebuffer outside allocator ownership.
+    mark_region_reserved(&mut state, 0, 0x1000000);
+    mark_region_reserved(&mut state, kernel_start, kernel_end);
+    mark_region_reserved(&mut state, map_start, map_end);
+    let info_start = info as *const MultibootInfo as usize;
+    mark_region_reserved(&mut state, info_start, info_start + core::mem::size_of::<MultibootInfo>());
+    if info.flags & MULTIBOOT_INFO_FRAMEBUFFER != 0 {
+        let base = info.framebuffer_addr;
+        let bytes = u64::from(info.framebuffer_pitch) * u64::from(info.framebuffer_height);
+        if let Some(end) = base.checked_add(bytes).filter(|&end| end > base) {
+            mark_region_reserved(&mut state, base as usize, end as usize);
+        }
     }
 
-    // Always reserve low 16 MiB (DMA, BIOS, AP trampoline at 0x8000, video)
-    mark_region_reserved(&mut state, 0x0, 0x1000000);
-
-    // Reserve kernel image
-    mark_region_reserved(&mut state, kernel_start, kernel_end);
-
+    if state.free_frames == 0 {
+        return Err("boot memory map contains no usable frames");
+    }
     state.reserved_frames = state.total_frames.saturating_sub(state.free_frames);
-    state.allocated_frames = 0;
-
     crate::drivers::serial::print("PMM Initialized: Managed Frames=");
     crate::drivers::serial::print_u64(state.total_frames as u64);
     crate::drivers::serial::print(", Free=");
     crate::drivers::serial::print_u64(state.free_frames as u64);
     crate::drivers::serial::println(" frames");
+    Ok(())
 }
 
 pub fn alloc_frame() -> Option<usize> {
@@ -243,6 +239,42 @@ pub fn free_frames(paddr: usize, count: usize) -> Result<(), &'static str> {
         free_frame(paddr + i * PAGE_SIZE)?;
     }
     Ok(())
+}
+
+/// A temporary, identity-mapped buffer that bypasses the small kernel heap.
+pub(crate) struct PageBuffer {
+    address: usize,
+    length: usize,
+}
+
+impl PageBuffer {
+    pub fn new(length: usize) -> Option<Self> {
+        if length == 0 {
+            return None;
+        }
+        let address = alloc_frames(length.div_ceil(PAGE_SIZE))?;
+        unsafe { (address as *mut u8).write_bytes(0, length) };
+        Some(Self { address, length })
+    }
+}
+
+impl core::ops::Deref for PageBuffer {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.address as *const u8, self.length) }
+    }
+}
+
+impl core::ops::DerefMut for PageBuffer {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.address as *mut u8, self.length) }
+    }
+}
+
+impl Drop for PageBuffer {
+    fn drop(&mut self) {
+        let _ = free_frames(self.address, self.length.div_ceil(PAGE_SIZE));
+    }
 }
 
 pub fn free_frames_count() -> usize {

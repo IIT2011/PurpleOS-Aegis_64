@@ -22,6 +22,56 @@ struct AcpiHeader {
     creator_revision: u32,
 }
 
+// The early identity map covers addresses below 4 GiB. Apply a narrower
+// firmware table range before dereferencing either the header or payload.
+unsafe fn validated_table(address: usize, signature: &[u8; 4]) -> Option<&'static [u8]> {
+    const MIN_ADDRESS: usize = 0x1000;
+    const END_ADDRESS: usize = 0xFE000000;
+    const HEADER_SIZE: usize = core::mem::size_of::<AcpiHeader>();
+    const MAX_TABLE_SIZE: usize = 4096;
+    if !(MIN_ADDRESS..=END_ADDRESS - HEADER_SIZE).contains(&address) {
+        return None;
+    }
+    let header = core::slice::from_raw_parts(address as *const u8, HEADER_SIZE);
+    if &header[..4] != signature {
+        return None;
+    }
+    let length = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
+    if !(HEADER_SIZE..=MAX_TABLE_SIZE).contains(&length) || length > END_ADDRESS - address {
+        return None;
+    }
+    let table = core::slice::from_raw_parts(address as *const u8, length);
+    (table.iter().fold(0u8, |sum, &byte| sum.wrapping_add(byte)) == 0).then_some(table)
+}
+
+fn madt_topology(table: &[u8]) -> Option<(u64, [u8; 8], usize)> {
+    let header = core::mem::size_of::<AcpiHeader>();
+    let lapic = u32::from_le_bytes(table.get(header..header + 4)?.try_into().ok()?) as u64;
+    let mut records = table.get(header + 8..)?;
+    let mut ids = [0; 8];
+    let mut count = 0;
+    while !records.is_empty() {
+        let kind = records[0];
+        let length = usize::from(*records.get(1)?);
+        if length < 2 || length > records.len() {
+            return None;
+        }
+        let (record, rest) = records.split_at(length);
+        if kind == 0 {
+            let flags = u32::from_le_bytes(record.get(4..8)?.try_into().ok()?);
+            if flags & 1 != 0 && count < ids.len() && !ids[..count].contains(&record[3]) {
+                ids[count] = record[3];
+                count += 1;
+            }
+        }
+        records = rest;
+    }
+    if lapic == 0 || lapic & 0xfff != 0 || count == 0 {
+        return None;
+    }
+    Some((lapic, ids, count))
+}
+
 pub struct MadtInfo {
     pub lapic_phys_addr: u64,
     pub cpu_count: usize,
@@ -63,68 +113,23 @@ pub fn init(mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
                     crate::drivers::serial::print(", RSDT at 0x");
                     crate::drivers::serial::print_hex(rsdt_phys as u64);
                     crate::drivers::serial::println("");
-                    if rsdt_phys >= 0x1000 && rsdt_phys < 0xFE000000 {
-                        let rsdt = rsdt_phys as *const AcpiHeader;
-                        if core::slice::from_raw_parts(rsdt as *const u8, 4) == b"RSDT" {
-                            let rsdt_len =
-                                core::ptr::read_unaligned(core::ptr::addr_of!((*rsdt).length))
-                                    as usize;
+                    if let Some(rsdt) = validated_table(rsdt_phys, b"RSDT") {
+                        let payload = &rsdt[core::mem::size_of::<AcpiHeader>()..];
+                        if payload.len() % 4 == 0 {
                             crate::drivers::serial::print("ACPI: RSDT valid, len=");
-                            crate::drivers::serial::print_u64(rsdt_len as u64);
+                            crate::drivers::serial::print_u64(rsdt.len() as u64);
                             crate::drivers::serial::println("");
-                            if rsdt_len >= core::mem::size_of::<AcpiHeader>() && rsdt_len < 4096 {
-                                let entries = (rsdt_len - core::mem::size_of::<AcpiHeader>()) / 4;
-                                let entry_ptr = (rsdt as usize + core::mem::size_of::<AcpiHeader>())
-                                    as *const u32;
-
-                                for i in 0..entries {
-                                    let table_phys =
-                                        core::ptr::read_unaligned(entry_ptr.add(i)) as usize;
-                                    if table_phys < 0x1000 || table_phys >= 0xFE000000 {
-                                        continue;
-                                    }
-                                    let table_addr = table_phys as *const AcpiHeader;
-                                    if core::slice::from_raw_parts(table_addr as *const u8, 4)
-                                        == b"FACP"
-                                    {
-                                        crate::kernel::power::init(table_phys);
-                                        continue;
-                                    }
-                                    if core::slice::from_raw_parts(table_addr as *const u8, 4)
-                                        == b"APIC"
-                                    {
-                                        // MADT Table
-                                        lapic = core::ptr::read_unaligned(
-                                            ((table_addr as usize) + 0x24) as *const u32,
-                                        ) as u64;
-                                        let mut madt_cur = (table_addr as usize) + 0x2C;
-                                        let madt_len = core::ptr::read_unaligned(
-                                            core::ptr::addr_of!((*table_addr).length),
-                                        )
-                                            as usize;
-                                        let madt_end = (table_addr as usize) + madt_len;
-
-                                        while madt_cur < madt_end {
-                                            let entry_type = *(madt_cur as *const u8);
-                                            let entry_len = *((madt_cur + 1) as *const u8) as usize;
-                                            if entry_len == 0 {
-                                                break;
-                                            }
-
-                                            if entry_type == 0 {
-                                                // Processor Local APIC
-                                                let flags = core::ptr::read_unaligned(
-                                                    (madt_cur + 4) as *const u32,
-                                                );
-                                                if (flags & 1) != 0 && count < 8 {
-                                                    let apic_id = *((madt_cur + 3) as *const u8);
-                                                    MADT_INFO.apic_ids[count] = apic_id;
-                                                    count += 1;
-                                                }
-                                            }
-                                            madt_cur += entry_len;
-                                        }
-                                    }
+                            for entry in payload.chunks_exact(4) {
+                                let address = u32::from_le_bytes(entry.try_into().unwrap()) as usize;
+                                if validated_table(address, b"FACP").is_some() {
+                                    crate::kernel::power::init(address);
+                                }
+                                if let Some((base, ids, found)) =
+                                    validated_table(address, b"APIC").and_then(madt_topology)
+                                {
+                                    lapic = base;
+                                    MADT_INFO.apic_ids = ids;
+                                    count = found;
                                 }
                             }
                         }

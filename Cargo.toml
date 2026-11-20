@@ -21,6 +21,7 @@ overflow-checks = false
 
 [features]
 signed-components = []
+development-sudo = []
 
 [dependencies]
 ed25519-dalek = { version = "2.2.0", default-features = false }

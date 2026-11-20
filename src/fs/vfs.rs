@@ -113,6 +113,9 @@ pub fn is_directory(path: &str) -> bool {
     if p.is_empty() {
         return true;
     }
+    if p == crate::kernel::accounts::local().home(&mut [0; 28]).trim_start_matches('/') {
+        return true;
+    }
     match p {
         "dev" | "proc" | "tmp" => return true,
         _ => {}
@@ -168,6 +171,10 @@ pub fn is_directory(path: &str) -> bool {
 }
 
 pub fn mkdir(path: &str) -> Result<(), &'static str> {
+    mkdir_owned(path, 0, 0)
+}
+
+pub(crate) fn mkdir_owned(path: &str, uid: u16, gid: u16) -> Result<(), &'static str> {
     let p = path.trim_start_matches('/').trim_end_matches('/');
     if p.is_empty() {
         return Err("Cannot create root directory");
@@ -177,7 +184,7 @@ pub fn mkdir(path: &str) -> Result<(), &'static str> {
     }
 
     // 1. If persistent storage filesystem is mounted, create persistent directory in PurpleFS on disk!
-    let disk_res = crate::kernel::storage::with_fs(|fs| fs.mkdir(p));
+    let disk_res = crate::kernel::storage::with_fs(|fs| fs.mkdir_owned(p, uid, gid));
 
     match disk_res {
         Some(Ok(_ino)) => {
