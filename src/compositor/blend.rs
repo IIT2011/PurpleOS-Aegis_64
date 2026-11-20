@@ -71,12 +71,7 @@ pub fn scale_alpha(color: u32, alpha_scale: u8) -> u32 {
 }
 
 /// Render a smooth vertical color gradient across a rectangular area
-pub fn render_vertical_gradient(
-    dst: &mut Surface,
-    rect: Rect,
-    top_color: u32,
-    bottom_color: u32,
-) {
+pub fn render_vertical_gradient(dst: &mut Surface, rect: Rect, top_color: u32, bottom_color: u32) {
     if !dst.is_valid() || rect.w == 0 || rect.h == 0 {
         return;
     }
@@ -180,4 +175,78 @@ pub fn gray_level(color: u32) -> u32 {
     let green = (color >> 8) & 0xff;
     let blue = color & 0xff;
     (red * 77 + green * 150 + blue * 29 + 128) >> 8
+}
+
+/// Blur the already composited pixels beneath a glass panel. The scratch grid
+/// is bounded independently of screen resolution and captured before drawing.
+pub fn frost_backdrop(target: &mut Surface, area: Rect, radius: usize) {
+    const GRID_W: usize = 80;
+    const GRID_H: usize = 36;
+    const MIN_STEP: usize = 6;
+    static BACKDROP: crate::sync::Spinlock<[u32; GRID_W * GRID_H]> =
+        crate::sync::Spinlock::new([0; GRID_W * GRID_H]);
+
+    let screen = Rect::new(0, 0, target.width, target.height);
+    let Some(visible) = area.intersection(&screen) else {
+        return;
+    };
+    if !target.is_valid() || visible.w == 0 || visible.h == 0 {
+        return;
+    }
+    let step = visible
+        .w
+        .div_ceil(GRID_W - 1)
+        .max(visible.h.div_ceil(GRID_H - 1))
+        .max(MIN_STEP);
+    let cols = (visible.w - 1).div_ceil(step) + 1;
+    let rows = (visible.h - 1).div_ceil(step) + 1;
+    let left = visible.x as usize;
+    let top = visible.y as usize;
+    let right = visible.right() as usize;
+    let bottom = visible.bottom() as usize;
+    let mut backdrop = BACKDROP.lock();
+    for row in 0..rows {
+        let y = (top + row * step).min(bottom - 1);
+        for col in 0..cols {
+            let x = (left + col * step).min(right - 1);
+            let delta = step / 2;
+            let point = |px: usize, py: usize| {
+                target.get_pixel(px.min(target.width - 1), py.min(target.height - 1))
+            };
+            let h = interpolate_color(point(x.saturating_sub(delta), y), point(x + delta, y), 1, 2);
+            let v = interpolate_color(point(x, y.saturating_sub(delta)), point(x, y + delta), 1, 2);
+            backdrop[row * GRID_W + col] = interpolate_color(h, v, 1, 2);
+        }
+    }
+    let radius = radius.min(area.w / 2).min(area.h / 2);
+    for y in top..bottom {
+        let row = (y - top) / step;
+        let next_row = (row + 1).min(rows - 1);
+        let fy = (y - top) % step;
+        let rel_y = (y as i32 - area.y) as usize;
+        let dy = radius.saturating_sub(rel_y.min(area.h - 1 - rel_y) + 1);
+        for x in left..right {
+            let rel_x = (x as i32 - area.x) as usize;
+            let dx = radius.saturating_sub(rel_x.min(area.w - 1 - rel_x) + 1);
+            if dx * dx + dy * dy > radius * radius {
+                continue;
+            }
+            let col = (x - left) / step;
+            let next_col = (col + 1).min(cols - 1);
+            let fx = (x - left) % step;
+            let a = interpolate_color(
+                backdrop[row * GRID_W + col],
+                backdrop[row * GRID_W + next_col],
+                fx,
+                step,
+            );
+            let b = interpolate_color(
+                backdrop[next_row * GRID_W + col],
+                backdrop[next_row * GRID_W + next_col],
+                fx,
+                step,
+            );
+            target.set_pixel(x, y, interpolate_color(a, b, fy, step));
+        }
+    }
 }

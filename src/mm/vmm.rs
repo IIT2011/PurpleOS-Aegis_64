@@ -9,7 +9,8 @@ pub const PAGE_WRITE_THROUGH: u64 = 1 << 3;
 pub const PAGE_CACHE_DISABLE: u64 = 1 << 4;
 pub const PAGE_HUGE: u64 = 1 << 7;
 pub const PAGE_NO_EXECUTE: u64 = 1 << 63;
-pub const PAGE_MMIO: u64 = PAGE_PRESENT | PAGE_WRITABLE | PAGE_CACHE_DISABLE | PAGE_WRITE_THROUGH | PAGE_NO_EXECUTE;
+pub const PAGE_MMIO: u64 =
+    PAGE_PRESENT | PAGE_WRITABLE | PAGE_CACHE_DISABLE | PAGE_WRITE_THROUGH | PAGE_NO_EXECUTE;
 pub const ENTRY_ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 
 #[repr(C, align(4096))]
@@ -116,17 +117,24 @@ pub fn split_huge_page(pml4: *mut PageTable, vaddr: u64) -> Result<(), &'static 
         let nx_flag = pd_entry & PAGE_NO_EXECUTE;
 
         for i in 0..512 {
-            (*new_pt).entries[i] = (huge_phys_base + (i * PAGE_SIZE) as u64) | common_flags | nx_flag;
+            (*new_pt).entries[i] =
+                (huge_phys_base + (i * PAGE_SIZE) as u64) | common_flags | nx_flag;
         }
 
-        (*pd).entries[pd_i] = (new_pt_frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (pd_entry & PAGE_USER);
+        (*pd).entries[pd_i] =
+            (new_pt_frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (pd_entry & PAGE_USER);
         write_cr3(read_cr3());
     }
 
     Ok(())
 }
 
-pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Result<(), &'static str> {
+pub fn map_page(
+    pml4: *mut PageTable,
+    vaddr: u64,
+    paddr: u64,
+    flags: u64,
+) -> Result<(), &'static str> {
     if !is_canonical(vaddr) {
         return Err("Non-canonical address");
     }
@@ -150,7 +158,8 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             let frame = alloc_frame().ok_or("Out of memory for PDPT")?;
             pdpt = frame as *mut PageTable;
             (*pdpt).entries.fill(0);
-            (*pml4).entries[pml4_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
+            (*pml4).entries[pml4_i] =
+                (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
         } else {
             let curr_pdpt_entry = (*pml4).entries[pml4_i];
             let curr_pdpt_addr = curr_pdpt_entry & ENTRY_ADDR_MASK;
@@ -163,7 +172,11 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             {
                 let frame = alloc_frame().ok_or("Out of memory cloning PDPT")?;
                 let new_pdpt = frame as *mut PageTable;
-                core::ptr::copy_nonoverlapping(curr_pdpt_addr as *const u8, new_pdpt as *mut u8, PAGE_SIZE);
+                core::ptr::copy_nonoverlapping(
+                    curr_pdpt_addr as *const u8,
+                    new_pdpt as *mut u8,
+                    PAGE_SIZE,
+                );
                 (*pml4).entries[pml4_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
                 pdpt = new_pdpt;
             } else {
@@ -179,13 +192,16 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             let frame = alloc_frame().ok_or("Out of memory for PD")?;
             pd = frame as *mut PageTable;
             (*pd).entries.fill(0);
-            (*pdpt).entries[pdpt_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
+            (*pdpt).entries[pdpt_i] =
+                (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
         } else {
             let curr_pd_entry = (*pdpt).entries[pdpt_i];
             let curr_pd_addr = curr_pd_entry & ENTRY_ADDR_MASK;
 
             // If modifying user space and pointing to shared kernel PD, unshare it by cloning
-            let kernel_pd_addr = if !KERNEL_PML4.is_null() && ((*KERNEL_PML4).entries[pml4_i] & PAGE_PRESENT) != 0 {
+            let kernel_pd_addr = if !KERNEL_PML4.is_null()
+                && ((*KERNEL_PML4).entries[pml4_i] & PAGE_PRESENT) != 0
+            {
                 let k_pdpt = ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK) as *const PageTable;
                 (*k_pdpt).entries[pdpt_i] & ENTRY_ADDR_MASK
             } else {
@@ -200,7 +216,11 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             {
                 let frame = alloc_frame().ok_or("Out of memory cloning PD")?;
                 let new_pd = frame as *mut PageTable;
-                core::ptr::copy_nonoverlapping(curr_pd_addr as *const u8, new_pd as *mut u8, PAGE_SIZE);
+                core::ptr::copy_nonoverlapping(
+                    curr_pd_addr as *const u8,
+                    new_pd as *mut u8,
+                    PAGE_SIZE,
+                );
                 (*pdpt).entries[pdpt_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
                 pd = new_pd;
             } else {
@@ -220,7 +240,8 @@ pub fn map_page(pml4: *mut PageTable, vaddr: u64, paddr: u64, flags: u64) -> Res
             let frame = alloc_frame().ok_or("Out of memory for PT")?;
             pt = frame as *mut PageTable;
             (*pt).entries.fill(0);
-            (*pd).entries[pd_i] = (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
+            (*pd).entries[pd_i] =
+                (frame as u64) | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
         } else {
             pt = ((*pd).entries[pd_i] & ENTRY_ADDR_MASK) as *mut PageTable;
             if (flags & PAGE_USER) != 0 {
@@ -364,7 +385,12 @@ pub fn map_mmio_range(paddr: u64, size: usize) -> Result<(), &'static str> {
 
 /// Clones all user-mapped pages within the virtual address range [start, end)
 /// from src_pml4 into dst_pml4 by allocating fresh physical frames and copying data.
-pub fn clone_user_range(src_pml4: *mut PageTable, dst_pml4: *mut PageTable, start: u64, end: u64) -> Result<(), &'static str> {
+pub fn clone_user_range(
+    src_pml4: *mut PageTable,
+    dst_pml4: *mut PageTable,
+    start: u64,
+    end: u64,
+) -> Result<(), &'static str> {
     if src_pml4.is_null() || dst_pml4.is_null() {
         return Err("Null PML4 pointer in clone_user_range");
     }
@@ -436,7 +462,9 @@ pub fn destroy_pml4(pml4: *mut PageTable) {
             }
 
             // If entry points to kernel's master PDPT, do not free it
-            if !KERNEL_PML4.is_null() && pdpt_addr == ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK) {
+            if !KERNEL_PML4.is_null()
+                && pdpt_addr == ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK)
+            {
                 continue;
             }
 
@@ -453,8 +481,11 @@ pub fn destroy_pml4(pml4: *mut PageTable) {
                     continue;
                 }
 
-                let k_pd_addr = if !KERNEL_PML4.is_null() && ((*KERNEL_PML4).entries[pml4_i] & PAGE_PRESENT) != 0 {
-                    let k_pdpt = ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK) as *const PageTable;
+                let k_pd_addr = if !KERNEL_PML4.is_null()
+                    && ((*KERNEL_PML4).entries[pml4_i] & PAGE_PRESENT) != 0
+                {
+                    let k_pdpt =
+                        ((*KERNEL_PML4).entries[pml4_i] & ENTRY_ADDR_MASK) as *const PageTable;
                     (*k_pdpt).entries[pdpt_i] & ENTRY_ADDR_MASK
                 } else {
                     0

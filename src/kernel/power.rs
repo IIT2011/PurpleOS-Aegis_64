@@ -20,13 +20,19 @@ struct Platform {
     reset: Option<(u16, u8)>,
 }
 
-static PLATFORM: Spinlock<Platform> = Spinlock::new(Platform { sleep: None, reset: None });
+static PLATFORM: Spinlock<Platform> = Spinlock::new(Platform {
+    sleep: None,
+    reset: None,
+});
 
 unsafe fn table(address: usize, signature: &[u8; 4], maximum: usize) -> Option<&'static [u8]> {
-    if !(0x1000..0xfe00_0000 - 36).contains(&address) { return None; }
+    if !(0x1000..0xfe00_0000 - 36).contains(&address) {
+        return None;
+    }
     let header = core::slice::from_raw_parts(address as *const u8, 36);
     let length = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
-    if &header[..4] != signature || !(36..=maximum).contains(&length)
+    if &header[..4] != signature
+        || !(36..=maximum).contains(&length)
         || address.checked_add(length)? > 0xfe00_0000
     {
         return None;
@@ -41,9 +47,15 @@ fn integer(data: &mut &[u8]) -> Option<u8> {
         0 | 1 => (*opcode, 0),
         0x0a => (*rest.first()?, 1),
         0x0b | 0x0c | 0x0e => {
-            let width = match opcode { 0x0b => 2, 0x0c => 4, _ => 8 };
+            let width = match opcode {
+                0x0b => 2,
+                0x0c => 4,
+                _ => 8,
+            };
             let value = rest.get(..width)?;
-            if value[1..].iter().any(|&byte| byte != 0) { return None; }
+            if value[1..].iter().any(|&byte| byte != 0) {
+                return None;
+            }
             (value[0], width)
         }
         _ => return None,
@@ -54,9 +66,13 @@ fn integer(data: &mut &[u8]) -> Option<u8> {
 
 fn s5_types(aml: &[u8]) -> Option<[u8; 2]> {
     for offset in 0..aml.len() {
-        let Some(name) = aml[offset..].strip_prefix(&[0x08]) else { continue; };
+        let Some(name) = aml[offset..].strip_prefix(&[0x08]) else {
+            continue;
+        };
         let name = name.strip_prefix(b"\\").unwrap_or(name);
-        let Some(package) = name.strip_prefix(b"_S5_\x12") else { continue; };
+        let Some(package) = name.strip_prefix(b"_S5_\x12") else {
+            continue;
+        };
         let lead = *package.first()?;
         let follow = usize::from(lead >> 6);
         let mut length = usize::from(lead & if follow == 0 { 0x3f } else { 0x0f });
@@ -65,7 +81,9 @@ fn s5_types(aml: &[u8]) -> Option<[u8; 2]> {
         }
         let mut items = package.get(1 + follow..length)?;
         let (&count, rest) = items.split_first()?;
-        if count < 2 { continue; }
+        if count < 2 {
+            continue;
+        }
         items = rest;
         if let (Some(a), Some(b)) = (integer(&mut items), integer(&mut items)) {
             return Some([a, b]);
@@ -75,17 +93,23 @@ fn s5_types(aml: &[u8]) -> Option<[u8; 2]> {
 }
 
 pub unsafe fn init(address: usize) {
-    let Some(fadt) = table(address, b"FACP", 4096).filter(|fadt| fadt.len() >= 116) else { return };
+    let Some(fadt) = table(address, b"FACP", 4096).filter(|fadt| fadt.len() >= 116) else {
+        return;
+    };
     let word = |offset| u32::from_le_bytes(fadt[offset..offset + 4].try_into().unwrap());
     let flags = word(112);
     let reset = if flags & (1 << 10) != 0 && fadt.len() >= 129 && fadt[116..120] == [1, 8, 0, 1] {
         u16::try_from(u64::from_le_bytes(fadt[120..128].try_into().unwrap()))
-            .ok().filter(|&port| port != 0).map(|port| (port, fadt[128]))
+            .ok()
+            .filter(|&port| port != 0)
+            .map(|port| (port, fadt[128]))
     } else {
         None
     };
     let sleep = (|| {
-        if flags & (1 << 20) != 0 || fadt[89] < 2 { return None; }
+        if flags & (1 << 20) != 0 || fadt[89] < 2 {
+            return None;
+        }
         let a = u16::try_from(word(64)).ok().filter(|&port| port != 0)?;
         let b = u16::try_from(word(68)).ok()?;
         let dsdt = table(word(40) as usize, b"DSDT", 1024 * 1024).or_else(|| {
@@ -93,9 +117,15 @@ pub unsafe fn init(address: usize) {
             table(usize::try_from(address).ok()?, b"DSDT", 1024 * 1024)
         })?;
         let types = s5_types(&dsdt[36..])?;
-        let enable = u16::try_from(word(48)).ok().filter(|&port| port != 0 && fadt[52] != 0)
+        let enable = u16::try_from(word(48))
+            .ok()
+            .filter(|&port| port != 0 && fadt[52] != 0)
             .map(|port| (port, fadt[52]));
-        Some(Sleep { ports: [a, b], types, enable })
+        Some(Sleep {
+            ports: [a, b],
+            types,
+            enable,
+        })
     })();
     *PLATFORM.lock() = Platform { sleep, reset };
 }
@@ -106,15 +136,27 @@ fn shut_down(sleep: Sleep) -> Result<(), &'static str> {
     const SLP_TYP: u16 = 7 << 10;
     unsafe {
         if inw(sleep.ports[0]) & SCI_EN == 0 {
-            let Some((port, value)) = sleep.enable else { return Err("ACPI mode is unavailable") };
+            let Some((port, value)) = sleep.enable else {
+                return Err("ACPI mode is unavailable");
+            };
             outb(port, value);
             for _ in 0..100 {
-                if inw(sleep.ports[0]) & SCI_EN != 0 { break; }
+                if inw(sleep.ports[0]) & SCI_EN != 0 {
+                    break;
+                }
                 crate::drivers::pit::delay_ms(1);
             }
-            if inw(sleep.ports[0]) & SCI_EN == 0 { return Err("Could not enable ACPI mode"); }
+            if inw(sleep.ports[0]) & SCI_EN == 0 {
+                return Err("Could not enable ACPI mode");
+            }
         }
-        let controls = sleep.ports.map(|port| if port == 0 { 0 } else { inw(port) & !(SLP_TYP | SLP_EN) });
+        let controls = sleep.ports.map(|port| {
+            if port == 0 {
+                0
+            } else {
+                inw(port) & !(SLP_TYP | SLP_EN)
+            }
+        });
         for ((port, kind), control) in sleep.ports.into_iter().zip(sleep.types).zip(controls) {
             if port != 0 {
                 outw(port, control | (u16::from(kind) << 10) | SLP_EN);
@@ -162,5 +204,6 @@ pub fn execute(action: Action) -> Result<(), &'static str> {
                 restart(platform.reset)
             }
         }
-    }).unwrap_or(Err("System disk is unavailable"))
+    })
+    .unwrap_or(Err("System disk is unavailable"))
 }

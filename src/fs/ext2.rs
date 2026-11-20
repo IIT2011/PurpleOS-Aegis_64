@@ -7,14 +7,14 @@ use crate::drivers::block_dev::BlockDevice;
 
 pub const EXT_MAGIC: u16 = 0xEF53;
 
-pub const EXT_FT_UNKNOWN: u8  = 0;
+pub const EXT_FT_UNKNOWN: u8 = 0;
 pub const EXT_FT_REG_FILE: u8 = 1;
-pub const EXT_FT_DIR: u8      = 2;
-pub const EXT_FT_CHRDEV: u8   = 3;
-pub const EXT_FT_BLKDEV: u8   = 4;
-pub const EXT_FT_FIFO: u8     = 5;
-pub const EXT_FT_SOCK: u8     = 6;
-pub const EXT_FT_SYMLINK: u8  = 7;
+pub const EXT_FT_DIR: u8 = 2;
+pub const EXT_FT_CHRDEV: u8 = 3;
+pub const EXT_FT_BLKDEV: u8 = 4;
+pub const EXT_FT_FIFO: u8 = 5;
+pub const EXT_FT_SOCK: u8 = 6;
+pub const EXT_FT_SYMLINK: u8 = 7;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ExtType {
@@ -153,8 +153,11 @@ impl ExtDriver {
         let free_inodes = u32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
         let log_blk_sz = u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
         let block_size = 1024u32.checked_shl(log_blk_sz)?;
-        if !(1024..=65536).contains(&block_size) || total_blocks == 0 || total_inodes == 0
-            || free_blocks > total_blocks || free_inodes > total_inodes
+        if !(1024..=65536).contains(&block_size)
+            || total_blocks == 0
+            || total_inodes == 0
+            || free_blocks > total_blocks
+            || free_inodes > total_inodes
         {
             return None;
         }
@@ -179,24 +182,31 @@ impl ExtDriver {
         // Ext2 vs Ext3 vs Ext4 features
         let compat = if rev_level >= 1 && buf.len() >= 96 {
             u32::from_le_bytes([buf[92], buf[93], buf[94], buf[95]])
-        } else { 0 };
+        } else {
+            0
+        };
         let incompat = if rev_level >= 1 && buf.len() >= 100 {
             u32::from_le_bytes([buf[96], buf[97], buf[98], buf[99]])
-        } else { 0 };
+        } else {
+            0
+        };
         let ro_compat = if rev_level >= 1 && buf.len() >= 104 {
             u32::from_le_bytes([buf[100], buf[101], buf[102], buf[103]])
-        } else { 0 };
+        } else {
+            0
+        };
 
         // EXT4: has extents (incompat & 0x0040) or 64bit (incompat & 0x0080)
         // EXT3: has has_journal (compat & 0x0004)
         // EXT2: baseline
-        let ext_type = if (incompat & 0x0040) != 0 || (incompat & 0x0080) != 0 || (ro_compat & 0x0008) != 0 {
-            ExtType::Ext4
-        } else if (compat & 0x0004) != 0 {
-            ExtType::Ext3
-        } else {
-            ExtType::Ext2
-        };
+        let ext_type =
+            if (incompat & 0x0040) != 0 || (incompat & 0x0080) != 0 || (ro_compat & 0x0008) != 0 {
+                ExtType::Ext4
+            } else if (compat & 0x0004) != 0 {
+                ExtType::Ext3
+            } else {
+                ExtType::Ext2
+            };
 
         let mut vol_name = [0u8; 16];
         if buf.len() >= 136 {
@@ -222,8 +232,10 @@ impl ExtDriver {
         let mut buf = [0u8; 1024];
         // Superblock begins at byte 1024 (LBA start + 2)
         let superblock_lba = start_lba.checked_add(2)?;
-        if dev.block_size() != 512 || superblock_lba.checked_add(2)? > dev.total_blocks()
-            || dev.read_blocks(superblock_lba, 2, &mut buf) != 0 {
+        if dev.block_size() != 512
+            || superblock_lba.checked_add(2)? > dev.total_blocks()
+            || dev.read_blocks(superblock_lba, 2, &mut buf) != 0
+        {
             return None;
         }
         let info = Self::probe_superblock(&buf)?;

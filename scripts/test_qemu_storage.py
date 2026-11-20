@@ -89,7 +89,7 @@ def main():
             ("GPT Table Validation", "Valid GPT detected with 1 partition(s)"),
             ("PurpleFS Partition Detection", "Found PurpleFS v2 partition at index 0"),
             ("PurpleFS Mount Success", "PurpleFS: Mounted volume 'PurpleSystem'"),
-            ("Disk Status Output", "ATA Storage Devices & GPT Partition Status"),
+            ("Disk Status Output", "Storage Devices & GPT Partition Status"),
             ("Partition List in Shell", "PurpleRootFS"),
             ("Filesystem Status Output", "Mount State:   MOUNTED (Read-Only Kernel Mode)"),
             ("Filesystem Block Size", "Block Size:    4096 bytes"),

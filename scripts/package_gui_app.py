@@ -105,7 +105,7 @@ def pack(args):
     if not public.startswith(ED25519_SPKI) or len(public) != len(ED25519_SPKI) + 32:
         raise ValueError("An Ed25519 private key is required")
     public = public[len(ED25519_SPKI):]
-    caps = 3 if args.console else 2
+    caps = 2 | int(args.console) | (4 if args.shell else 0)
     header = bytearray(MANIFEST_SIZE)
     struct.pack_into("<8sII", header, 0, b"APAPP200", 2, MANIFEST_SIZE)
     field(header, 16, 32, identifier, True)
@@ -144,7 +144,7 @@ def sign_policy(args):
     entries = set()
     for line in lines[1:]:
         identifier, key, caps, priority = line.split()
-        if not re.fullmatch(r"[a-f0-9]{64}", key) or caps not in ("2", "3") or priority not in ("1", "2"):
+        if not re.fullmatch(r"[a-f0-9]{64}", key) or caps not in ("2", "3", "6", "7") or priority not in ("1", "2"):
             raise ValueError("Invalid signer policy entry")
         entry = (app_id(identifier), key)
         if entry in entries:
@@ -172,6 +172,7 @@ def main():
     package.add_argument("--stack", type=int, default=0)
     package.add_argument("--priority", type=int, choices=(1, 2), default=2)
     package.add_argument("--console", action="store_true")
+    package.add_argument("--shell", action="store_true")
     package.add_argument("--resources", type=Path)
     package.add_argument("--metadata", type=Path)
     trust = commands.add_parser("sign-policy")

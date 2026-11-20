@@ -16,15 +16,17 @@ fn image_region_is_valid(offset: u32, size: usize, payload_len: usize) -> bool {
     }
     let start = offset as usize;
     start >= core::mem::size_of::<ApdrvHeader>()
-        && start.checked_add(size).map_or(false, |end| end <= payload_len)
+        && start
+            .checked_add(size)
+            .map_or(false, |end| end <= payload_len)
 }
 
 /* Relocation Types */
 pub const APDRV_RELOC_NONE: u32 = 0;
-pub const APDRV_RELOC_64: u32 = 1;    // *(uint64_t*)target = sym + addend
-pub const APDRV_RELOC_PC32: u32 = 2;  // *(int32_t*)target = sym + addend - target
+pub const APDRV_RELOC_64: u32 = 1; // *(uint64_t*)target = sym + addend
+pub const APDRV_RELOC_PC32: u32 = 2; // *(int32_t*)target = sym + addend - target
 pub const APDRV_RELOC_PLT32: u32 = 4; // *(int32_t*)target = sym + addend - target
-pub const APDRV_RELOC_32: u32 = 10;   // *(uint32_t*)target = (uint32_t)(sym + addend)
+pub const APDRV_RELOC_32: u32 = 10; // *(uint32_t*)target = (uint32_t)(sym + addend)
 
 /* Relocation Section Base Indices */
 pub const APDRV_SEC_TEXT: u32 = 0xFFF0;
@@ -163,24 +165,57 @@ impl LoadedModule {
 }
 
 static MODULE_REGISTRY: Spinlock<[LoadedModule; APDRV_MAX_MODULES]> = Spinlock::new([
-    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
-    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
-    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
-    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
-    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
-    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
-    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
-    LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(), LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
+    LoadedModule::empty(),
 ]);
 
+#[cfg(not(feature = "signed-components"))]
 static CPU_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/cpu.apdrv");
+#[cfg(not(feature = "signed-components"))]
 static RAM_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/ram.apdrv");
+#[cfg(not(feature = "signed-components"))]
 static GPU_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/gpu.apdrv");
+#[cfg(not(feature = "signed-components"))]
 static STORAGE_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/storage.apdrv");
+#[cfg(not(feature = "signed-components"))]
 static NETWORK_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/network.apdrv");
+#[cfg(not(feature = "signed-components"))]
 static AUDIO_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/audio.apdrv");
+#[cfg(not(feature = "signed-components"))]
 static USB_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/usb.apdrv");
+#[cfg(not(feature = "signed-components"))]
 static INPUT_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/input.apdrv");
+#[cfg(not(feature = "signed-components"))]
 static FILESYSTEMS_APDRV: &[u8] = include_bytes!("../../build/drivers_apdrv/filesystems.apdrv");
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -193,6 +228,7 @@ pub enum DriverCondition {
 pub struct ApdrvBundleDriver {
     pub name: &'static str,
     pub filename: &'static str,
+    #[cfg(not(feature = "signed-components"))]
     pub binary: &'static [u8],
     pub condition: DriverCondition,
     pub description: &'static str,
@@ -202,6 +238,7 @@ pub static APDRV_BUNDLE: &[ApdrvBundleDriver] = &[
     ApdrvBundleDriver {
         name: "cpu",
         filename: "cpu.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: CPU_APDRV,
         condition: DriverCondition::Core,
         description: "Unified CPU, SMP Multi-Core & APIC Subsystem",
@@ -209,6 +246,7 @@ pub static APDRV_BUNDLE: &[ApdrvBundleDriver] = &[
     ApdrvBundleDriver {
         name: "ram",
         filename: "ram.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: RAM_APDRV,
         condition: DriverCondition::Core,
         description: "Unified Memory Management (PMM, VMM, Dynamic Heap)",
@@ -216,6 +254,7 @@ pub static APDRV_BUNDLE: &[ApdrvBundleDriver] = &[
     ApdrvBundleDriver {
         name: "filesystems",
         filename: "filesystems.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: FILESYSTEMS_APDRV,
         condition: DriverCondition::Core,
         description: "Unified Filesystem Subsystem (PurpleFS, FAT, Ext4, ISO9660, RAMFS)",
@@ -223,13 +262,17 @@ pub static APDRV_BUNDLE: &[ApdrvBundleDriver] = &[
     ApdrvBundleDriver {
         name: "storage",
         filename: "storage.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: STORAGE_APDRV,
-        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Storage),
+        condition: DriverCondition::Category(
+            crate::drivers::purple_detect::DeviceCategory::Storage,
+        ),
         description: "Unified Block Storage Driver (AHCI SATA, NVMe, ATA, SDXC)",
     },
     ApdrvBundleDriver {
         name: "input",
         filename: "input.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: INPUT_APDRV,
         condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Input),
         description: "Unified Human Interface Device Driver (PS/2 & USB HID)",
@@ -237,20 +280,27 @@ pub static APDRV_BUNDLE: &[ApdrvBundleDriver] = &[
     ApdrvBundleDriver {
         name: "gpu",
         filename: "gpu.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: GPU_APDRV,
-        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Display),
+        condition: DriverCondition::Category(
+            crate::drivers::purple_detect::DeviceCategory::Display,
+        ),
         description: "Unified GPU Driver Stack (Bochs VBE 2D, igd, radeongd, nvgd 3D)",
     },
     ApdrvBundleDriver {
         name: "network",
         filename: "network.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: NETWORK_APDRV,
-        condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Network),
+        condition: DriverCondition::Category(
+            crate::drivers::purple_detect::DeviceCategory::Network,
+        ),
         description: "Unified Network Driver (Intel E1000, RTL8139, TCP/IP L2)",
     },
     ApdrvBundleDriver {
         name: "audio",
         filename: "audio.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: AUDIO_APDRV,
         condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Audio),
         description: "Unified HD Audio Driver and PCM Streaming Pipeline",
@@ -258,34 +308,55 @@ pub static APDRV_BUNDLE: &[ApdrvBundleDriver] = &[
     ApdrvBundleDriver {
         name: "usb",
         filename: "usb.apdrv",
+        #[cfg(not(feature = "signed-components"))]
         binary: USB_APDRV,
         condition: DriverCondition::Category(crate::drivers::purple_detect::DeviceCategory::Bus),
         description: "Unified USB 3.0 / 2.0 Host Controller Subsystem",
     },
 ];
 
+impl ApdrvBundleDriver {
+    fn load(&self) -> Result<usize, &'static str> {
+        #[cfg(not(feature = "signed-components"))]
+        return load_binary(self.binary);
+
+        #[cfg(feature = "signed-components")]
+        {
+            const MAX_BOOT_MODULE_SIZE: usize = 8192;
+            let path = alloc::format!("/System/Drivers/{}", self.filename);
+            let size = crate::fs::vfs::file_size(&path)?;
+            if size == 0 || size > MAX_BOOT_MODULE_SIZE {
+                return Err("Invalid boot module size");
+            }
+            let mut image = [0u8; MAX_BOOT_MODULE_SIZE];
+            if crate::fs::vfs::read(&path, &mut image)? != size {
+                return Err("Could not read the complete boot module");
+            }
+            load_binary(&image[..size])
+        }
+    }
+}
+
 pub fn load_matching_drivers() -> (usize, usize) {
     let mut loaded = 0usize;
     let mut skipped = 0usize;
 
-    crate::drivers::serial::println("PurpleDetect: Scanning hardware inventory and matching APDRV driver bundle...");
+    crate::drivers::serial::println(
+        "PurpleDetect: Scanning hardware inventory and matching APDRV driver bundle...",
+    );
 
     for drv in APDRV_BUNDLE.iter() {
         let is_matched = match drv.condition {
             DriverCondition::Core => true,
-            DriverCondition::Category(cat) => {
-                crate::drivers::purple_detect::has_category(cat)
-            }
-            DriverCondition::PciDevice(v, d) => {
-                crate::drivers::purple_detect::has_pci_device(v, d)
-            }
+            DriverCondition::Category(cat) => crate::drivers::purple_detect::has_category(cat),
+            DriverCondition::PciDevice(v, d) => crate::drivers::purple_detect::has_pci_device(v, d),
         };
 
         if is_matched {
             crate::drivers::serial::print("PurpleDetect: Matched hardware for '");
             crate::drivers::serial::print(drv.filename);
             crate::drivers::serial::println("' — loading driver module");
-            match load_binary(drv.binary) {
+            match drv.load() {
                 Ok(_) => loaded += 1,
                 Err(reason) => {
                     skipped += 1;
@@ -347,7 +418,9 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
         return Err("Invalid APDRV header size");
     }
 
-    let mod_name = core::str::from_utf8(&hdr.name).unwrap_or("module").trim_matches('\0');
+    let mod_name = core::str::from_utf8(&hdr.name)
+        .unwrap_or("module")
+        .trim_matches('\0');
     if !crate::security::aegis_detect::verify_driver(mod_name, image) {
         return Err("APDRV signature verification failed");
     }
@@ -399,7 +472,12 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
             }
         }
     }
-    for entry in [hdr.entry_init, hdr.entry_fini, hdr.entry_probe, hdr.entry_ioctl] {
+    for entry in [
+        hdr.entry_init,
+        hdr.entry_fini,
+        hdr.entry_probe,
+        hdr.entry_ioctl,
+    ] {
         if entry != APDRV_ENTRY_ABSENT && entry >= hdr.text_size {
             return Err("APDRV entry point lies outside text section");
         }
@@ -418,7 +496,11 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
         let mods = MODULE_REGISTRY.lock();
         for (idx, slot) in mods.iter().enumerate() {
             if slot.state != ModuleState::Unloaded {
-                let slot_name_len = slot.name.iter().position(|&c| c == 0).unwrap_or(slot.name.len());
+                let slot_name_len = slot
+                    .name
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(slot.name.len());
                 let slot_name = core::str::from_utf8(&slot.name[..slot_name_len]).unwrap_or("");
                 if slot_name == mod_name {
                     return Ok(idx);
@@ -438,7 +520,8 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
         return Err("Empty module sections");
     }
 
-    let base_phys = alloc_frames(total_pages).ok_or("Failed to allocate physical frames for module")?;
+    let base_phys =
+        alloc_frames(total_pages).ok_or("Failed to allocate physical frames for module")?;
     let base_addr = base_phys;
 
     let text_addr = base_addr;
@@ -452,16 +535,26 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
             let src = image.as_ptr().add(hdr.text_offset as usize);
             core::ptr::copy_nonoverlapping(src, text_addr as *mut u8, hdr.text_size as usize);
             if text_pages * PAGE_SIZE > hdr.text_size as usize {
-                core::ptr::write_bytes((text_addr + hdr.text_size as usize) as *mut u8, 0, text_pages * PAGE_SIZE - hdr.text_size as usize);
+                core::ptr::write_bytes(
+                    (text_addr + hdr.text_size as usize) as *mut u8,
+                    0,
+                    text_pages * PAGE_SIZE - hdr.text_size as usize,
+                );
             }
         }
 
         // Copy .rodata
-        if hdr.rodata_size > 0 && (hdr.rodata_offset as usize + hdr.rodata_size as usize) <= image.len() {
+        if hdr.rodata_size > 0
+            && (hdr.rodata_offset as usize + hdr.rodata_size as usize) <= image.len()
+        {
             let src = image.as_ptr().add(hdr.rodata_offset as usize);
             core::ptr::copy_nonoverlapping(src, rodata_addr as *mut u8, hdr.rodata_size as usize);
             if rodata_pages * PAGE_SIZE > hdr.rodata_size as usize {
-                core::ptr::write_bytes((rodata_addr + hdr.rodata_size as usize) as *mut u8, 0, rodata_pages * PAGE_SIZE - hdr.rodata_size as usize);
+                core::ptr::write_bytes(
+                    (rodata_addr + hdr.rodata_size as usize) as *mut u8,
+                    0,
+                    rodata_pages * PAGE_SIZE - hdr.rodata_size as usize,
+                );
             }
         }
 
@@ -470,7 +563,11 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
             let src = image.as_ptr().add(hdr.data_offset as usize);
             core::ptr::copy_nonoverlapping(src, data_addr as *mut u8, hdr.data_size as usize);
             if data_pages * PAGE_SIZE > hdr.data_size as usize {
-                core::ptr::write_bytes((data_addr + hdr.data_size as usize) as *mut u8, 0, data_pages * PAGE_SIZE - hdr.data_size as usize);
+                core::ptr::write_bytes(
+                    (data_addr + hdr.data_size as usize) as *mut u8,
+                    0,
+                    data_pages * PAGE_SIZE - hdr.data_size as usize,
+                );
             }
         }
 
@@ -495,7 +592,10 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
                     }
                 };
                 let offset = r.offset as usize;
-                if offset.checked_add(width).map_or(true, |end| end > total_pages * PAGE_SIZE) {
+                if offset
+                    .checked_add(width)
+                    .map_or(true, |end| end > total_pages * PAGE_SIZE)
+                {
                     let _ = crate::mm::pmm::free_frames(base_phys, total_pages);
                     return Err("Relocation target exceeds module memory bounds");
                 }
@@ -509,9 +609,14 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
                     APDRV_SEC_BSS if hdr.bss_size > 0 => bss_addr as u64,
                     APDRV_SEC_MODULE => base_addr as u64,
                     idx if idx < import_count => {
-                        let imp_ptr = image.as_ptr().add(hdr.import_offset as usize) as *const ApdrvSymbol;
+                        let imp_ptr =
+                            image.as_ptr().add(hdr.import_offset as usize) as *const ApdrvSymbol;
                         let sym = core::ptr::read_unaligned(imp_ptr.add(idx as usize));
-                        let name_len = sym.name.iter().position(|&c| c == 0).unwrap_or(sym.name.len());
+                        let name_len = sym
+                            .name
+                            .iter()
+                            .position(|&c| c == 0)
+                            .unwrap_or(sym.name.len());
                         if name_len == 0 {
                             let _ = crate::mm::pmm::free_frames(base_phys, total_pages);
                             return Err("APDRV relocation references an empty import name");
@@ -571,8 +676,18 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
     // Map code, constants, and writable data with separate permissions.
     let ranges = [
         (text_addr, text_pages, crate::mm::vmm::PAGE_PRESENT),
-        (rodata_addr, rodata_pages, crate::mm::vmm::PAGE_PRESENT | crate::mm::vmm::PAGE_NO_EXECUTE),
-        (data_addr, data_pages + bss_pages, crate::mm::vmm::PAGE_PRESENT | crate::mm::vmm::PAGE_WRITABLE | crate::mm::vmm::PAGE_NO_EXECUTE),
+        (
+            rodata_addr,
+            rodata_pages,
+            crate::mm::vmm::PAGE_PRESENT | crate::mm::vmm::PAGE_NO_EXECUTE,
+        ),
+        (
+            data_addr,
+            data_pages + bss_pages,
+            crate::mm::vmm::PAGE_PRESENT
+                | crate::mm::vmm::PAGE_WRITABLE
+                | crate::mm::vmm::PAGE_NO_EXECUTE,
+        ),
     ];
     for (start_addr, page_count, permissions) in ranges {
         for page in 0..page_count {
@@ -599,17 +714,19 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
         None
     };
 
-    let fn_probe: Option<extern "C" fn(u32, u32) -> i32> = if hdr.entry_probe != APDRV_ENTRY_ABSENT {
+    let fn_probe: Option<extern "C" fn(u32, u32) -> i32> = if hdr.entry_probe != APDRV_ENTRY_ABSENT
+    {
         Some(unsafe { core::mem::transmute(text_addr + hdr.entry_probe as usize) })
     } else {
         None
     };
 
-    let fn_ioctl: Option<extern "C" fn(u32, *mut u8) -> i32> = if hdr.entry_ioctl != APDRV_ENTRY_ABSENT {
-        Some(unsafe { core::mem::transmute(text_addr + hdr.entry_ioctl as usize) })
-    } else {
-        None
-    };
+    let fn_ioctl: Option<extern "C" fn(u32, *mut u8) -> i32> =
+        if hdr.entry_ioctl != APDRV_ENTRY_ABSENT {
+            Some(unsafe { core::mem::transmute(text_addr + hdr.entry_ioctl as usize) })
+        } else {
+            None
+        };
 
     // Register in slot
     let mut mods = MODULE_REGISTRY.lock();
@@ -649,7 +766,11 @@ pub fn load_binary(image: &[u8]) -> Result<usize, &'static str> {
                 }
             };
 
-            let name_len = hdr.name.iter().position(|&c| c == 0).unwrap_or(hdr.name.len());
+            let name_len = hdr
+                .name
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(hdr.name.len());
             let name_str = core::str::from_utf8(&hdr.name[0..name_len]).unwrap_or("unknown");
             crate::drivers::serial::print("APDRV: Module '");
             crate::drivers::serial::print(name_str);
@@ -693,7 +814,9 @@ pub fn insmod(name: &str) {
     let clean = name.trim_start_matches('/');
     if clean.is_empty()
         || clean.as_bytes().contains(&0)
-        || clean.split('/').any(|component| component.is_empty() || component == "." || component == "..")
+        || clean
+            .split('/')
+            .any(|component| component.is_empty() || component == "." || component == "..")
     {
         crate::drivers::serial::println("APDRV: Invalid module path");
         return;
@@ -711,7 +834,9 @@ pub fn insmod(name: &str) {
                 let mut path = [0u8; 64];
                 path[..prefix.len()].copy_from_slice(prefix);
                 path[prefix.len()..prefix.len() + clean_bytes.len()].copy_from_slice(clean_bytes);
-                if let Ok(path_str) = core::str::from_utf8(&path[..prefix.len() + clean_bytes.len()]) {
+                if let Ok(path_str) =
+                    core::str::from_utf8(&path[..prefix.len() + clean_bytes.len()])
+                {
                     target_ino = fs.lookup(path_str);
                 }
             }
@@ -760,12 +885,18 @@ pub fn insmod(name: &str) {
 pub fn list_modules() {
     let mods = MODULE_REGISTRY.lock();
     crate::drivers::serial::println("=== APDRV v3 Loaded Native Modules ===");
-    crate::drivers::serial::println("NAME                             STATE    BASE ADDR          PAGES   PCI VENDOR:DEVICE");
+    crate::drivers::serial::println(
+        "NAME                             STATE    BASE ADDR          PAGES   PCI VENDOR:DEVICE",
+    );
     let mut count = 0;
     for slot in mods.iter() {
         if slot.state != ModuleState::Unloaded {
             count += 1;
-            let name_len = slot.name.iter().position(|&c| c == 0).unwrap_or(slot.name.len());
+            let name_len = slot
+                .name
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(slot.name.len());
             let name_str = core::str::from_utf8(&slot.name[0..name_len]).unwrap_or("unknown");
             crate::drivers::serial::print(name_str);
             for _ in name_str.len()..32 {

@@ -4,28 +4,28 @@
 //!   - `drivers/net/ethernet/realtek/8139too.c`
 //!   - `drivers/net/ethernet/realtek/8139cp.c`
 
-use crate::arch::x86_64::io::{inb, inl, inw, outb, outw, outl};
-use crate::drivers::pci::find_device;
+use crate::arch::x86_64::io::{inb, inl, inw, outb, outl, outw};
 use crate::drivers::dma::alloc_coherent;
+use crate::drivers::pci::find_device;
 use crate::sync::Spinlock;
 
 pub const RTL8139_VENDOR: u16 = 0x10EC;
 pub const RTL8139_DEV_ID: u16 = 0x8139;
 
 /* Register Offsets (enum RTL8139_registers from Linux 8139too.c) */
-pub const REG_MAC0: u16       = 0x00; /* Ethernet Hardware Address */
-pub const REG_MAR0: u16       = 0x08; /* Multicast filter */
+pub const REG_MAC0: u16 = 0x00; /* Ethernet Hardware Address */
+pub const REG_MAR0: u16 = 0x08; /* Multicast filter */
 pub const REG_TX_STATUS0: u16 = 0x10; /* Transmit status (4 ports: 0x10, 0x14, 0x18, 0x1C) */
-pub const REG_TX_ADDR0: u16   = 0x20; /* Tx buffer DMA physical addresses (4 ports) */
-pub const REG_RX_BUF: u16     = 0x30; /* Rx ring buffer DMA physical address */
-pub const REG_CHIP_CMD: u16   = 0x37; /* Command Register */
-pub const REG_CAPR: u16       = 0x38; /* Current Address of Packet Read (RxBufPtr) */
-pub const REG_CBR: u16        = 0x3A; /* Current Buffer Address (RxBufAddr) */
-pub const REG_INTR_MASK: u16  = 0x3C; /* Interrupt Mask */
-pub const REG_INTR_STS: u16   = 0x3E; /* Interrupt Status */
-pub const REG_TX_CONFIG: u16  = 0x40; /* Transmit Configuration */
-pub const REG_RX_CONFIG: u16  = 0x44; /* Receive Configuration */
-pub const REG_CONFIG1: u16    = 0x52; /* Configuration Register 1 */
+pub const REG_TX_ADDR0: u16 = 0x20; /* Tx buffer DMA physical addresses (4 ports) */
+pub const REG_RX_BUF: u16 = 0x30; /* Rx ring buffer DMA physical address */
+pub const REG_CHIP_CMD: u16 = 0x37; /* Command Register */
+pub const REG_CAPR: u16 = 0x38; /* Current Address of Packet Read (RxBufPtr) */
+pub const REG_CBR: u16 = 0x3A; /* Current Buffer Address (RxBufAddr) */
+pub const REG_INTR_MASK: u16 = 0x3C; /* Interrupt Mask */
+pub const REG_INTR_STS: u16 = 0x3E; /* Interrupt Status */
+pub const REG_TX_CONFIG: u16 = 0x40; /* Transmit Configuration */
+pub const REG_RX_CONFIG: u16 = 0x44; /* Receive Configuration */
+pub const REG_CONFIG1: u16 = 0x52; /* Configuration Register 1 */
 
 /* ChipCmd Register Bits */
 pub const CMD_RESET: u8 = 0x10; /* Software Reset */
@@ -33,10 +33,10 @@ pub const CMD_RX_EN: u8 = 0x08; /* Receiver Enable */
 pub const CMD_TX_EN: u8 = 0x04; /* Transmitter Enable */
 
 /* RxConfig Bits */
-pub const RX_CFG_AAP: u32  = 0x0001; /* Accept All Packets */
-pub const RX_CFG_APM: u32  = 0x0002; /* Accept Physical Match */
-pub const RX_CFG_AM: u32   = 0x0004; /* Accept Multicast */
-pub const RX_CFG_AB: u32   = 0x0008; /* Accept Broadcast */
+pub const RX_CFG_AAP: u32 = 0x0001; /* Accept All Packets */
+pub const RX_CFG_APM: u32 = 0x0002; /* Accept Physical Match */
+pub const RX_CFG_AM: u32 = 0x0004; /* Accept Multicast */
+pub const RX_CFG_AB: u32 = 0x0008; /* Accept Broadcast */
 pub const RX_CFG_WRAP: u32 = 0x0080; /* Wrap packet past end of buffer */
 
 /* Buffer Sizes */
@@ -99,14 +99,16 @@ impl Rtl8139Device {
             }
 
             // 4. Allocate DMA buffer for RX Ring
-            let (rx_ptr, rx_phys) = alloc_coherent(RX_BUF_LEN).ok_or("Failed to alloc RTL8139 RX Ring")?;
+            let (rx_ptr, rx_phys) =
+                alloc_coherent(RX_BUF_LEN).ok_or("Failed to alloc RTL8139 RX Ring")?;
             self.rx_buf = rx_ptr;
             self.rx_buf_phys = rx_phys;
             outl(self.io_base + REG_RX_BUF, rx_phys as u32);
 
             // 5. Allocate DMA buffers for TX (4 buffers)
             for i in 0..4 {
-                let (tx_ptr, tx_phys) = alloc_coherent(TX_BUF_LEN).ok_or("Failed to alloc RTL8139 TX Buf")?;
+                let (tx_ptr, tx_phys) =
+                    alloc_coherent(TX_BUF_LEN).ok_or("Failed to alloc RTL8139 TX Buf")?;
                 self.tx_bufs[i] = tx_ptr;
                 self.tx_bufs_phys[i] = tx_phys;
                 outl(self.io_base + REG_TX_ADDR0 + (i as u16 * 4), tx_phys as u32);
@@ -116,7 +118,10 @@ impl Rtl8139Device {
             outw(self.io_base + REG_INTR_MASK, 0x0000);
 
             // 7. Configure RX (Accept Broadcast, Physical match, Wrap mode)
-            outl(self.io_base + REG_RX_CONFIG, RX_CFG_AB | RX_CFG_APM | RX_CFG_WRAP);
+            outl(
+                self.io_base + REG_RX_CONFIG,
+                RX_CFG_AB | RX_CFG_APM | RX_CFG_WRAP,
+            );
 
             // 8. Enable RX and TX
             outb(self.io_base + REG_CHIP_CMD, CMD_RX_EN | CMD_TX_EN);
@@ -128,7 +133,8 @@ impl Rtl8139Device {
 
     /// Transmit raw ethernet frame
     pub fn transmit(&mut self, packet: &[u8]) -> Result<(), &'static str> {
-        if !self.is_ready || !(crate::net::eth::ETH_HEADER_LEN..=TX_BUF_LEN).contains(&packet.len()) {
+        if !self.is_ready || !(crate::net::eth::ETH_HEADER_LEN..=TX_BUF_LEN).contains(&packet.len())
+        {
             return Err("RTL8139 not ready or packet too large");
         }
 
@@ -177,7 +183,10 @@ impl Rtl8139Device {
             if !(4..=RX_MAX_LENGTH).contains(&length) {
                 // Discard the pending ring contents when its length cannot be trusted.
                 self.rx_read_ptr = usize::from(inw(self.io_base + REG_CBR)) % RX_RING_LEN & !3;
-                outw(self.io_base + REG_CAPR, (self.rx_read_ptr as u16).wrapping_sub(16));
+                outw(
+                    self.io_base + REG_CAPR,
+                    (self.rx_read_ptr as u16).wrapping_sub(16),
+                );
                 return 0;
             }
             let payload_len = length - 4;
@@ -185,14 +194,25 @@ impl Rtl8139Device {
                 && (crate::net::eth::ETH_HEADER_LEN..=buf.len()).contains(&payload_len);
             if valid {
                 core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
-                core::ptr::copy_nonoverlapping(self.rx_buf.add(cur_ptr + 4), buf.as_mut_ptr(), payload_len);
+                core::ptr::copy_nonoverlapping(
+                    self.rx_buf.add(cur_ptr + 4),
+                    buf.as_mut_ptr(),
+                    payload_len,
+                );
             }
             self.rx_read_ptr = ((cur_ptr + length + 7) & !3) % RX_RING_LEN;
 
             // Update CAPR register (subtract 16 per RTL8139 hardware erratum specification)
-            outw(self.io_base + REG_CAPR, (self.rx_read_ptr as u16).wrapping_sub(16));
+            outw(
+                self.io_base + REG_CAPR,
+                (self.rx_read_ptr as u16).wrapping_sub(16),
+            );
 
-            if valid { payload_len } else { 0 }
+            if valid {
+                payload_len
+            } else {
+                0
+            }
         }
     }
 }

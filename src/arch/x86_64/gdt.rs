@@ -42,7 +42,9 @@ pub struct GdtTable {
     pub entries: [u64; 5 + 2 * MAX_GDT_CPUS],
 }
 
-static mut GDT: GdtTable = GdtTable { entries: [0; 5 + 2 * MAX_GDT_CPUS] };
+static mut GDT: GdtTable = GdtTable {
+    entries: [0; 5 + 2 * MAX_GDT_CPUS],
+};
 static mut TSS_ARRAY: [Tss64; MAX_GDT_CPUS] = [Tss64 {
     reserved0: 0,
     rsp0: 0,
@@ -192,8 +194,5 @@ pub fn set_tss_rsp0(cpu: usize, stack_top: u64) {
 
 pub fn get_tss_rsp0(cpu: usize) -> u64 {
     let cpu = cpu.min(MAX_GDT_CPUS - 1);
-    unsafe {
-        TSS_ARRAY[cpu].rsp0
-    }
+    unsafe { TSS_ARRAY[cpu].rsp0 }
 }
-

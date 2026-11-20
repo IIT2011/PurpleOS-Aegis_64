@@ -14,8 +14,8 @@ pub const RSA_2048_WORDS: usize = 32;
 
 /// ASN.1 DigestInfo prefix for SHA-256 (RFC 8017 / PKCS #1 v2.2)
 pub const SHA256_ASN1_PREFIX: [u8; 19] = [
-    0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
-    0x05, 0x00, 0x04, 0x20,
+    0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0x04, 0x20,
 ];
 
 /// 2048-bit Unsigned Big Integer (stored as 32 little-endian 64-bit words)
@@ -26,7 +26,9 @@ pub struct BigUint2048 {
 
 impl BigUint2048 {
     pub const fn zero() -> Self {
-        Self { words: [0u64; RSA_2048_WORDS] }
+        Self {
+            words: [0u64; RSA_2048_WORDS],
+        }
     }
 
     /// Parse big-endian 256-byte array into 2048-bit little-endian words
@@ -160,6 +162,14 @@ pub fn verify_rsa_2048_pkcs1_v15(
     payload: &[u8],
     sig_bytes: &[u8; RSA_2048_BYTES],
 ) -> bool {
+    verify_rsa_2048_sha256_digest(n_bytes, &sha256::hash(payload), sig_bytes)
+}
+
+pub fn verify_rsa_2048_sha256_digest(
+    n_bytes: &[u8; RSA_2048_BYTES],
+    expected_hash: &[u8; 32],
+    sig_bytes: &[u8; RSA_2048_BYTES],
+) -> bool {
     let modulus = BigUint2048::from_be_bytes(n_bytes);
     let signature = BigUint2048::from_be_bytes(sig_bytes);
 
@@ -170,7 +180,9 @@ pub fn verify_rsa_2048_pkcs1_v15(
 
     // Compute M = S^65537 mod N
     let recovered_words = mod_pow_65537(&signature.words, &modulus.words);
-    let recovered = BigUint2048 { words: recovered_words };
+    let recovered = BigUint2048 {
+        words: recovered_words,
+    };
 
     let mut em = [0u8; RSA_2048_BYTES];
     recovered.to_be_bytes(&mut em);
@@ -201,7 +213,6 @@ pub fn verify_rsa_2048_pkcs1_v15(
     }
 
     // Verify SHA-256 digest of payload (32 bytes)
-    let expected_hash = sha256::hash(payload);
     for i in 0..32 {
         diff |= em[224 + i] ^ expected_hash[i];
     }

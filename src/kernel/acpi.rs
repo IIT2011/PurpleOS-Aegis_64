@@ -41,7 +41,8 @@ pub fn init(mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
         let mut lapic = 0xFEE00000;
 
         // Search BIOS ROM area 0xE0000..0xFFFFF for "RSD PTR "
-        let (start, limit) = mbi.filter(|info| info.flags & AEGIS_UEFI_ACPI_RSDP != 0)
+        let (start, limit) = mbi
+            .filter(|info| info.flags & AEGIS_UEFI_ACPI_RSDP != 0)
             .map_or((0xE0000, 0x100000), |info| {
                 let rsdp = info.config_table as usize;
                 (rsdp, rsdp + 16)
@@ -55,7 +56,8 @@ pub fn init(mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
                 let sum: u8 = rsdp_bytes.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
                 if sum == 0 {
                     let rsdp = &*(addr as *const RsdpDescriptor);
-                    let rsdt_phys = core::ptr::read_unaligned(core::ptr::addr_of!(rsdp.rsdt_address)) as usize;
+                    let rsdt_phys =
+                        core::ptr::read_unaligned(core::ptr::addr_of!(rsdp.rsdt_address)) as usize;
                     crate::drivers::serial::print("ACPI: RSDP at 0x");
                     crate::drivers::serial::print_hex(addr as u64);
                     crate::drivers::serial::print(", RSDT at 0x");
@@ -64,29 +66,42 @@ pub fn init(mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
                     if rsdt_phys >= 0x1000 && rsdt_phys < 0xFE000000 {
                         let rsdt = rsdt_phys as *const AcpiHeader;
                         if core::slice::from_raw_parts(rsdt as *const u8, 4) == b"RSDT" {
-                            let rsdt_len = core::ptr::read_unaligned(core::ptr::addr_of!((*rsdt).length)) as usize;
+                            let rsdt_len =
+                                core::ptr::read_unaligned(core::ptr::addr_of!((*rsdt).length))
+                                    as usize;
                             crate::drivers::serial::print("ACPI: RSDT valid, len=");
                             crate::drivers::serial::print_u64(rsdt_len as u64);
                             crate::drivers::serial::println("");
                             if rsdt_len >= core::mem::size_of::<AcpiHeader>() && rsdt_len < 4096 {
                                 let entries = (rsdt_len - core::mem::size_of::<AcpiHeader>()) / 4;
-                                let entry_ptr = (rsdt as usize + core::mem::size_of::<AcpiHeader>()) as *const u32;
+                                let entry_ptr = (rsdt as usize + core::mem::size_of::<AcpiHeader>())
+                                    as *const u32;
 
                                 for i in 0..entries {
-                                    let table_phys = core::ptr::read_unaligned(entry_ptr.add(i)) as usize;
+                                    let table_phys =
+                                        core::ptr::read_unaligned(entry_ptr.add(i)) as usize;
                                     if table_phys < 0x1000 || table_phys >= 0xFE000000 {
                                         continue;
                                     }
                                     let table_addr = table_phys as *const AcpiHeader;
-                                    if core::slice::from_raw_parts(table_addr as *const u8, 4) == b"FACP" {
+                                    if core::slice::from_raw_parts(table_addr as *const u8, 4)
+                                        == b"FACP"
+                                    {
                                         crate::kernel::power::init(table_phys);
                                         continue;
                                     }
-                                    if core::slice::from_raw_parts(table_addr as *const u8, 4) == b"APIC" {
+                                    if core::slice::from_raw_parts(table_addr as *const u8, 4)
+                                        == b"APIC"
+                                    {
                                         // MADT Table
-                                        lapic = core::ptr::read_unaligned(((table_addr as usize) + 0x24) as *const u32) as u64;
+                                        lapic = core::ptr::read_unaligned(
+                                            ((table_addr as usize) + 0x24) as *const u32,
+                                        ) as u64;
                                         let mut madt_cur = (table_addr as usize) + 0x2C;
-                                        let madt_len = core::ptr::read_unaligned(core::ptr::addr_of!((*table_addr).length)) as usize;
+                                        let madt_len = core::ptr::read_unaligned(
+                                            core::ptr::addr_of!((*table_addr).length),
+                                        )
+                                            as usize;
                                         let madt_end = (table_addr as usize) + madt_len;
 
                                         while madt_cur < madt_end {
@@ -96,8 +111,11 @@ pub fn init(mbi: Option<&MultibootInfo>) -> Result<(), &'static str> {
                                                 break;
                                             }
 
-                                            if entry_type == 0 { // Processor Local APIC
-                                                let flags = core::ptr::read_unaligned((madt_cur + 4) as *const u32);
+                                            if entry_type == 0 {
+                                                // Processor Local APIC
+                                                let flags = core::ptr::read_unaligned(
+                                                    (madt_cur + 4) as *const u32,
+                                                );
                                                 if (flags & 1) != 0 && count < 8 {
                                                     let apic_id = *((madt_cur + 3) as *const u8);
                                                     MADT_INFO.apic_ids[count] = apic_id;

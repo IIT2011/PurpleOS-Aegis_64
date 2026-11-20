@@ -128,7 +128,9 @@ impl Surface {
         if width == 0 || height == 0 {
             return None;
         }
-        let byte_size = width.saturating_mul(height).saturating_mul(core::mem::size_of::<u32>());
+        let byte_size = width
+            .saturating_mul(height)
+            .saturating_mul(core::mem::size_of::<u32>());
         let (ptr, _) = unsafe { alloc_coherent(byte_size)? };
 
         Some(Self {
@@ -283,99 +285,127 @@ impl Surface {
         }
     }
 
-    /// Draw a single ASCII character onto the surface with Inter anti-aliasing
-    pub fn draw_char(&mut self, x: usize, y: usize, c: u8, fg: u32, bg: u32, transparent_bg: bool) {
-        self.draw_char_styled(x, y, c, fg, bg, transparent_bg, crate::drivers::font::FontWeight::Regular);
-    }
-
-    /// Draw a single ASCII character onto the surface with custom font weight
-    pub fn draw_char_styled(
+    pub fn draw_text(
         &mut self,
         x: usize,
         y: usize,
-        c: u8,
+        text: &str,
         fg: u32,
         bg: u32,
-        transparent_bg: bool,
+        transparent: bool,
+    ) {
+        self.draw_text_styled(
+            x,
+            y,
+            text,
+            fg,
+            bg,
+            transparent,
+            self.width,
+            crate::drivers::font::FontWeight::Regular,
+        );
+    }
+
+    pub fn draw_text_bold(
+        &mut self,
+        x: usize,
+        y: usize,
+        text: &str,
+        fg: u32,
+        bg: u32,
+        transparent: bool,
+    ) {
+        self.draw_text_styled(
+            x,
+            y,
+            text,
+            fg,
+            bg,
+            transparent,
+            self.width,
+            crate::drivers::font::FontWeight::Bold,
+        );
+    }
+
+    pub fn draw_text_styled(
+        &mut self,
+        x: usize,
+        y: usize,
+        text: &str,
+        fg: u32,
+        bg: u32,
+        transparent: bool,
+        right: usize,
         weight: crate::drivers::font::FontWeight,
     ) {
-        if !self.is_valid() || x >= self.width || y >= self.height || x + 8 > self.width || y + 16 > self.height {
+        use crate::drivers::font::{
+            self,
+            inter::{Glyph, SUBPIXELS},
+        };
+        let right = right.min(self.width);
+        if !self.is_valid() || x >= right || y >= self.height {
             return;
         }
-
-        let face = crate::drivers::font::get_active_font();
-        match face {
-            crate::drivers::font::FontFace::Inter => {
-                for row in 0..16 {
-                    let py = y + row;
-                    let offset = py * self.stride + x;
-                    for col in 0..8 {
-                        let a = crate::drivers::font::get_glyph_alpha(c, row, col, weight);
-                        if a > 0 {
-                            unsafe {
-                                let dst = if transparent_bg { *self.pixels.add(offset + col) } else { bg };
-                                *self.pixels.add(offset + col) = crate::drivers::font::blend_alpha(fg, dst, a);
-                            }
-                        } else if !transparent_bg {
-                            unsafe { *self.pixels.add(offset + col) = bg; }
+        let face = font::desktop_face(weight);
+        let height = if face.is_some() {
+            font::DESKTOP_HEIGHT
+        } else {
+            font::FONT_HEIGHT
+        };
+        if !transparent {
+            let width = font::text_width(text, weight).min(right - x);
+            self.fill_rect(Rect::new(x as i32, y as i32, width, height), bg);
+        }
+        let mut pen = x * SUBPIXELS;
+        for c in text.chars().take_while(|&c| c != '\n') {
+            let byte = u8::try_from(u32::from(c)).unwrap_or(b'?');
+            if let Some(face) = face {
+                let glyph = face.glyph(byte);
+                if pen + glyph.advance > right * SUBPIXELS {
+                    break;
+                }
+                let left = ((pen + SUBPIXELS / 2) / SUBPIXELS) as isize;
+                for (row, coverage) in glyph.coverage.iter().take(self.height - y).enumerate() {
+                    for (column, &alpha) in coverage.iter().enumerate() {
+                        let px = left + Glyph::x_offset(column);
+                        if alpha == 0 || px < x as isize || px >= right as isize {
+                            continue;
                         }
+                        let px = px as usize;
+                        let py = y + row;
+                        self.set_pixel(
+                            px,
+                            py,
+                            font::blend_alpha(fg, self.get_pixel(px, py), alpha),
+                        );
                     }
                 }
-            }
-            crate::drivers::font::FontFace::ClassicVga => {
-                let glyph = crate::drivers::font8x16::FONT8X16[c as usize];
-                for row in 0..16 {
-                    let bits = glyph[row];
-                    let py = y + row;
-                    let offset = py * self.stride + x;
-                    for col in 0..8 {
-                        let is_fg = (bits & (0x80 >> col)) != 0;
-                        if is_fg {
-                            unsafe { *self.pixels.add(offset + col) = fg; }
-                        } else if !transparent_bg {
-                            unsafe { *self.pixels.add(offset + col) = bg; }
+                pen += glyph.advance;
+            } else {
+                let left = pen / SUBPIXELS;
+                if left + font::FONT_WIDTH > right {
+                    break;
+                }
+                for row in 0..font::FONT_HEIGHT.min(self.height - y) {
+                    for column in 0..font::FONT_WIDTH {
+                        let alpha = font::get_glyph_alpha(byte, row, column, weight);
+                        if alpha == 0 {
+                            continue;
                         }
+                        let (px, py) = (left + column, y + row);
+                        self.set_pixel(
+                            px,
+                            py,
+                            font::blend_alpha(fg, self.get_pixel(px, py), alpha),
+                        );
                     }
                 }
+                pen += font::FONT_WIDTH * SUBPIXELS;
             }
         }
     }
 
-    /// Draw a text string onto the surface
-    pub fn draw_text(&mut self, mut x: usize, y: usize, text: &str, fg: u32, bg: u32, transparent_bg: bool) {
-        if !self.is_valid() || y >= self.height || y + 16 > self.height {
-            return;
-        }
-        for b in text.bytes() {
-            if b == b'\n' {
-                break;
-            }
-            if x >= self.width || x + 8 > self.width {
-                break;
-            }
-            self.draw_char(x, y, b, fg, bg, transparent_bg);
-            x += 8;
-        }
-    }
-
-    /// Draw a bold text string onto the surface
-    pub fn draw_text_bold(&mut self, mut x: usize, y: usize, text: &str, fg: u32, bg: u32, transparent_bg: bool) {
-        if !self.is_valid() || y >= self.height || y + 16 > self.height {
-            return;
-        }
-        for b in text.bytes() {
-            if b == b'\n' {
-                break;
-            }
-            if x >= self.width || x + 8 > self.width {
-                break;
-            }
-            self.draw_char_styled(x, y, b, fg, bg, transparent_bg, crate::drivers::font::FontWeight::Bold);
-            x += 8;
-        }
-    }
-
-    /// Blit a rectangular region from src to this surface with bounds clipping
+    /// Blit a region, with optional alpha blending.
     pub fn blit(&mut self, src: &Surface, src_rect: Rect, dst_x: i32, dst_y: i32, alpha: bool) {
         if !self.is_valid() || !src.is_valid() || src_rect.w == 0 || src_rect.h == 0 {
             return;
@@ -407,8 +437,16 @@ impl Surface {
         let actual_w = d_x2 - d_x1;
         let actual_h = d_y2 - d_y1;
 
-        let src_start_x = if dst_x < 0 { s_x + (-dst_x as usize) } else { s_x };
-        let src_start_y = if dst_y < 0 { s_y + (-dst_y as usize) } else { s_y };
+        let src_start_x = if dst_x < 0 {
+            s_x + (-dst_x as usize)
+        } else {
+            s_x
+        };
+        let src_start_y = if dst_y < 0 {
+            s_y + (-dst_y as usize)
+        } else {
+            s_y
+        };
 
         unsafe {
             for row in 0..actual_h {

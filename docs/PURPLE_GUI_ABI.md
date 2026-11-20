@@ -24,15 +24,22 @@ Use the x86-64 `syscall` instruction. The number is in RAX, the first three argu
 | 0x1101 | None | Address of the immutable 64-byte startup record |
 | 0x1102 | NUL-terminated UTF-8 title, width, height | New task-owned window handle |
 | 0x1103 | Window handle | Close an owned window |
-| 0x1104 | Window handle, pixels, byte count | Copy one complete XRGB8888 client frame |
+| 0x1104 | Window handle, pixels, byte count | Copy one complete XRGB8888 frame; ARGB8888 when glass mode is enabled |
 | 0x1105 | Window handle, writable event address | 1 for one event, 0 for an empty queue |
 | 0x1106 | Window handle | Width in high 32 bits and height in low 32 bits |
 | 0x1107 | UTF-8 input address, length | Write up to 256 bytes to serial with Console permission |
 | 0x1108 | Nonzero byte count | Map zeroed, writable and nonexecutable memory |
 | 0x1109 | Mapping base | Free the entire mapping at that exact base |
+| 0x110c | Window handle, enabled (0 or 1) | Enable or disable live backdrop glass for an owned window |
+
+Call `0x110a` is available to applications with the Shell capability (bit `0x04`). It accepts a command pointer, its byte length (up to 240 printable ASCII bytes), and a pointer to a writable 4096-byte output buffer. It returns the number of captured bytes or a negative errno. The kernel resolves each command through the authenticated command database and dispatches supported AegisShell builtins. The GUI shell supports help, navigation, text file reads, echo, and basic system status. The kernel supports up to four signed pipeline stages with supported stream commands. Output redirection with `>` and `>>` can replace or append to regular files in `/tmp/`. The kernel rejects input redirection, command chaining, background execution, and raw device reads.
+
+Call `0x110b` takes a writable buffer pointer and its capacity, and returns the byte length of the current Shell prompt. It requires the Shell capability. Use a 96-byte buffer and refresh after each command to reflect changes to the working directory.
 
 Calls 24, 39, 60 and 231 provide yield, process ID and termination. The startup record is eight little-endian u64 fields in header order and points to read-only resource and metadata bytes. A zero pointer and length indicate an empty section. Heap mappings round up to a page; at most 32 regions and 32 MiB are allowed per process. Mapped windows are kernel surfaces. The pixel source remains user-owned; the compositor copies it before returning.
 
 The event record is four little-endian 32-bit words. The fields are kind, x, y and detail. Pointer events report signed client-relative x and y and the PS/2 button mask in detail. Key events place a cooked keyboard byte in x. Focus uses x=1 for gain and x=0 for loss. Resize uses width in x and height in y; query the current window size before submitting the next frame. The close request asks the app to close its window or exit, and has priority over queued input. Overflow indicates that older input was dropped. Motion with an identical button state may be coalesced.
 
-ABI v1 enables the GUI and optional Console capabilities for system-installed clients. It has no user-profile installation, filesystem or network capability, clipboard, IME, accessibility service, guest GPU API, or toolkit. Use the resource section for bundled assets and software-render content into the pixel buffer.
+ABI v1 enables the GUI and optional Console and Shell capabilities for system-installed clients. It has no user-profile installation, filesystem or network capability, clipboard, IME, accessibility service, guest GPU API, or toolkit. Use the resource section for bundled assets and software-render content into the pixel buffer.
+
+Native windows are opaque by default. A client can call `0x110c` before its first presentation to enable live acrylic: the compositor blurs and tints the scene below the client area, then alpha-composites an ARGB8888 frame. Transparent client pixels reveal the glass; fully opaque pixels retain normal app rendering. The C helper is `purple_gui_set_glass`.

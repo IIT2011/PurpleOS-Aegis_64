@@ -1,4 +1,6 @@
-use crate::arch::x86_64::boot::{MultibootInfo, MultibootMmapEntry, MULTIBOOT_INFO_MEM_MAP, MULTIBOOT_MEMORY_AVAILABLE};
+use crate::arch::x86_64::boot::{
+    MultibootInfo, MultibootMmapEntry, MULTIBOOT_INFO_MEM_MAP, MULTIBOOT_MEMORY_AVAILABLE,
+};
 use crate::sync::Spinlock;
 
 pub const PAGE_SIZE: usize = 4096;

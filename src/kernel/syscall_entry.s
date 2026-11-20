@@ -31,6 +31,15 @@ syscall_entry_asm:
     pushq %r14
     pushq %r15
 
+    /* Preserve user argument and scratch registers across the Rust ABI call.
+     * The user syscall ABI clobbers RAX, RCX, and R11 only. */
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %r8
+    pushq %r9
+    pushq %r10
+
     /* Call Rust syscall_dispatch(num, a1, a2, a3, a4, a5, a6) */
     /* Incoming: rax=num, rdi=a1, rsi=a2, rdx=a3, r10=a4, r8=a5, r9=a6 */
     /* System V AMD64 call convention: rdi, rsi, rdx, rcx, r8, r9, 7th arg on stack */
@@ -45,6 +54,13 @@ syscall_entry_asm:
     call syscall_dispatch
 
     addq $8, %rsp               /* Clean up 7th arg on stack */
+
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdx
+    popq %rsi
+    popq %rdi
 
     popq %r15
     popq %r14

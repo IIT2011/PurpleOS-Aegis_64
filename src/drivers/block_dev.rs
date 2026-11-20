@@ -6,11 +6,11 @@ pub const BLOCK_DEV_ERR_BOUNDS: i32 = -2;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum StorageCategory {
-    Ssd,   // /ssd/ssd1, /ssd/ssd2... (NVMe, SATA SSD)
-    Hdd,   // /hdd/hdd1, /hdd/hdd2... (ATA/IDE, SATA HDD)
-    Usb,   // /usb/usb1, /usb/usb2... (USB 3.x flash drives)
-    Sdxc,  // /sdxc/card1... (SDXC high-capacity cards)
-    Sdhc,  // /sdhc/card1... (SDHC standard cards)
+    Ssd,  // /ssd/ssd1, /ssd/ssd2... (NVMe, SATA SSD)
+    Hdd,  // /hdd/hdd1, /hdd/hdd2... (ATA/IDE, SATA HDD)
+    Usb,  // /usb/usb1, /usb/usb2... (USB 3.x flash drives)
+    Sdxc, // /sdxc/card1... (SDXC high-capacity cards)
+    Sdhc, // /sdhc/card1... (SDHC standard cards)
 }
 
 pub trait BlockDevice: Send + Sync {
@@ -40,7 +40,10 @@ pub struct BlockDevRegistry {
 }
 
 pub static REGISTRY: Spinlock<BlockDevRegistry> = Spinlock::new(BlockDevRegistry {
-    devices: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+    devices: [
+        None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+        None,
+    ],
     canonical_paths: [[0; 32]; 16],
     canonical_lens: [0; 16],
     count: 0,
@@ -87,17 +90,11 @@ pub fn register(dev: &'static mut dyn BlockDevice) {
     if reg.count < reg.devices.len() {
         let idx = reg.count;
         let dname = dev.name().trim_matches(char::from(0)).trim();
-        if dname == "sata0" {
-            crate::drivers::serial::println("BlockDev: Registered 'sata0' [AHCI/SATA]");
-        } else if dname == "nvme0n1" {
-            crate::drivers::serial::println("BlockDev: Registered 'nvme0n1' [NVMe PCIe]");
-        } else {
-            crate::drivers::serial::print("BlockDev: Registered '");
-            crate::drivers::serial::print(dname);
-            crate::drivers::serial::print("', Blocks=");
-            crate::drivers::serial::print_u64(dev.total_blocks());
-            crate::drivers::serial::println("");
-        }
+        crate::drivers::serial::print("BlockDev: Registered '");
+        crate::drivers::serial::print(dname);
+        crate::drivers::serial::print("', Blocks=");
+        crate::drivers::serial::print_u64(dev.total_blocks());
+        crate::drivers::serial::println("");
 
         // Assign dedicated storage hierarchy path (/ssd/ssd1, /hdd/hdd1, /usb/usb1, ...)
         let (prefix, num) = match dev.category() {
@@ -134,6 +131,11 @@ pub fn register(dev: &'static mut dyn BlockDevice) {
         reg.devices[idx] = Some(dev);
         reg.count += 1;
     }
+}
+
+pub(crate) fn has_capacity() -> bool {
+    let reg = REGISTRY.lock();
+    reg.count < reg.devices.len()
 }
 
 pub fn count() -> usize {

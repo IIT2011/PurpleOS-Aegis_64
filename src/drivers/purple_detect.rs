@@ -1,6 +1,6 @@
-use crate::sync::Spinlock;
 use crate::drivers::serial;
 use crate::drivers::video;
+use crate::sync::Spinlock;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum DeviceCategory {
@@ -148,13 +148,76 @@ pub fn init() {
 
 pub fn scan_all() {
     // 1. Builtin ISA System Peripherals
-    register(DeviceCategory::Serial, "COM1", "National Semi", "16550A UART Serial", "ISA", 0x3F8, 4, DeviceState::Active);
-    register(DeviceCategory::Timer, "PIT", "Intel", "8254 Programmable Timer", "ISA", 0x40, 0, DeviceState::Active);
-    register(DeviceCategory::Input, "PS2KBD", "IBM/Standard", "PS/2 Keyboard Controller", "ISA", 0x60, 1, DeviceState::Active);
-    register(DeviceCategory::Input, "PS2MOU", "Synaptics", "PS/2 Auxiliary Mouse", "ISA", 0x60, 12, DeviceState::Active);
-    register(DeviceCategory::Interrupt, "LAPIC", "Intel/AMD", "Local APIC Controller", "MMIO", 0xFEE00000, 0, DeviceState::Active);
-    register(DeviceCategory::Storage, "ATA_PRI", "Standard", "IDE Primary Controller", "ISA", 0x1F0, 14, DeviceState::Active);
-    register(DeviceCategory::Storage, "ATA_SEC", "Standard", "IDE Secondary Controller", "ISA", 0x170, 15, DeviceState::Active);
+    register(
+        DeviceCategory::Serial,
+        "COM1",
+        "National Semi",
+        "16550A UART Serial",
+        "ISA",
+        0x3F8,
+        4,
+        DeviceState::Active,
+    );
+    register(
+        DeviceCategory::Timer,
+        "PIT",
+        "Intel",
+        "8254 Programmable Timer",
+        "ISA",
+        0x40,
+        0,
+        DeviceState::Active,
+    );
+    register(
+        DeviceCategory::Input,
+        "PS2KBD",
+        "IBM/Standard",
+        "PS/2 Keyboard Controller",
+        "ISA",
+        0x60,
+        1,
+        DeviceState::Active,
+    );
+    register(
+        DeviceCategory::Input,
+        "PS2MOU",
+        "Synaptics",
+        "PS/2 Auxiliary Mouse",
+        "ISA",
+        0x60,
+        12,
+        DeviceState::Active,
+    );
+    register(
+        DeviceCategory::Interrupt,
+        "LAPIC",
+        "Intel/AMD",
+        "Local APIC Controller",
+        "MMIO",
+        0xFEE00000,
+        0,
+        DeviceState::Active,
+    );
+    register(
+        DeviceCategory::Storage,
+        "ATA_PRI",
+        "Standard",
+        "IDE Primary Controller",
+        "ISA",
+        0x1F0,
+        14,
+        DeviceState::Active,
+    );
+    register(
+        DeviceCategory::Storage,
+        "ATA_SEC",
+        "Standard",
+        "IDE Secondary Controller",
+        "ISA",
+        0x170,
+        15,
+        DeviceState::Active,
+    );
 
     // 2. Discover and Register PCI Devices
     crate::drivers::pci::for_each_device(|pdev| {
@@ -195,8 +258,18 @@ pub fn scan_all() {
             },
         };
 
-        let bdf_addr = ((pdev.bus as u64) << 16) | ((pdev.slot as u64) << 11) | ((pdev.func as u64) << 8);
-        register(cat, "PCI_DEV", vendor_name, model_name, "PCI", bdf_addr, pdev.irq_line, DeviceState::Active);
+        let bdf_addr =
+            ((pdev.bus as u64) << 16) | ((pdev.slot as u64) << 11) | ((pdev.func as u64) << 8);
+        register(
+            cat,
+            "PCI_DEV",
+            vendor_name,
+            model_name,
+            "PCI",
+            bdf_addr,
+            pdev.irq_line,
+            DeviceState::Active,
+        );
     });
 
     // 3. Discover and Register Filesystem Drivers and VFS Engines
@@ -210,11 +283,16 @@ pub fn scan_all() {
 
 pub fn print_table() {
     let reg = REGISTRY.lock();
-    let header = "\n=== PurpleDetect Hardware & Removable Device Registry ===\n  Discovered Devices: ";
+    let header =
+        "\n=== PurpleDetect Hardware & Removable Device Registry ===\n  Discovered Devices: ";
     serial::print(header);
     serial::print_u64(reg.count as u64);
-    serial::println("\n\n  ID   NAME          CATEGORY    STATE       BUS    ADDRESS     IRQ  VENDOR / MODEL");
-    serial::println("  --------------------------------------------------------------------------------");
+    serial::println(
+        "\n\n  ID   NAME          CATEGORY    STATE       BUS    ADDRESS     IRQ  VENDOR / MODEL",
+    );
+    serial::println(
+        "  --------------------------------------------------------------------------------",
+    );
 
     if video::is_available() {
         video::puts(header);
@@ -230,9 +308,15 @@ pub fn print_table() {
         } else {
             serial::print("  ");
         }
-        let name_str = core::str::from_utf8(&d.name).unwrap_or("").trim_matches(char::from(0));
+        let name_str = core::str::from_utf8(&d.name)
+            .unwrap_or("")
+            .trim_matches(char::from(0));
         serial::print(name_str);
-        let pad = if name_str.len() < 14 { 14 - name_str.len() } else { 2 };
+        let pad = if name_str.len() < 14 {
+            14 - name_str.len()
+        } else {
+            2
+        };
         for _ in 0..pad {
             serial::print(" ");
         }
@@ -246,7 +330,9 @@ pub fn print_table() {
         for _ in st_str.len()..12 {
             serial::print(" ");
         }
-        let bus_str = core::str::from_utf8(&d.bus).unwrap_or("").trim_matches(char::from(0));
+        let bus_str = core::str::from_utf8(&d.bus)
+            .unwrap_or("")
+            .trim_matches(char::from(0));
         serial::print(bus_str);
         for _ in bus_str.len()..7 {
             serial::print(" ");
@@ -256,13 +342,19 @@ pub fn print_table() {
         serial::print("  ");
         serial::print_u64(d.irq as u64);
         serial::print("  ");
-        let ven_str = core::str::from_utf8(&d.vendor).unwrap_or("").trim_matches(char::from(0));
-        let mod_str = core::str::from_utf8(&d.model).unwrap_or("").trim_matches(char::from(0));
+        let ven_str = core::str::from_utf8(&d.vendor)
+            .unwrap_or("")
+            .trim_matches(char::from(0));
+        let mod_str = core::str::from_utf8(&d.model)
+            .unwrap_or("")
+            .trim_matches(char::from(0));
         serial::print(ven_str);
         serial::print(" - ");
         serial::println(mod_str);
     }
-    serial::println("  --------------------------------------------------------------------------------\n");
+    serial::println(
+        "  --------------------------------------------------------------------------------\n",
+    );
 }
 
 pub fn get_device_count() -> usize {

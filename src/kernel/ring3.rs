@@ -6,8 +6,10 @@
 //! and per-CPU TSS rsp0 / GS base stack switching.
 
 use crate::drivers::serial;
-use crate::kernel::task::{spawn_user_program, TaskPriority, USER_CODE_BASE, USER_STACK_TOP, USER_STACK_PAGES};
-use crate::kernel::uaccess::{USER_SPACE_MIN, USER_SPACE_MAX};
+use crate::kernel::task::{
+    spawn_user_program, TaskPriority, USER_CODE_BASE, USER_STACK_PAGES, USER_STACK_TOP,
+};
+use crate::kernel::uaccess::{USER_SPACE_MAX, USER_SPACE_MIN};
 
 /// Ring 3 Full Feature Demonstration Userland Binary (124 bytes code + 2 embedded string constants)
 pub static RING3_DEMO_CODE: [u8; 1024] = {
@@ -15,59 +17,155 @@ pub static RING3_DEMO_CODE: [u8; 1024] = {
 
     // .text (124 bytes)
     // 0x00: movw %cs, %ax
-    buf[0] = 0x66; buf[1] = 0x8c; buf[2] = 0xc8;
+    buf[0] = 0x66;
+    buf[1] = 0x8c;
+    buf[2] = 0xc8;
     // 0x03: andw $3, %ax
-    buf[3] = 0x66; buf[4] = 0x83; buf[5] = 0xe0; buf[6] = 0x03;
+    buf[3] = 0x66;
+    buf[4] = 0x83;
+    buf[5] = 0xe0;
+    buf[6] = 0x03;
     // 0x07: cmpw $3, %ax
-    buf[7] = 0x66; buf[8] = 0x83; buf[9] = 0xf8; buf[10] = 0x03;
+    buf[7] = 0x66;
+    buf[8] = 0x83;
+    buf[9] = 0xf8;
+    buf[10] = 0x03;
     // 0x0b: je +2 (to 0x0f)
-    buf[11] = 0x74; buf[12] = 0x02;
+    buf[11] = 0x74;
+    buf[12] = 0x02;
     // 0x0d: ud2 (fault if not CPL=3)
-    buf[13] = 0x0f; buf[14] = 0x0b;
+    buf[13] = 0x0f;
+    buf[14] = 0x0b;
     // 0x0f: movq $20, %rax (SYS_PRINT)
-    buf[15] = 0x48; buf[16] = 0xc7; buf[17] = 0xc0; buf[18] = 0x14; buf[19] = 0x00; buf[20] = 0x00; buf[21] = 0x00;
+    buf[15] = 0x48;
+    buf[16] = 0xc7;
+    buf[17] = 0xc0;
+    buf[18] = 0x14;
+    buf[19] = 0x00;
+    buf[20] = 0x00;
+    buf[21] = 0x00;
     // 0x16: movabsq $0x00400200, %rdi (pointer to msg1)
-    buf[22] = 0x48; buf[23] = 0xbf; buf[24] = 0x00; buf[25] = 0x02; buf[26] = 0x40; buf[27] = 0x00; buf[28] = 0x00; buf[29] = 0x00; buf[30] = 0x00; buf[31] = 0x00;
+    buf[22] = 0x48;
+    buf[23] = 0xbf;
+    buf[24] = 0x00;
+    buf[25] = 0x02;
+    buf[26] = 0x40;
+    buf[27] = 0x00;
+    buf[28] = 0x00;
+    buf[29] = 0x00;
+    buf[30] = 0x00;
+    buf[31] = 0x00;
     // 0x20: movq $62, %rsi (len of msg1)
-    buf[32] = 0x48; buf[33] = 0xc7; buf[34] = 0xc6; buf[35] = 0x3e; buf[36] = 0x00; buf[37] = 0x00; buf[38] = 0x00;
+    buf[32] = 0x48;
+    buf[33] = 0xc7;
+    buf[34] = 0xc6;
+    buf[35] = 0x3e;
+    buf[36] = 0x00;
+    buf[37] = 0x00;
+    buf[38] = 0x00;
     // 0x27: syscall
-    buf[39] = 0x0f; buf[40] = 0x05;
+    buf[39] = 0x0f;
+    buf[40] = 0x05;
     // 0x29: movabsq $0x12345678, %rbx
-    buf[41] = 0x48; buf[42] = 0xbb; buf[43] = 0x78; buf[44] = 0x56; buf[45] = 0x34; buf[46] = 0x12; buf[47] = 0x00; buf[48] = 0x00; buf[49] = 0x00; buf[50] = 0x00;
+    buf[41] = 0x48;
+    buf[42] = 0xbb;
+    buf[43] = 0x78;
+    buf[44] = 0x56;
+    buf[45] = 0x34;
+    buf[46] = 0x12;
+    buf[47] = 0x00;
+    buf[48] = 0x00;
+    buf[49] = 0x00;
+    buf[50] = 0x00;
     // 0x33: pushq %rbx (test user stack)
     buf[51] = 0x53;
     // 0x34: popq %rdx
     buf[52] = 0x5a;
     // 0x35: cmpq %rbx, %rdx
-    buf[53] = 0x48; buf[54] = 0x39; buf[55] = 0xda;
+    buf[53] = 0x48;
+    buf[54] = 0x39;
+    buf[55] = 0xda;
     // 0x38: je +2 (to 0x3c)
-    buf[56] = 0x74; buf[57] = 0x02;
+    buf[56] = 0x74;
+    buf[57] = 0x02;
     // 0x3a: ud2 (fault if stack mismatch)
-    buf[58] = 0x0f; buf[59] = 0x0b;
+    buf[58] = 0x0f;
+    buf[59] = 0x0b;
     // 0x3c: movq $1, %rax (SYS_WRITE)
-    buf[60] = 0x48; buf[61] = 0xc7; buf[62] = 0xc0; buf[63] = 0x01; buf[64] = 0x00; buf[65] = 0x00; buf[66] = 0x00;
+    buf[60] = 0x48;
+    buf[61] = 0xc7;
+    buf[62] = 0xc0;
+    buf[63] = 0x01;
+    buf[64] = 0x00;
+    buf[65] = 0x00;
+    buf[66] = 0x00;
     // 0x43: movq $1, %rdi (stdout fd)
-    buf[67] = 0x48; buf[68] = 0xc7; buf[69] = 0xc7; buf[70] = 0x01; buf[71] = 0x00; buf[72] = 0x00; buf[73] = 0x00;
+    buf[67] = 0x48;
+    buf[68] = 0xc7;
+    buf[69] = 0xc7;
+    buf[70] = 0x01;
+    buf[71] = 0x00;
+    buf[72] = 0x00;
+    buf[73] = 0x00;
     // 0x4a: movabsq $0x00400300, %rsi (pointer to msg2)
-    buf[74] = 0x48; buf[75] = 0xbe; buf[76] = 0x00; buf[77] = 0x03; buf[78] = 0x40; buf[79] = 0x00; buf[80] = 0x00; buf[81] = 0x00; buf[82] = 0x00; buf[83] = 0x00;
+    buf[74] = 0x48;
+    buf[75] = 0xbe;
+    buf[76] = 0x00;
+    buf[77] = 0x03;
+    buf[78] = 0x40;
+    buf[79] = 0x00;
+    buf[80] = 0x00;
+    buf[81] = 0x00;
+    buf[82] = 0x00;
+    buf[83] = 0x00;
     // 0x54: movq $59, %rdx (len of msg2: 59 bytes)
-    buf[84] = 0x48; buf[85] = 0xc7; buf[86] = 0xc2; buf[87] = 0x3b; buf[88] = 0x00; buf[89] = 0x00; buf[90] = 0x00;
+    buf[84] = 0x48;
+    buf[85] = 0xc7;
+    buf[86] = 0xc2;
+    buf[87] = 0x3b;
+    buf[88] = 0x00;
+    buf[89] = 0x00;
+    buf[90] = 0x00;
     // 0x5b: syscall
-    buf[91] = 0x0f; buf[92] = 0x05;
+    buf[91] = 0x0f;
+    buf[92] = 0x05;
     // 0x5d: movq $39, %rax (SYS_GETPID)
-    buf[93] = 0x48; buf[94] = 0xc7; buf[95] = 0xc0; buf[96] = 0x27; buf[97] = 0x00; buf[98] = 0x00; buf[99] = 0x00;
+    buf[93] = 0x48;
+    buf[94] = 0xc7;
+    buf[95] = 0xc0;
+    buf[96] = 0x27;
+    buf[97] = 0x00;
+    buf[98] = 0x00;
+    buf[99] = 0x00;
     // 0x64: syscall
-    buf[100] = 0x0f; buf[101] = 0x05;
+    buf[100] = 0x0f;
+    buf[101] = 0x05;
     // 0x66: movq $24, %rax (SYS_SCHED_YIELD)
-    buf[102] = 0x48; buf[103] = 0xc7; buf[104] = 0xc0; buf[105] = 0x18; buf[106] = 0x00; buf[107] = 0x00; buf[108] = 0x00;
+    buf[102] = 0x48;
+    buf[103] = 0xc7;
+    buf[104] = 0xc0;
+    buf[105] = 0x18;
+    buf[106] = 0x00;
+    buf[107] = 0x00;
+    buf[108] = 0x00;
     // 0x6d: syscall
-    buf[109] = 0x0f; buf[110] = 0x05;
+    buf[109] = 0x0f;
+    buf[110] = 0x05;
     // 0x6f: movq $60, %rax (SYS_EXIT)
-    buf[111] = 0x48; buf[112] = 0xc7; buf[113] = 0xc0; buf[114] = 0x3c; buf[115] = 0x00; buf[116] = 0x00; buf[117] = 0x00;
+    buf[111] = 0x48;
+    buf[112] = 0xc7;
+    buf[113] = 0xc0;
+    buf[114] = 0x3c;
+    buf[115] = 0x00;
+    buf[116] = 0x00;
+    buf[117] = 0x00;
     // 0x76: xorq %rdi, %rdi (exit status 0)
-    buf[118] = 0x48; buf[119] = 0x31; buf[120] = 0xff;
+    buf[118] = 0x48;
+    buf[119] = 0x31;
+    buf[120] = 0xff;
     // 0x79: syscall
-    buf[121] = 0x0f; buf[122] = 0x05;
+    buf[121] = 0x0f;
+    buf[122] = 0x05;
     // 0x7b: hlt
     buf[123] = 0xf4;
 
@@ -92,15 +190,16 @@ pub static RING3_DEMO_CODE: [u8; 1024] = {
 
 /// Ring 3 Deliberate Fault 1: Division By Zero (#DE, vector 0)
 pub static RING3_FAULT_DIV0: [u8; 13] = [
-    0x48, 0x31, 0xc9,                   // xorq %rcx, %rcx
+    0x48, 0x31, 0xc9, // xorq %rcx, %rcx
     0x48, 0xc7, 0xc0, 0x64, 0x00, 0x00, 0x00, // movq $100, %rax
-    0x48, 0xf7, 0xf1                    // divq %rcx (#DE)
+    0x48, 0xf7, 0xf1, // divq %rcx (#DE)
 ];
 
 /// Ring 3 Deliberate Fault 2: Kernel Memory Access / Protection Violation (#PF, vector 14)
 pub static RING3_FAULT_PAGEFAULT: [u8; 13] = [
-    0x48, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xff, 0xff, // movabsq $0xffff800000000000, %rax
-    0x48, 0x8b, 0x18                                             // movq (%rax), %rbx (#PF)
+    0x48, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xff,
+    0xff, // movabsq $0xffff800000000000, %rax
+    0x48, 0x8b, 0x18, // movq (%rax), %rbx (#PF)
 ];
 
 /// Displays comprehensive Ring 3 architecture, segment selectors, MSRs, and memory bounds.
@@ -119,7 +218,9 @@ pub fn print_info() {
     serial::println("  TSS Selector:         0x28 (Per-CPU 64-bit Task State Segment)");
     serial::println("");
     serial::println("Hardware System Call Registers (MSR):");
-    serial::println("  MSR_STAR (0xC0000081): 0x0010000800000000 (Target CS/SS for SYSCALL/SYSRET)");
+    serial::println(
+        "  MSR_STAR (0xC0000081): 0x0010000800000000 (Target CS/SS for SYSCALL/SYSRET)",
+    );
     serial::println("  MSR_LSTAR (0xC0000082): syscall_entry_asm (Hardware SYSCALL Entry Point)");
     serial::println("  MSR_SFMASK (0xC0000084): 0x0000000000000200 (Clears IF flag on entry)");
     serial::println("  MSR_KERNEL_GS_BASE:    Per-CPU dedicated kernel syscall stack anchor");
@@ -171,7 +272,9 @@ pub fn run_fault_div0() -> Option<u32> {
 
 /// Spawns a Ring 3 task that deliberately accesses supervisor kernel memory (#PF).
 pub fn run_fault_pagefault() -> Option<u32> {
-    serial::println("[RING3] Spawning Ring 3 Process to Trigger Fault: Kernel Memory Access (#PF)...");
+    serial::println(
+        "[RING3] Spawning Ring 3 Process to Trigger Fault: Kernel Memory Access (#PF)...",
+    );
     let tid = spawn_user_program("FaultPage", &RING3_FAULT_PAGEFAULT, TaskPriority::Normal)?;
     serial::print("[RING3] Fault process spawned with TID ");
     serial::print_u64(tid as u64);

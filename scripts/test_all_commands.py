@@ -127,7 +127,7 @@ def main():
         ("remount ro", "PurpleFS volume remounted READ-ONLY"),
 
         # Group 6: Storage & Filesystem Status
-        ("disks", "ATA Storage Devices & GPT Partition Status:"),
+        ("disks", "Storage Devices & GPT Partition Status:"),
         ("disk status", "sectors"),
         ("disk list", "sectors"),
         ("df", "Filesystem Status (PurpleFS v3 / v2):"),
@@ -180,7 +180,7 @@ def main():
         ("native test", "Native Syscall Test Summary: 10/10 Subsystem Categories PASSED"),
 
         # Group 11: Natural Grammar Aliases
-        ("show disks", "ATA Storage Devices & GPT Partition Status:"),
+        ("show disks", "Storage Devices & GPT Partition Status:"),
         ("show filesystem", "Filesystem Status (PurpleFS v3 / v2):"),
         ("show memory", "Memory Accounting & Physical Memory Status (PMM):"),
         ("show cpu", "CPU Information:"),

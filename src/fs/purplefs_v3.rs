@@ -22,7 +22,11 @@ impl<'a> PurpleFsV3<'a> {
         Err("PurpleFS v3 has no implemented mount format")
     }
 
-    pub fn read_fs_block(&mut self, block_idx: u64, buf: &mut [u8; 4096]) -> Result<(), &'static str> {
+    pub fn read_fs_block(
+        &mut self,
+        block_idx: u64,
+        buf: &mut [u8; 4096],
+    ) -> Result<(), &'static str> {
         let lba = self.start_lba + block_idx * 8;
         if self.dev.read_blocks(lba, 8, buf) == 0 {
             Ok(())
@@ -32,7 +36,11 @@ impl<'a> PurpleFsV3<'a> {
     }
 
     pub fn lookup_path(&mut self, path: &str) -> Option<u64> {
-        let filename = path.trim_start_matches('/').rsplit('/').next().unwrap_or(path);
+        let filename = path
+            .trim_start_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or(path);
         let mut dir_block = [0u8; 4096];
         if self.read_fs_block(10, &mut dir_block).is_err() {
             return None;
@@ -41,7 +49,8 @@ impl<'a> PurpleFsV3<'a> {
         let mut off = 0;
         while off + 32 <= 4096 {
             let ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
-            let rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
+            let rec_len =
+                u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
             let name_len = dir_block[off + 6] as usize;
 
             if ino != 0 && name_len > 0 && off + 8 + name_len <= 4096 {
@@ -73,9 +82,8 @@ impl<'a> PurpleFsV3<'a> {
             return 0;
         }
 
-        let size_bytes = u64::from_le_bytes(
-            inode_block[ino_off + 8..ino_off + 16].try_into().unwrap(),
-        ) as usize;
+        let size_bytes =
+            u64::from_le_bytes(inode_block[ino_off + 8..ino_off + 16].try_into().unwrap()) as usize;
 
         let mut bytes_copied = 0;
         let mut block_buf = [0u8; 4096];
@@ -86,7 +94,8 @@ impl<'a> PurpleFsV3<'a> {
             }
 
             let ptr_off = ino_off + 0x2C + i * 4;
-            let data_blk = u32::from_le_bytes(inode_block[ptr_off..ptr_off + 4].try_into().unwrap());
+            let data_blk =
+                u32::from_le_bytes(inode_block[ptr_off..ptr_off + 4].try_into().unwrap());
             if data_blk == 0 {
                 break;
             }
@@ -94,7 +103,8 @@ impl<'a> PurpleFsV3<'a> {
             if self.read_fs_block(data_blk as u64, &mut block_buf).is_ok() {
                 let remaining = size_bytes - bytes_copied;
                 let chunk_len = remaining.min(4096).min(buf.len() - bytes_copied);
-                buf[bytes_copied..bytes_copied + chunk_len].copy_from_slice(&block_buf[0..chunk_len]);
+                buf[bytes_copied..bytes_copied + chunk_len]
+                    .copy_from_slice(&block_buf[0..chunk_len]);
                 bytes_copied += chunk_len;
             } else {
                 break;

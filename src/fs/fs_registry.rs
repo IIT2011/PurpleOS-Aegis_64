@@ -12,8 +12,8 @@
 use crate::drivers::block_dev::BlockDevice;
 use crate::drivers::purple_detect::{self, DeviceCategory, DeviceState};
 use crate::drivers::serial;
-use crate::fs::fat::FatDriver;
 use crate::fs::ext2::ExtDriver;
+use crate::fs::fat::FatDriver;
 use crate::fs::iso9660::Iso9660Driver;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -180,13 +180,19 @@ pub const FS_DRIVERS: &[FsDriverEntry] = &[
 ];
 
 pub fn init() {
-    serial::println("FS: Filesystem driver registry initialized; unsupported formats remain inactive");
+    serial::println(
+        "FS: Filesystem driver registry initialized; unsupported formats remain inactive",
+    );
 }
 
 /// Link all registered filesystem drivers directly to the PurpleDetect device hierarchy
 pub fn register_with_purple_detect() {
     for drv in FS_DRIVERS.iter() {
-        let state = if drv.active { DeviceState::Active } else { DeviceState::Unsupported };
+        let state = if drv.active {
+            DeviceState::Active
+        } else {
+            DeviceState::Unsupported
+        };
         purple_detect::register(
             DeviceCategory::Filesystem,
             drv.name,
@@ -240,7 +246,9 @@ pub fn probe_filesystem(dev: &mut dyn BlockDevice, start_lba: u64) -> Option<&'s
 /// Display a comprehensive table of all registered filesystem drivers
 pub fn print_driver_table() {
     serial::println("\n=== Purple OS Registered Filesystem Drivers (filesystems.apdrv) ===");
-    serial::println("  DRIVER          CATEGORY   VERSION  FEATURES                 VENDOR / DESCRIPTION");
+    serial::println(
+        "  DRIVER          CATEGORY   VERSION  FEATURES                 VENDOR / DESCRIPTION",
+    );
     serial::println("  -----------------------------------------------------------------------------------------");
 
     for drv in FS_DRIVERS.iter() {

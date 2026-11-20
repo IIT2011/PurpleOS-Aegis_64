@@ -1,6 +1,6 @@
+use super::font::{draw_char, FONT_HEIGHT, FONT_WIDTH};
 use crate::arch::x86_64::boot::{MultibootInfo, MULTIBOOT_INFO_FRAMEBUFFER};
 use crate::sync::Spinlock;
-use super::font::{draw_char, FONT_HEIGHT, FONT_WIDTH};
 
 pub const COLOR_PURPLE_BG: u32 = 0x1A0933;
 pub const COLOR_PURPLE_BAR: u32 = 0x2D1152;
@@ -80,7 +80,8 @@ pub fn init(mbi: Option<&MultibootInfo>) {
     }
 
     // Hardware GPU fallback: probe Bochs / Intel / VirtIO GPU directly
-    if let Some((fb_ptr, width, height, pitch, bpp)) = crate::drivers::gpu::init_hardware_display() {
+    if let Some((fb_ptr, width, height, pitch, bpp)) = crate::drivers::gpu::init_hardware_display()
+    {
         v.fb_ptr = fb_ptr;
         v.width = width;
         v.height = height;
@@ -162,7 +163,8 @@ fn scroll_up(v: &mut VideoState) {
 
     let max_rows = (v.height / FONT_HEIGHT).min(VIDEO_MAX_ROWS);
     if max_rows > 1 {
-        v.text_buf.copy_within(VIDEO_MAX_COLS..(max_rows * VIDEO_MAX_COLS), 0);
+        v.text_buf
+            .copy_within(VIDEO_MAX_COLS..(max_rows * VIDEO_MAX_COLS), 0);
         v.text_buf[(max_rows - 1) * VIDEO_MAX_COLS..max_rows * VIDEO_MAX_COLS].fill(0);
     }
 }
@@ -179,7 +181,8 @@ fn putc_inner(v: &mut VideoState, c: u8) {
         b'\r' => {
             v.cursor_col = 0;
         }
-        b'\x08' => { // Backspace
+        b'\x08' => {
+            // Backspace
             if v.cursor_col > 0 {
                 v.cursor_col -= 1;
                 let cr = v.cursor_row;
@@ -326,7 +329,14 @@ pub fn get_fb_info() -> Option<(usize, usize, usize, usize, u64)> {
     }
 }
 
-pub fn blit_rect(src: &[u32], dst_x: usize, dst_y: usize, w: usize, h: usize, src_pitch: usize) -> usize {
+pub fn blit_rect(
+    src: &[u32],
+    dst_x: usize,
+    dst_y: usize,
+    w: usize,
+    h: usize,
+    src_pitch: usize,
+) -> usize {
     let v = VIDEO.lock();
     if !v.available || v.fb_ptr.is_null() || w == 0 || h == 0 || src_pitch == 0 {
         return 0;
@@ -371,8 +381,16 @@ pub fn draw_line(mut x0: usize, mut y0: usize, x1: usize, y1: usize, color: u32)
     let width = v.width;
     let height = v.height;
 
-    let dx = if x1 >= x0 { (x1 - x0) as isize } else { -((x0 - x1) as isize) };
-    let dy = if y1 >= y0 { -((y1 - y0) as isize) } else { (y0 - y1) as isize };
+    let dx = if x1 >= x0 {
+        (x1 - x0) as isize
+    } else {
+        -((x0 - x1) as isize)
+    };
+    let dy = if y1 >= y0 {
+        -((y1 - y0) as isize)
+    } else {
+        (y0 - y1) as isize
+    };
     let sx: isize = if x0 < x1 { 1 } else { -1 };
     let sy: isize = if y0 < y1 { 1 } else { -1 };
     let mut err = dx + dy;

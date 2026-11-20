@@ -17,34 +17,34 @@ use crate::drivers::pci::find_device;
 use crate::sync::Spinlock;
 
 /* PCI Hardware IDs */
-pub const GPU_VENDOR_BOCHS: u16      = 0x1234;
-pub const GPU_DEV_BOCHS_VGA: u16     = 0x1111;
+pub const GPU_VENDOR_BOCHS: u16 = 0x1234;
+pub const GPU_DEV_BOCHS_VGA: u16 = 0x1111;
 
-pub const GPU_VENDOR_INTEL: u16      = 0x8086;
+pub const GPU_VENDOR_INTEL: u16 = 0x8086;
 pub const GPU_DEV_INTEL_KABYLAKE: u16 = 0x5912;
-pub const GPU_DEV_INTEL_SKYLAKE: u16  = 0x1912;
+pub const GPU_DEV_INTEL_SKYLAKE: u16 = 0x1912;
 pub const GPU_DEV_INTEL_COFFEELAKE: u16 = 0x3EA0;
 
-pub const GPU_VENDOR_VIRTIO: u16     = 0x1AF4;
-pub const GPU_DEV_VIRTIO_GPU: u16    = 0x1050;
+pub const GPU_VENDOR_VIRTIO: u16 = 0x1AF4;
+pub const GPU_DEV_VIRTIO_GPU: u16 = 0x1050;
 
-pub const GPU_VENDOR_VMWARE: u16     = 0x15AD;
-pub const GPU_DEV_VMWARE_SVGA2: u16  = 0x0405;
+pub const GPU_VENDOR_VMWARE: u16 = 0x15AD;
+pub const GPU_DEV_VMWARE_SVGA2: u16 = 0x0405;
 
 /* Bochs / QEMU VBE Dispi Register Offsets (Linux drivers/gpu/drm/tiny/bochs.c) */
 pub const VBE_DISPI_IOPORT_INDEX: u16 = 0x01CE;
-pub const VBE_DISPI_IOPORT_DATA: u16  = 0x01CF;
+pub const VBE_DISPI_IOPORT_DATA: u16 = 0x01CF;
 
-pub const VBE_DISPI_INDEX_ID: u16               = 0x0;
-pub const VBE_DISPI_INDEX_XRES: u16             = 0x1;
-pub const VBE_DISPI_INDEX_YRES: u16             = 0x2;
-pub const VBE_DISPI_INDEX_BPP: u16              = 0x3;
-pub const VBE_DISPI_INDEX_ENABLE: u16           = 0x4;
-pub const VBE_DISPI_INDEX_BANK: u16             = 0x5;
-pub const VBE_DISPI_INDEX_VIRT_WIDTH: u16       = 0x6;
-pub const VBE_DISPI_INDEX_VIRT_HEIGHT: u16      = 0x7;
-pub const VBE_DISPI_INDEX_X_OFFSET: u16         = 0x8;
-pub const VBE_DISPI_INDEX_Y_OFFSET: u16         = 0x9;
+pub const VBE_DISPI_INDEX_ID: u16 = 0x0;
+pub const VBE_DISPI_INDEX_XRES: u16 = 0x1;
+pub const VBE_DISPI_INDEX_YRES: u16 = 0x2;
+pub const VBE_DISPI_INDEX_BPP: u16 = 0x3;
+pub const VBE_DISPI_INDEX_ENABLE: u16 = 0x4;
+pub const VBE_DISPI_INDEX_BANK: u16 = 0x5;
+pub const VBE_DISPI_INDEX_VIRT_WIDTH: u16 = 0x6;
+pub const VBE_DISPI_INDEX_VIRT_HEIGHT: u16 = 0x7;
+pub const VBE_DISPI_INDEX_X_OFFSET: u16 = 0x8;
+pub const VBE_DISPI_INDEX_Y_OFFSET: u16 = 0x9;
 pub const VBE_DISPI_INDEX_VIDEO_MEMORY_64K: u16 = 0xA;
 
 /* VBE Dispi ID Magic */
@@ -56,26 +56,26 @@ pub const VBE_DISPI_ID4: u16 = 0xB0C4;
 pub const VBE_DISPI_ID5: u16 = 0xB0C5;
 
 /* VBE Dispi Enable Flags */
-pub const VBE_DISPI_DISABLED: u16    = 0x00;
-pub const VBE_DISPI_ENABLED: u16     = 0x01;
-pub const VBE_DISPI_GETCAPS: u16     = 0x02;
-pub const VBE_DISPI_8BIT_DAC: u16    = 0x20;
+pub const VBE_DISPI_DISABLED: u16 = 0x00;
+pub const VBE_DISPI_ENABLED: u16 = 0x01;
+pub const VBE_DISPI_GETCAPS: u16 = 0x02;
+pub const VBE_DISPI_8BIT_DAC: u16 = 0x20;
 pub const VBE_DISPI_LFB_ENABLED: u16 = 0x40;
-pub const VBE_DISPI_NOCLEARMEM: u16  = 0x80;
+pub const VBE_DISPI_NOCLEARMEM: u16 = 0x80;
 
 /* Intel HD Graphics Display Registers (Linux drivers/gpu/drm/i915/i915_reg.h) */
-pub const I915_PIPE_A_CONF: usize   = 0x70008;
-pub const I915_PIPE_A_STAT: usize   = 0x70024;
-pub const I915_PLANE_A_CNTR: usize  = 0x70180;
+pub const I915_PIPE_A_CONF: usize = 0x70008;
+pub const I915_PIPE_A_STAT: usize = 0x70024;
+pub const I915_PLANE_A_CNTR: usize = 0x70180;
 pub const I915_PLANE_A_STRIDE: usize = 0x70188;
-pub const I915_PLANE_A_SURF: usize  = 0x7019C;
+pub const I915_PLANE_A_SURF: usize = 0x7019C;
 
 /* VirtIO-GPU Control Commands (Linux drivers/gpu/drm/virtio/virtgpu_drv.h) */
-pub const VIRTIO_GPU_CMD_GET_DISPLAY_INFO: u32    = 0x0100;
-pub const VIRTIO_GPU_CMD_RESOURCE_CREATE_2D: u32  = 0x0101;
-pub const VIRTIO_GPU_CMD_RESOURCE_UNREF: u32      = 0x0102;
-pub const VIRTIO_GPU_CMD_SET_SCANOUT: u32         = 0x0103;
-pub const VIRTIO_GPU_CMD_RESOURCE_FLUSH: u32      = 0x0104;
+pub const VIRTIO_GPU_CMD_GET_DISPLAY_INFO: u32 = 0x0100;
+pub const VIRTIO_GPU_CMD_RESOURCE_CREATE_2D: u32 = 0x0101;
+pub const VIRTIO_GPU_CMD_RESOURCE_UNREF: u32 = 0x0102;
+pub const VIRTIO_GPU_CMD_SET_SCANOUT: u32 = 0x0103;
+pub const VIRTIO_GPU_CMD_RESOURCE_FLUSH: u32 = 0x0104;
 pub const VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D: u32 = 0x0105;
 pub const VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING: u32 = 0x0106;
 
@@ -261,7 +261,9 @@ pub fn init() {
 
         if gpu.set_vbe_mode(1024, 768, 32) {
             gpu.is_ready = true;
-            crate::drivers::serial::print("GPU: Bochs / QEMU Standard VGA Display Adapter online (PCI 1234:1111, FB: 0x");
+            crate::drivers::serial::print(
+                "GPU: Bochs / QEMU Standard VGA Display Adapter online (PCI 1234:1111, FB: 0x",
+            );
             crate::drivers::serial::print_hex(bar0);
             crate::drivers::serial::println(", 1024x768@32bpp, Hardware Page Flipping Enabled)");
             return;
@@ -297,7 +299,9 @@ pub fn init() {
         gpu.vendor_id = GPU_VENDOR_VIRTIO;
         gpu.device_id = GPU_DEV_VIRTIO_GPU;
         gpu.is_ready = true;
-        crate::drivers::serial::println("GPU: VirtIO-GPU Paravirtualized Graphics Adapter online (PCI 1AF4:1050)");
+        crate::drivers::serial::println(
+            "GPU: VirtIO-GPU Paravirtualized Graphics Adapter online (PCI 1AF4:1050)",
+        );
         return;
     }
 

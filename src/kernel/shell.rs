@@ -24,7 +24,7 @@ mod con {
     pub fn print(s: &str) {
         {
             let mut cap = CAPTURE.lock();
-            if cap.active {
+            if cap.active && !serial::capturing_here() {
                 for b in s.bytes() {
                     if cap.len < cap.buf.len() {
                         let idx = cap.len;
@@ -45,7 +45,7 @@ mod con {
     pub fn println(s: &str) {
         {
             let mut cap = CAPTURE.lock();
-            if cap.active {
+            if cap.active && !serial::capturing_here() {
                 for b in s.bytes() {
                     if cap.len < cap.buf.len() {
                         let idx = cap.len;
@@ -72,7 +72,7 @@ mod con {
     pub fn print_u64(n: u64) {
         {
             let mut cap = CAPTURE.lock();
-            if cap.active {
+            if cap.active && !serial::capturing_here() {
                 let mut buf = [0u8; 20];
                 let mut i = 0;
                 let mut val = n;
@@ -125,7 +125,7 @@ mod con {
     pub fn print_hex(n: u64) {
         {
             let mut cap = CAPTURE.lock();
-            if cap.active {
+            if cap.active && !serial::capturing_here() {
                 let mut buf = [0u8; 16];
                 let mut i = 0;
                 let mut val = n;
@@ -180,7 +180,7 @@ mod con {
     pub fn print_hex_u64(n: u64) {
         {
             let mut cap = CAPTURE.lock();
-            if cap.active {
+            if cap.active && !serial::capturing_here() {
                 let hex_chars = b"0123456789abcdef";
                 for i in (0..16).rev() {
                     let digit = ((n >> (i * 4)) & 0xF) as usize;
@@ -207,7 +207,7 @@ mod con {
     pub fn putchar(c: u8) {
         {
             let mut cap = CAPTURE.lock();
-            if cap.active {
+            if cap.active && !serial::capturing_here() {
                 if cap.len < cap.buf.len() {
                     let idx = cap.len;
                     cap.buf[idx] = c;
@@ -224,8 +224,8 @@ mod con {
 }
 
 use self::con as serial;
-use crate::drivers::video;
 use crate::drivers::keyboard;
+use crate::drivers::video;
 
 pub const MAX_HISTORY: usize = 32;
 pub const MAX_ALIASES: usize = 16;
@@ -337,6 +337,170 @@ pub struct Shell {
     jobs: [ShellJob; MAX_JOBS],
 }
 
+// Independent working directory for the GUI command session. The lock also
+// serializes capture so unrelated CPUs continue reporting to COM1.
+static GUI_SHELL: crate::sync::Spinlock<(u32, Shell)> =
+    crate::sync::Spinlock::new((0, Shell::new()));
+
+const SHELL_USER: &str = "root";
+pub const GUI_PROMPT_CAPACITY: usize = 96;
+
+fn gui_session(owner: u32) -> crate::sync::SpinlockGuard<'static, (u32, Shell)> {
+    let mut session = GUI_SHELL.lock();
+    if session.0 != owner {
+        session.0 = owner;
+        session.1.cwd[0] = b'/';
+        session.1.cwd_len = 1;
+    }
+    session
+}
+
+pub(crate) fn gui_prompt(owner: u32, output: &mut [u8; GUI_PROMPT_CAPACITY]) -> usize {
+    let session = gui_session(owner);
+    let shell = &session.1;
+    let cwd = &shell.cwd[..shell.cwd_len];
+    let directory: &[u8] = if cwd == b"/" { b"~" } else { cwd };
+    let mut used = 0;
+    for part in [
+        b"PurpleOS@" as &[u8],
+        SHELL_USER.as_bytes(),
+        b" ",
+        directory,
+        b"$ ",
+    ] {
+        output[used..used + part.len()].copy_from_slice(part);
+        used += part.len();
+    }
+    used
+}
+
+pub(crate) fn gui_command(owner: u32, command: &str, output: &mut [u8]) -> usize {
+    let mut session = gui_session(owner);
+    match gui_pipeline(&mut session.1, command, output) {
+        Ok(length) => length,
+        Err(error) => crate::drivers::serial::capture(output, || serial::println(error)),
+    }
+}
+
+fn gui_pipeline(
+    shell: &mut Shell,
+    command: &str,
+    output: &mut [u8],
+) -> Result<usize, &'static str> {
+    const MAX_STAGES: usize = 4;
+    let mut redirect_path = [0; 128];
+    let (commands, redirection) = if let Some((commands, suffix)) = command.split_once('>') {
+        let (append, file) = suffix
+            .strip_prefix('>')
+            .map_or((false, suffix), |file| (true, file));
+        let file = file.trim();
+        if file.is_empty()
+            || file.contains('>')
+            || file
+                .bytes()
+                .any(|byte| byte.is_ascii_whitespace() || byte == b'|')
+        {
+            return Err("Expected one output path after > or >>.");
+        }
+        let file = shell.resolve_path(file, &mut redirect_path);
+        if !file.starts_with("/tmp/") {
+            return Err("GUI redirection writes only /tmp files.");
+        }
+        (commands, Some((file, append)))
+    } else {
+        (command, None)
+    };
+
+    let mut stages = [("", ""); MAX_STAGES];
+    let mut count = 0;
+    for stage in commands.split('|') {
+        let slot = stages
+            .get_mut(count)
+            .ok_or("A GUI pipeline supports up to four commands.")?;
+        let stage = stage.trim();
+        let (name, arguments) = stage.split_once(' ').unwrap_or((stage, ""));
+        let record =
+            crate::kernel::cmddb::lookup(name).ok_or("Command absent from signed cmd.dtbase.")?;
+        let builtin = match (count, record.target()) {
+            (0, "ring0:help") => "help",
+            (0, "ring0:ls") => "ls",
+            (0, "ring0:pwd") => "pwd",
+            (0, "ring0:cd") if !commands.contains('|') && redirection.is_none() => "cd",
+            (0, "ring0:cat") => "cat",
+            (0, "ring0:echo") => "echo",
+            (0, "ring0:ver") => "ver",
+            (0, "ring0:date") => "date",
+            (0, "ring0:time") => "time",
+            (0, "ring0:uptime") => "uptime",
+            (0, "ring0:mem") => "free",
+            (_, "ring0:grep") if count != 0 && !arguments.trim().is_empty() => "grep",
+            (_, "ring0:head") if count != 0 => "head",
+            (_, "ring0:tail") if count != 0 => "tail",
+            (_, "ring0:wc") if count != 0 && arguments.trim().is_empty() => "wc",
+            (_, "ring0:cat") if count != 0 && arguments.trim().is_empty() => "cat",
+            _ => return Err("This command is unavailable at this stage of the GUI shell."),
+        };
+        *slot = (builtin, arguments);
+        count += 1;
+    }
+
+    let (builtin, arguments) = stages[0];
+    if builtin == "cat" {
+        let mut path = [0; 128];
+        let file = shell.resolve_path(
+            arguments.split_ascii_whitespace().next().unwrap_or(""),
+            &mut path,
+        );
+        if crate::fs::vfs::is_storage_path(file) || file == "/dev" || file.starts_with("/dev/") {
+            return Err("The GUI shell cannot read device nodes.");
+        }
+    }
+
+    let first = alloc::format!("{builtin} {arguments}");
+    let mut length = capture_gui_output(output, || shell.execute_single(first.trim_end()));
+    if count > 1 {
+        let mut scratch = alloc::vec::Vec::new();
+        scratch
+            .try_reserve_exact(output.len())
+            .map_err(|_| "Not enough memory for pipeline.")?;
+        scratch.resize(output.len(), 0);
+        for (builtin, arguments) in &stages[1..count] {
+            if length >= output.len() {
+                return Err("Pipeline output exceeded the capture limit.");
+            }
+            let command = alloc::format!("{builtin} {arguments}");
+            scratch[..length].copy_from_slice(&output[..length]);
+            length = capture_gui_output(output, || {
+                shell.execute_piped_consumer(command.trim_end(), &scratch[..length]);
+            });
+        }
+    }
+    if let Some((path, append)) = redirection {
+        if length >= output.len() {
+            return Err("Redirection output exceeded the capture limit.");
+        }
+        crate::fs::vfs::redirect_tmpfs(path, append, &output[..length])?;
+        return Ok(0);
+    }
+    Ok(length)
+}
+
+fn capture_gui_output(output: &mut [u8], action: impl FnOnce()) -> usize {
+    let captured = crate::drivers::serial::capture(output, action);
+    if captured >= output.len() {
+        return captured;
+    }
+    let mut written = 0;
+    for index in 0..captured {
+        let byte = output[index];
+        if byte != b'\r' {
+            output[written] = byte;
+            written += 1;
+        }
+    }
+    written
+}
+
 impl Shell {
     pub const fn new() -> Self {
         let mut cwd = [0u8; 64];
@@ -391,7 +555,8 @@ impl Shell {
 
     pub fn print_prompt(&self) {
         if self.editor_mode {
-            let fname = core::str::from_utf8(&self.editor_file[..self.editor_file_len]).unwrap_or("file");
+            let fname =
+                core::str::from_utf8(&self.editor_file[..self.editor_file_len]).unwrap_or("file");
             if video::is_available() {
                 video::set_colors(video::COLOR_GOLD, video::COLOR_PURPLE_BG);
                 video::puts("aegis64@edit(");
@@ -535,7 +700,8 @@ impl Shell {
         let current_target = match self.history_browse {
             None => {
                 self.saved_draft_len = self.len.min(self.saved_draft.len());
-                self.saved_draft[..self.saved_draft_len].copy_from_slice(&self.buf[..self.saved_draft_len]);
+                self.saved_draft[..self.saved_draft_len]
+                    .copy_from_slice(&self.buf[..self.saved_draft_len]);
                 total.saturating_sub(1)
             }
             Some(idx) => {
@@ -577,7 +743,8 @@ impl Shell {
                 self.redraw_line();
             } else {
                 self.history_browse = None;
-                self.buf[..self.saved_draft_len].copy_from_slice(&self.saved_draft[..self.saved_draft_len]);
+                self.buf[..self.saved_draft_len]
+                    .copy_from_slice(&self.saved_draft[..self.saved_draft_len]);
                 self.len = self.saved_draft_len;
                 self.cursor_pos = self.len;
                 self.redraw_line();
@@ -602,11 +769,13 @@ impl Shell {
         let mut matches: [&str; 32] = [""; 32];
         let mut match_count = 0usize;
 
-        let mut match_names: [[u8; crate::kernel::cmddb::MAX_NAME_LEN]; 32] = [[0; crate::kernel::cmddb::MAX_NAME_LEN]; 32];
+        let mut match_names: [[u8; crate::kernel::cmddb::MAX_NAME_LEN]; 32] =
+            [[0; crate::kernel::cmddb::MAX_NAME_LEN]; 32];
         let mut match_lens: [usize; 32] = [0; 32];
 
         if start == 0 {
-            let n = crate::kernel::cmddb::find_completions(prefix, &mut match_names, &mut match_lens);
+            let n =
+                crate::kernel::cmddb::find_completions(prefix, &mut match_names, &mut match_lens);
             for i in 0..n {
                 if match_count < matches.len() {
                     if let Ok(s) = core::str::from_utf8(&match_names[i][..match_lens[i]]) {
@@ -616,7 +785,9 @@ impl Shell {
                 }
             }
             for i in 0..self.alias_count {
-                if let Ok(al_name) = core::str::from_utf8(&self.aliases[i].name[..self.aliases[i].name_len]) {
+                if let Ok(al_name) =
+                    core::str::from_utf8(&self.aliases[i].name[..self.aliases[i].name_len])
+                {
                     if al_name.starts_with(prefix) && match_count < matches.len() {
                         matches[match_count] = al_name;
                         match_count += 1;
@@ -625,10 +796,22 @@ impl Shell {
             }
         } else {
             let known_files = [
-                "welcome.txt", "version.txt", "motd", "cpu.apdrv", "ram.apdrv",
-                "gpu.apdrv", "storage.apdrv", "network.apdrv", "audio.apdrv",
-                "usb.apdrv", "input.apdrv", "e1000.apdrv", "bochs_gpu.apdrv",
-                "r8139.apdrv", "xhci.apdrv", "hdaudio.apdrv"
+                "welcome.txt",
+                "version.txt",
+                "motd",
+                "cpu.apdrv",
+                "ram.apdrv",
+                "gpu.apdrv",
+                "storage.apdrv",
+                "network.apdrv",
+                "audio.apdrv",
+                "usb.apdrv",
+                "input.apdrv",
+                "e1000.apdrv",
+                "bochs_gpu.apdrv",
+                "r8139.apdrv",
+                "xhci.apdrv",
+                "hdaudio.apdrv",
             ];
             for &f in &known_files {
                 if f.starts_with(prefix) && match_count < matches.len() {
@@ -665,7 +848,11 @@ impl Shell {
                 let candidate = matches[i];
                 let mut match_len = 0;
                 for (b1, b2) in first.bytes().zip(candidate.bytes()) {
-                    if b1 == b2 { match_len += 1; } else { break; }
+                    if b1 == b2 {
+                        match_len += 1;
+                    } else {
+                        break;
+                    }
                 }
                 common_len = common_len.min(match_len);
             }
@@ -677,14 +864,17 @@ impl Shell {
                     for i in (self.cursor_pos..self.len).rev() {
                         self.buf[i + ext_bytes.len()] = self.buf[i];
                     }
-                    self.buf[self.cursor_pos..self.cursor_pos + ext_bytes.len()].copy_from_slice(ext_bytes);
+                    self.buf[self.cursor_pos..self.cursor_pos + ext_bytes.len()]
+                        .copy_from_slice(ext_bytes);
                     self.cursor_pos += ext_bytes.len();
                     self.len += ext_bytes.len();
                     self.redraw_line();
                 }
             } else {
                 crate::drivers::serial::print("\n");
-                if con::video_enabled() { video::putc(b'\n'); }
+                if con::video_enabled() {
+                    video::putc(b'\n');
+                }
                 for i in 0..match_count {
                     crate::drivers::serial::print("  ");
                     crate::drivers::serial::print(matches[i]);
@@ -694,7 +884,9 @@ impl Shell {
                     }
                 }
                 crate::drivers::serial::print("\n");
-                if con::video_enabled() { video::putc(b'\n'); }
+                if con::video_enabled() {
+                    video::putc(b'\n');
+                }
                 self.redraw_line();
             }
         }
@@ -798,8 +990,8 @@ impl Shell {
         let mut got_char = false;
         let mut c: u8 = 0;
 
-        if let Some(ch) = keyboard::try_getchar() {
-            if crate::compositor::client::keyboard(ch) {
+        if let Some((ch, modifiers)) = keyboard::try_getchar_with_modifiers() {
+            if crate::compositor::client::keyboard(ch, modifiers) {
                 return;
             }
             c = ch;
@@ -968,8 +1160,12 @@ impl Shell {
             // Ctrl+W -> Delete word backward
             if self.cursor_pos > 0 {
                 let mut p = self.cursor_pos;
-                while p > 0 && self.buf[p - 1] == b' ' { p -= 1; }
-                while p > 0 && self.buf[p - 1] != b' ' { p -= 1; }
+                while p > 0 && self.buf[p - 1] == b' ' {
+                    p -= 1;
+                }
+                while p > 0 && self.buf[p - 1] != b' ' {
+                    p -= 1;
+                }
                 let del_count = self.cursor_pos - p;
                 for i in p..(self.len - del_count) {
                     self.buf[i] = self.buf[i + del_count];
@@ -1117,7 +1313,11 @@ impl Shell {
         } else if line.starts_with('!') && line.len() > 1 && line.as_bytes()[1].is_ascii_digit() {
             if let Ok(num) = line[1..].trim().parse::<usize>() {
                 let _total = self.history_count.min(MAX_HISTORY);
-                let start = if self.history_count > MAX_HISTORY { self.history_count - MAX_HISTORY } else { 0 };
+                let start = if self.history_count > MAX_HISTORY {
+                    self.history_count - MAX_HISTORY
+                } else {
+                    0
+                };
                 if num >= 1 && num <= self.history_count && (num - 1) >= start {
                     let idx = (num - 1) % MAX_HISTORY;
                     let len = self.history_lens[idx];
@@ -1287,14 +1487,20 @@ impl Shell {
         } else if cmd.starts_with("head") {
             let mut parts = cmd.split_whitespace();
             parts.next();
-            let n = parts.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
+            let n = parts
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(10);
             for l in text.lines().take(n) {
                 serial::println(l);
             }
         } else if cmd.starts_with("tail") {
             let mut parts = cmd.split_whitespace();
             parts.next();
-            let n = parts.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
+            let n = parts
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(10);
             let total = text.lines().count();
             let skip = total.saturating_sub(n);
             for l in text.lines().skip(skip) {
@@ -1431,7 +1637,9 @@ impl Shell {
                 if let Some(target) = parts.next() {
                     self.do_hexdump(target);
                 } else {
-                    serial::println("Usage: dump <file_or_device> (e.g. dump /ssd/ssd1, dump welcome.txt)");
+                    serial::println(
+                        "Usage: dump <file_or_device> (e.g. dump /ssd/ssd1, dump welcome.txt)",
+                    );
                 }
             }
 
@@ -1548,8 +1756,12 @@ impl Shell {
 
             // Version
             "ver" | "version" | "uname" => {
-                serial::println("Purple OS / Aegis64 Kernel v0.5.0 (x86_64-unknown-none, Pure Rust)");
-                serial::println("CLI Environment: AegisShell 2.5 (MS-DOS & Linux POSIX Hybrid Engine)");
+                serial::println(
+                    "Purple OS / Aegis64 Kernel v0.5.0 (x86_64-unknown-none, Pure Rust)",
+                );
+                serial::println(
+                    "CLI Environment: AegisShell 2.5 (MS-DOS & Linux POSIX Hybrid Engine)",
+                );
             }
 
             // CMOS Date & Time
@@ -1557,7 +1769,8 @@ impl Shell {
 
             // Whoami
             "whoami" | "id" => {
-                serial::println("root (uid=0 gid=0 groups=0(root)) - Aegis64 Ring 0 Kernel Supervisor");
+                serial::print(SHELL_USER);
+                serial::println(" (uid=0 gid=0 groups=0(root)) - Aegis64 Ring 0 Kernel Supervisor");
             }
 
             // Natural Grammar: copy <source> to <destination>
@@ -1620,7 +1833,9 @@ impl Shell {
                 }
 
                 if filename.is_empty() {
-                    serial::println("Usage: write <filename> <content> (or write to <filename> <content>)");
+                    serial::println(
+                        "Usage: write <filename> <content> (or write to <filename> <content>)",
+                    );
                     return;
                 }
 
@@ -1722,20 +1937,45 @@ impl Shell {
                 match sub {
                     "test" => {
                         serial::println("Spawning automated scheduler test tasks");
-                        crate::kernel::task::spawn("Task_A", test_worker, 1 as *mut u8, crate::kernel::task::TaskPriority::Normal);
-                        crate::kernel::task::spawn("Task_B", test_worker, 2 as *mut u8, crate::kernel::task::TaskPriority::Normal);
-                        crate::kernel::task::spawn("Task_C", test_worker, 3 as *mut u8, crate::kernel::task::TaskPriority::Normal);
+                        crate::kernel::task::spawn(
+                            "Task_A",
+                            test_worker,
+                            1 as *mut u8,
+                            crate::kernel::task::TaskPriority::Normal,
+                        );
+                        crate::kernel::task::spawn(
+                            "Task_B",
+                            test_worker,
+                            2 as *mut u8,
+                            crate::kernel::task::TaskPriority::Normal,
+                        );
+                        crate::kernel::task::spawn(
+                            "Task_C",
+                            test_worker,
+                            3 as *mut u8,
+                            crate::kernel::task::TaskPriority::Normal,
+                        );
                     }
                     "spawn" => {
                         let name = parts.next().unwrap_or("Worker");
-                        crate::kernel::task::spawn(name, background_task_entry, core::ptr::null_mut(), crate::kernel::task::TaskPriority::Normal);
+                        crate::kernel::task::spawn(
+                            name,
+                            background_task_entry,
+                            core::ptr::null_mut(),
+                            crate::kernel::task::TaskPriority::Normal,
+                        );
                         serial::print("Spawned background task '");
                         serial::print(name);
                         serial::println("'");
                     }
                     "user" => {
                         let name = parts.next().unwrap_or("UserTask");
-                        if let Some(tid) = crate::kernel::task::spawn_user_task(name, background_task_entry, core::ptr::null_mut(), crate::kernel::task::TaskPriority::Normal) {
+                        if let Some(tid) = crate::kernel::task::spawn_user_task(
+                            name,
+                            background_task_entry,
+                            core::ptr::null_mut(),
+                            crate::kernel::task::TaskPriority::Normal,
+                        ) {
                             serial::print("Spawned isolated user task '");
                             serial::print(name);
                             serial::print("' (TID ");
@@ -1818,7 +2058,9 @@ impl Shell {
                 let res = crate::kernel::storage::with_fs(|fs| fs.sync());
                 match res {
                     Some(Ok(())) => {
-                        serial::println("Filesystem transactions committed and cache flushed to disk.");
+                        serial::println(
+                            "Filesystem transactions committed and cache flushed to disk.",
+                        );
                     }
                     _ => {
                         serial::println("Failed to sync filesystem.");
@@ -1833,7 +2075,9 @@ impl Shell {
             "devices" | "hwinfo" => {
                 let sub = parts.next().unwrap_or("");
                 if sub == "scan" || sub == "rescan" {
-                    serial::println("\nPurpleDetect: Rescanning hardware and updating driver bindings...");
+                    serial::println(
+                        "\nPurpleDetect: Rescanning hardware and updating driver bindings...",
+                    );
                     crate::drivers::purple_detect::scan_all();
                     crate::drivers::purple_detect::load_matching_drivers();
                 } else {
@@ -1873,7 +2117,7 @@ impl Shell {
                 } else {
                     self.show_network();
                 }
-            },
+            }
 
             // Driver Modules & Symbols
             "lsmod" | "modules" => crate::kernel::apdrv::list_modules(),
@@ -1887,16 +2131,26 @@ impl Shell {
                     crate::kernel::posix::run_posix_self_test();
                 } else {
                     serial::println("\nAegis64 POSIX 2024 / IEEE Std 1003.1 Subsystem:");
-                    serial::println("  Standard:        IEEE Std 1003.1-2024 / Linux x86_64 ABI Compatibility");
-                    serial::println("  Syscall MSR:     0xC0000080 / EFER.SCE Active (SYSCALL/SYSRET)");
+                    serial::println(
+                        "  Standard:        IEEE Std 1003.1-2024 / Linux x86_64 ABI Compatibility",
+                    );
+                    serial::println(
+                        "  Syscall MSR:     0xC0000080 / EFER.SCE Active (SYSCALL/SYSRET)",
+                    );
                     serial::println("  Syscall Vector:  Linux x86_64 ABI (RAX=Syscall, RDI, RSI, RDX, R10, R8, R9)");
-                    serial::println("  Standard FDs:    FD 0 (stdin), FD 1 (stdout), FD 2 (stderr)");
+                    serial::println(
+                        "  Standard FDs:    FD 0 (stdin), FD 1 (stdout), FD 2 (stderr)",
+                    );
                     serial::println("  VFS / Pipes:     FD 3..31 mapped to VFS file table & ring-buffered IPC pipes");
                     serial::println("  Signals:         POSIX.1-2024 Signals 1..64 supported");
-                    serial::println("  Epoch:           Real-Time Dynamic Gregorian Epoch from CMOS RTC");
+                    serial::println(
+                        "  Epoch:           Real-Time Dynamic Gregorian Epoch from CMOS RTC",
+                    );
                     serial::println("  Memory:          Hardware-enforced ring 3 memory isolation & user brk/mmap");
                     serial::println("  Pure Rust:       Rust no_std kernel implementation (platform and ABI constants are defined in code)\n");
-                    serial::println("Use 'posix test' to run the in-kernel 12-test validation suite.");
+                    serial::println(
+                        "Use 'posix test' to run the in-kernel 12-test validation suite.",
+                    );
                 }
             }
             "native" | "nativetest" | "purple" | "purpletest" => {
@@ -1905,27 +2159,61 @@ impl Shell {
                     crate::kernel::purple_abi::run_native_syscall_self_test();
                 } else if sub == "list" {
                     serial::println("\nAegis64 / PurpleOS Native System Call Catalog (68 Total):");
-                    serial::println("  Category 1: GPU & Display Acceleration  (0x1000 - 0x1009) [10 Calls]");
-                    serial::println("  Category 2: Audio DSP & PCM Streaming   (0x1020 - 0x1027) [ 8 Calls]");
-                    serial::println("  Category 3: Fast Zero-Copy Channel IPC  (0x1030 - 0x1037) [ 8 Calls]");
-                    serial::println("  Category 4: Multi-Core SMP & Affinity   (0x1040 - 0x1048) [ 9 Calls]");
-                    serial::println("  Category 5: High-Precision Clocks/TSC   (0x1050 - 0x1056) [ 7 Calls]");
-                    serial::println("  Category 6: Raw Direct DMA Networking   (0x1060 - 0x1065) [ 6 Calls]");
-                    serial::println("  Category 7: Hardware & PMM Telemetry    (0x1070 - 0x1075) [ 6 Calls]");
-                    serial::println("  Category 8: Raw Block Storage I/O       (0x1080 - 0x1084) [ 5 Calls]");
-                    serial::println("  Category 9: Real-Time Input Subsystem   (0x1090 - 0x1092) [ 3 Calls]");
-                    serial::println("  Category 10: Task & Sandbox Security    (0x10A0 - 0x10A5) [ 6 Calls]\n");
+                    serial::println(
+                        "  Category 1: GPU & Display Acceleration  (0x1000 - 0x1009) [10 Calls]",
+                    );
+                    serial::println(
+                        "  Category 2: Audio DSP & PCM Streaming   (0x1020 - 0x1027) [ 8 Calls]",
+                    );
+                    serial::println(
+                        "  Category 3: Fast Zero-Copy Channel IPC  (0x1030 - 0x1037) [ 8 Calls]",
+                    );
+                    serial::println(
+                        "  Category 4: Multi-Core SMP & Affinity   (0x1040 - 0x1048) [ 9 Calls]",
+                    );
+                    serial::println(
+                        "  Category 5: High-Precision Clocks/TSC   (0x1050 - 0x1056) [ 7 Calls]",
+                    );
+                    serial::println(
+                        "  Category 6: Raw Direct DMA Networking   (0x1060 - 0x1065) [ 6 Calls]",
+                    );
+                    serial::println(
+                        "  Category 7: Hardware & PMM Telemetry    (0x1070 - 0x1075) [ 6 Calls]",
+                    );
+                    serial::println(
+                        "  Category 8: Raw Block Storage I/O       (0x1080 - 0x1084) [ 5 Calls]",
+                    );
+                    serial::println(
+                        "  Category 9: Real-Time Input Subsystem   (0x1090 - 0x1092) [ 3 Calls]",
+                    );
+                    serial::println(
+                        "  Category 10: Task & Sandbox Security    (0x10A0 - 0x10A5) [ 6 Calls]\n",
+                    );
                     serial::println("Use 'native test' to run the 10-category validation suite.");
                 } else {
                     serial::println("\nAegis64 / PurpleOS Native System Call Subsystem:");
-                    serial::println("  Architecture:    PurpleOS First-Class Native ABI (Non-POSIX, Non-Linux)");
-                    serial::println("  Syscall Range:   0x1000 - 0x10AF (68 High-Performance Native Calls)");
-                    serial::println("  Target Domain:   Heavy-Load Apps (3D GPU, Audio DSP, Direct DMA, SMP)");
-                    serial::println("  Security:        Hardware-Enforced Ring 3 Sandboxing & Capability Masks");
-                    serial::println("  Channel IPC:     Lockless/Bounded Ring Buffers (Zero-Copy Transfer)");
-                    serial::println("  Pure Rust:       100% Bare-Metal Rust #![no_std] (Zero C/C++ Code)\n");
+                    serial::println(
+                        "  Architecture:    PurpleOS First-Class Native ABI (Non-POSIX, Non-Linux)",
+                    );
+                    serial::println(
+                        "  Syscall Range:   0x1000 - 0x10AF (68 High-Performance Native Calls)",
+                    );
+                    serial::println(
+                        "  Target Domain:   Heavy-Load Apps (3D GPU, Audio DSP, Direct DMA, SMP)",
+                    );
+                    serial::println(
+                        "  Security:        Hardware-Enforced Ring 3 Sandboxing & Capability Masks",
+                    );
+                    serial::println(
+                        "  Channel IPC:     Lockless/Bounded Ring Buffers (Zero-Copy Transfer)",
+                    );
+                    serial::println(
+                        "  Pure Rust:       100% Bare-Metal Rust #![no_std] (Zero C/C++ Code)\n",
+                    );
                     serial::println("Available commands:");
-                    serial::println("  native test  - Run full in-kernel 10-category validation suite");
+                    serial::println(
+                        "  native test  - Run full in-kernel 10-category validation suite",
+                    );
                     serial::println("  native list  - Display complete native system call catalog");
                 }
             }
@@ -1947,26 +2235,26 @@ impl Shell {
                         }
                     }
                     _ => {
-                        serial::println("Unknown ring3 subcommand. Options: info, test, fault [div0|pagefault]");
+                        serial::println(
+                            "Unknown ring3 subcommand. Options: info, test, fault [div0|pagefault]",
+                        );
                     }
                 }
             }
             "cmd" => {
                 let sub = parts.next().unwrap_or("info");
                 match sub {
-                    "reload" => {
-                        match crate::kernel::cmddb::reload() {
-                            Ok(count) => {
-                                serial::print("[CMDDB] Successfully reloaded ");
-                                serial::print_u64(count as u64);
-                                serial::println(" commands from /System/CLI/cmd.dtbase.");
-                            }
-                            Err(e) => {
-                                serial::print("[CMDDB] Reload error: ");
-                                serial::println(e);
-                            }
+                    "reload" => match crate::kernel::cmddb::reload() {
+                        Ok(count) => {
+                            serial::print("[CMDDB] Successfully reloaded ");
+                            serial::print_u64(count as u64);
+                            serial::println(" commands from /System/CLI/cmd.dtbase.");
                         }
-                    }
+                        Err(e) => {
+                            serial::print("[CMDDB] Reload error: ");
+                            serial::println(e);
+                        }
+                    },
                     "verify" => {
                         if crate::kernel::cmddb::verify_integrity() {
                             serial::println("[CMDDB] /System/CLI/cmd.dtbase signature and payload integrity VERIFIED.");
@@ -1978,7 +2266,9 @@ impl Shell {
                         let target = parts.next().unwrap_or("");
                         if target.is_empty() {
                             serial::println("=======================================================================");
-                            serial::println("  PurpleOS Command Database Subsystem (/System/CLI/cmd.dtbase)");
+                            serial::println(
+                                "  PurpleOS Command Database Subsystem (/System/CLI/cmd.dtbase)",
+                            );
                             serial::println("=======================================================================");
                             serial::print("  Database Path:     ");
                             serial::println(crate::kernel::cmddb::CMD_DATABASE_PATH);
@@ -1991,7 +2281,9 @@ impl Shell {
                             } else {
                                 serial::println("NO (Signature check failed)");
                             }
-                            serial::println("  Subcommands:       cmd reload, cmd verify, cmd info [command]");
+                            serial::println(
+                                "  Subcommands:       cmd reload, cmd verify, cmd info [command]",
+                            );
                             serial::println("=======================================================================");
                         } else {
                             if !crate::kernel::cmddb::print_command_help(target) {
@@ -2012,19 +2304,17 @@ impl Shell {
                     "list" | "show" | "" => {
                         crate::kernel::pathdb::print_paths();
                     }
-                    "reload" => {
-                        match crate::kernel::pathdb::reload() {
-                            Ok(count) => {
-                                serial::print("[PATHDB] Successfully reloaded ");
-                                serial::print_u64(count as u64);
-                                serial::println(" search path(s) from /System/CLI/path.dtbase.");
-                            }
-                            Err(e) => {
-                                serial::print("[PATHDB] Reload error: ");
-                                serial::println(e);
-                            }
+                    "reload" => match crate::kernel::pathdb::reload() {
+                        Ok(count) => {
+                            serial::print("[PATHDB] Successfully reloaded ");
+                            serial::print_u64(count as u64);
+                            serial::println(" search path(s) from /System/CLI/path.dtbase.");
                         }
-                    }
+                        Err(e) => {
+                            serial::print("[PATHDB] Reload error: ");
+                            serial::println(e);
+                        }
+                    },
                     "add" => {
                         if let Some(dir) = parts.next() {
                             match crate::kernel::pathdb::add_path(dir) {
@@ -2072,7 +2362,9 @@ impl Shell {
                 serial::print("\x1b[2J\x1b[H");
             }
             "reboot" | "restart" => {
-                if let Err(reason) = crate::kernel::power::execute(crate::kernel::power::Action::Restart) {
+                if let Err(reason) =
+                    crate::kernel::power::execute(crate::kernel::power::Action::Restart)
+                {
                     serial::print("Restart cancelled: ");
                     serial::println(reason);
                 }
@@ -2124,7 +2416,11 @@ impl Shell {
     fn do_history(&self) {
         serial::println("\n=== AegisShell Command History ===");
         let total = self.history_count.min(MAX_HISTORY);
-        let start = if self.history_count > MAX_HISTORY { self.history_count - MAX_HISTORY } else { 0 };
+        let start = if self.history_count > MAX_HISTORY {
+            self.history_count - MAX_HISTORY
+        } else {
+            0
+        };
         for i in 0..total {
             let actual = (start + i) % MAX_HISTORY;
             let len = self.history_lens[actual];
@@ -2145,8 +2441,10 @@ impl Shell {
         if rest.is_empty() {
             serial::println("\n=== Active Shell Aliases ===");
             for i in 0..self.alias_count {
-                let name = core::str::from_utf8(&self.aliases[i].name[..self.aliases[i].name_len]).unwrap_or("");
-                let cmd = core::str::from_utf8(&self.aliases[i].cmd[..self.aliases[i].cmd_len]).unwrap_or("");
+                let name = core::str::from_utf8(&self.aliases[i].name[..self.aliases[i].name_len])
+                    .unwrap_or("");
+                let cmd = core::str::from_utf8(&self.aliases[i].cmd[..self.aliases[i].cmd_len])
+                    .unwrap_or("");
                 serial::print("  alias ");
                 serial::print(name);
                 serial::print("='");
@@ -2160,7 +2458,9 @@ impl Shell {
         if let Some(eq_pos) = rest.find('=') {
             let name = rest[..eq_pos].trim();
             let mut val = rest[eq_pos + 1..].trim();
-            if (val.starts_with('\'') && val.ends_with('\'')) || (val.starts_with('"') && val.ends_with('"')) {
+            if (val.starts_with('\'') && val.ends_with('\''))
+                || (val.starts_with('"') && val.ends_with('"'))
+            {
                 if val.len() >= 2 {
                     val = &val[1..val.len() - 1];
                 }
@@ -2211,7 +2511,9 @@ impl Shell {
         if let Some(eq_pos) = rest.find('=') {
             let key = rest[..eq_pos].trim();
             let mut val = rest[eq_pos + 1..].trim();
-            if (val.starts_with('\'') && val.ends_with('\'')) || (val.starts_with('"') && val.ends_with('"')) {
+            if (val.starts_with('\'') && val.ends_with('\''))
+                || (val.starts_with('"') && val.ends_with('"'))
+            {
                 if val.len() >= 2 {
                     val = &val[1..val.len() - 1];
                 }
@@ -2230,8 +2532,10 @@ impl Shell {
     fn do_env(&self) {
         serial::println("\n=== Shell Environment Variables ===");
         for i in 0..self.env_count {
-            let key = core::str::from_utf8(&self.env_vars[i].key[..self.env_vars[i].key_len]).unwrap_or("");
-            let val = core::str::from_utf8(&self.env_vars[i].val[..self.env_vars[i].val_len]).unwrap_or("");
+            let key = core::str::from_utf8(&self.env_vars[i].key[..self.env_vars[i].key_len])
+                .unwrap_or("");
+            let val = core::str::from_utf8(&self.env_vars[i].val[..self.env_vars[i].val_len])
+                .unwrap_or("");
             serial::print("  ");
             serial::print(key);
             serial::print("=");
@@ -2300,7 +2604,9 @@ impl Shell {
         if let Some(entry) = crate::kernel::cmddb::lookup(cmd) {
             serial::print(cmd);
             if entry.is_ring3() {
-                serial::println(": Ring 3 user mode application (defined in /System/CLI/cmd.dtbase)");
+                serial::println(
+                    ": Ring 3 user mode application (defined in /System/CLI/cmd.dtbase)",
+                );
             } else {
                 serial::println(": shell builtin command (defined in /System/CLI/cmd.dtbase)");
             }
@@ -2353,7 +2659,8 @@ impl Shell {
                 } else {
                     0
                 }
-            }).unwrap_or(0)
+            })
+            .unwrap_or(0)
         };
 
         if read_len > 0 {
@@ -2375,7 +2682,8 @@ impl Shell {
     }
 
     fn editor_redraw(&self) {
-        let fname = core::str::from_utf8(&self.editor_file[..self.editor_file_len]).unwrap_or("file");
+        let fname =
+            core::str::from_utf8(&self.editor_file[..self.editor_file_len]).unwrap_or("file");
         con::println("\n=======================================================================");
         con::print("  PurpleOS AegisEdit v2.0 — File: '");
         con::print(fname);
@@ -2437,7 +2745,10 @@ impl Shell {
             if let Some(num_str) = parts.next() {
                 if let Ok(num) = num_str.parse::<usize>() {
                     let text = parts.next().unwrap_or("");
-                    if num >= 1 && num <= self.editor_line_count + 1 && self.editor_line_count < MAX_EDITOR_LINES {
+                    if num >= 1
+                        && num <= self.editor_line_count + 1
+                        && self.editor_line_count < MAX_EDITOR_LINES
+                    {
                         let idx = num - 1;
                         for i in (idx..self.editor_line_count).rev() {
                             self.editor_lines[i + 1] = self.editor_lines[i];
@@ -2510,7 +2821,9 @@ impl Shell {
         for i in 0..self.editor_line_count {
             let num = i + 1;
             con::print("  ");
-            if num < 10 { con::print("0"); }
+            if num < 10 {
+                con::print("0");
+            }
             con::print_u64(num as u64);
             con::print(" | ");
             let len = self.editor_line_lens[i];
@@ -2580,7 +2893,11 @@ impl Shell {
         }
 
         let (bg, bar, fg) = match name {
-            "purple" => (video::COLOR_PURPLE_BG, video::COLOR_PURPLE_BAR, video::COLOR_WHITE),
+            "purple" => (
+                video::COLOR_PURPLE_BG,
+                video::COLOR_PURPLE_BAR,
+                video::COLOR_WHITE,
+            ),
             "matrix" => (0x000000, 0x002200, 0x00FF00),
             "amber" => (0x120A00, 0x2A1600, 0xFFB000),
             "classic" => (0x000080, 0x000050, 0xFFFFFF),
@@ -2726,7 +3043,12 @@ impl Shell {
             bg_worker_trampoline
         };
 
-        if let Some(task_id) = crate::kernel::task::spawn(clean, entry, job_id as *mut u8, crate::kernel::task::TaskPriority::Normal) {
+        if let Some(task_id) = crate::kernel::task::spawn(
+            clean,
+            entry,
+            job_id as *mut u8,
+            crate::kernel::task::TaskPriority::Normal,
+        ) {
             let cb = clean.as_bytes();
             let clen = cb.len().min(self.jobs[slot_idx].name.len());
             self.jobs[slot_idx].name[..clen].copy_from_slice(&cb[..clen]);
@@ -2900,7 +3222,8 @@ impl Shell {
                 } else {
                     0
                 }
-            }).unwrap_or(0)
+            })
+            .unwrap_or(0)
         };
 
         if read_len == 0 {
@@ -2920,7 +3243,9 @@ impl Shell {
             let mut line_no = 1;
             for l in content.lines() {
                 con::print("  ");
-                if line_no < 10 { con::print("0"); }
+                if line_no < 10 {
+                    con::print("0");
+                }
                 con::print_u64(line_no as u64);
                 con::print(" | ");
                 con::println(l);
@@ -2971,7 +3296,9 @@ impl Shell {
             return;
         };
         if !crate::security::aegis_detect::verify_control_file(
-            resolved, b"PurpleOS/SHELL-SCRIPT/v1\0", &buf[..read_len],
+            resolved,
+            b"PurpleOS/SHELL-SCRIPT/v1\0",
+            &buf[..read_len],
         ) {
             serial::println("AegisDetect: Script rejected by signature policy");
             return;
@@ -2984,7 +3311,11 @@ impl Shell {
         if let Ok(content) = core::str::from_utf8(&buf[..read_len]) {
             for raw_line in content.lines() {
                 let line = raw_line.trim();
-                if line.is_empty() || line.starts_with('#') || line.starts_with("rem ") || line.starts_with("//") {
+                if line.is_empty()
+                    || line.starts_with('#')
+                    || line.starts_with("rem ")
+                    || line.starts_with("//")
+                {
                     continue;
                 }
                 serial::print(">> ");
@@ -3016,7 +3347,9 @@ impl Shell {
             (Some(s), Some(e), None) => (s, 1, e),
             (Some(s), Some(st), Some(e)) => (s, st, e),
             _ => {
-                serial::println("Usage: seq <end> OR seq <start> <end> OR seq <start> <step> <end>");
+                serial::println(
+                    "Usage: seq <end> OR seq <start> <end> OR seq <start> <step> <end>",
+                );
                 return;
             }
         };
@@ -3076,7 +3409,8 @@ impl Shell {
                 } else {
                     0
                 }
-            }).unwrap_or(0)
+            })
+            .unwrap_or(0)
         };
 
         if read_len < 4 {
@@ -3089,7 +3423,8 @@ impl Shell {
                     } else {
                         0
                     }
-                }).unwrap_or(0);
+                })
+                .unwrap_or(0);
                 if p_len >= 4 {
                     header = alt_hdr;
                     read_len = p_len;
@@ -3242,14 +3577,18 @@ impl Shell {
                 dir_count += 1;
                 serial::print(" ");
                 serial::print(name);
-                for _ in name.len()..16 { serial::print(" "); }
+                for _ in name.len()..16 {
+                    serial::print(" ");
+                }
                 serial::println("<DIR>            00:00");
             } else {
                 file_count += 1;
                 total_bytes += size;
                 serial::print(" ");
                 serial::print(name);
-                for _ in name.len()..16 { serial::print(" "); }
+                for _ in name.len()..16 {
+                    serial::print(" ");
+                }
                 serial::print("       ");
                 serial::print_u64(size as u64);
                 serial::println("  12:00");
@@ -3280,7 +3619,11 @@ impl Shell {
 
     fn show_tree(&self) {
         let st = crate::kernel::storage::STORAGE.lock();
-        let name_len = st.volume_name.iter().position(|&c| c == 0).unwrap_or(st.volume_name.len());
+        let name_len = st
+            .volume_name
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(st.volume_name.len());
         let name_str = if st.fs_mounted && name_len > 0 {
             core::str::from_utf8(&st.volume_name[..name_len]).unwrap_or("PurpleSystem")
         } else {
@@ -3288,8 +3631,16 @@ impl Shell {
         };
         serial::print("\nFolder PATH listing for Volume ");
         serial::println(name_str);
-        let serial_hi = if st.fs_mounted { ((st.total_blocks ^ 0xAE64) & 0xFFFF) as u16 } else { 0xAE64 };
-        let serial_lo = if st.fs_mounted { ((st.free_blocks ^ 0x2026) & 0xFFFF) as u16 } else { 0x2026 };
+        let serial_hi = if st.fs_mounted {
+            ((st.total_blocks ^ 0xAE64) & 0xFFFF) as u16
+        } else {
+            0xAE64
+        };
+        let serial_lo = if st.fs_mounted {
+            ((st.free_blocks ^ 0x2026) & 0xFFFF) as u16
+        } else {
+            0x2026
+        };
         serial::print("Volume serial number is ");
         serial::print_hex(serial_hi as u64);
         serial::print("-");
@@ -3333,12 +3684,18 @@ impl Shell {
                 serial::print("  Size:     ");
                 serial::print_u64(size as u64);
                 serial::println(" bytes");
-                let blks = if size == 0 { 0 } else { ((size + 511) / 512) as u64 };
+                let blks = if size == 0 {
+                    0
+                } else {
+                    ((size + 511) / 512) as u64
+                };
                 serial::print("  Blocks:   ");
                 serial::print_u64(blks);
                 serial::println("");
                 serial::println("  Type:     Regular File / VFS Device Node");
-                serial::println("  Access:   (0644/-rw-r--r--) Uid: ( 0/ root)   Gid: ( 0/ root)\n");
+                serial::println(
+                    "  Access:   (0644/-rw-r--r--) Uid: ( 0/ root)   Gid: ( 0/ root)\n",
+                );
             }
             Err(e) => {
                 serial::print("stat: cannot stat '");
@@ -3394,7 +3751,9 @@ impl Shell {
             if let Ok(text) = core::str::from_utf8(&buf[..len]) {
                 let mut lines_printed = 0usize;
                 for line in text.lines() {
-                    if lines_printed >= count { break; }
+                    if lines_printed >= count {
+                        break;
+                    }
                     serial::println(line);
                     lines_printed += 1;
                 }
@@ -3459,13 +3818,17 @@ impl Shell {
                     for i in 0..16 {
                         if offset + i < display_len {
                             let b = buf[offset + i];
-                            if b < 16 { con::print("0"); }
+                            if b < 16 {
+                                con::print("0");
+                            }
                             con::print_hex(b as u64);
                             con::print(" ");
                         } else {
                             con::print("   ");
                         }
-                        if i == 7 { con::print(" "); }
+                        if i == 7 {
+                            con::print(" ");
+                        }
                     }
 
                     con::print(" |");
@@ -3632,19 +3995,29 @@ impl Shell {
         serial::print("Current CMOS RTC Date & Time: 20");
         serial::print_u64((t.year % 100) as u64);
         serial::print("-");
-        if t.month < 10 { serial::print("0"); }
+        if t.month < 10 {
+            serial::print("0");
+        }
         serial::print_u64(t.month as u64);
         serial::print("-");
-        if t.day < 10 { serial::print("0"); }
+        if t.day < 10 {
+            serial::print("0");
+        }
         serial::print_u64(t.day as u64);
         serial::print(" ");
-        if t.hour < 10 { serial::print("0"); }
+        if t.hour < 10 {
+            serial::print("0");
+        }
         serial::print_u64(t.hour as u64);
         serial::print(":");
-        if t.minute < 10 { serial::print("0"); }
+        if t.minute < 10 {
+            serial::print("0");
+        }
         serial::print_u64(t.minute as u64);
         serial::print(":");
-        if t.second < 10 { serial::print("0"); }
+        if t.second < 10 {
+            serial::print("0");
+        }
         serial::print_u64(t.second as u64);
         serial::println(" UTC");
     }
@@ -3800,7 +4173,9 @@ impl Shell {
         if let Some((w_str, h_str)) = mode_change {
             let w = if w_str == "800" { 800 } else { 1024 };
             let h = if h_str == "600" { 600 } else { 768 };
-            crate::drivers::gpu::GPU.lock().set_vbe_mode(w as u16, h as u16, 32);
+            crate::drivers::gpu::GPU
+                .lock()
+                .set_vbe_mode(w as u16, h as u16, 32);
             {
                 let mut v = crate::drivers::video::VIDEO.lock();
                 v.width = w;
@@ -3836,7 +4211,9 @@ impl Shell {
         match engine.gpu_type {
             crate::drivers::gpu_accel::AccelGpuType::Igd => {
                 serial::println("  Driver:        igd (Intel Graphics Driver)");
-                serial::println("  Domain:        Clean-room Gen9/Gen11 3D Command Streamer (MI Batch)");
+                serial::println(
+                    "  Domain:        Clean-room Gen9/Gen11 3D Command Streamer (MI Batch)",
+                );
                 serial::print("  PCI Device:    8086:");
                 serial::print_hex(engine.device_id as u64);
                 serial::println(" (Hardware spec ref: i915)");
@@ -3850,15 +4227,21 @@ impl Shell {
             }
             crate::drivers::gpu_accel::AccelGpuType::Nvgd => {
                 serial::println("  Driver:        nvgd (NVIDIA Graphics Driver)");
-                serial::println("  Domain:        Clean-room NV9097 Class Pushbuffer FIFO 3D Engine");
-                serial::println("  Workload:      Good for daily 3D acceleration (not for gaming for now)");
+                serial::println(
+                    "  Domain:        Clean-room NV9097 Class Pushbuffer FIFO 3D Engine",
+                );
+                serial::println(
+                    "  Workload:      Good for daily 3D acceleration (not for gaming for now)",
+                );
                 serial::print("  PCI Device:    10DE:");
                 serial::print_hex(engine.device_id as u64);
                 serial::println(" (Hardware spec ref: nouveau)");
             }
             crate::drivers::gpu_accel::AccelGpuType::None => {
                 serial::println("  Status:        Software Raster Fallback / Bochs VBE Emulation");
-                serial::println("  Supported HW:  igd (Intel), radeongd (AMD), nvgd (NVIDIA - daily 3D accel)");
+                serial::println(
+                    "  Supported HW:  igd (Intel), radeongd (AMD), nvgd (NVIDIA - daily 3D accel)",
+                );
                 serial::println("  Licensing:     100% Pure Rust clean-room (Linux drivers cited as spec reference only)");
             }
         }
@@ -3890,17 +4273,25 @@ impl Shell {
                 let comp = crate::compositor::COMPOSITOR.lock();
                 serial::println("\n=== Aegis64 Native Framebuffer Compositor Subsystem ===");
                 serial::print("  Status:          ");
-                serial::println(if comp.running { "Online (Native Compositor Loop)" } else { "Standby / Stopped" });
+                serial::println(if comp.running {
+                    "Online (Native Compositor Loop)"
+                } else {
+                    "Standby / Stopped"
+                });
                 serial::print("  Resolution:      ");
                 serial::print_u64(comp.width as u64);
                 serial::print("x");
                 serial::print_u64(comp.height as u64);
                 serial::println("@32bpp ARGB8888");
                 serial::println("  Double Buffer:   RAM back buffer and linear framebuffer");
-                serial::println("  Alpha Blending:  Porter-Duff SourceOver (Translucent Shadows & Borders)");
+                serial::println(
+                    "  Alpha Blending:  Porter-Duff SourceOver (Translucent Shadows & Borders)",
+                );
                 serial::println("  Cursor Engine:   Software pointer overlay");
                 serial::println("  Window Server:   Z-ordered windows with desktop-region updates");
-                serial::println("  Desktop Shell:   Purple Desktop UI (Purple Bar & Purple Dock Active)");
+                serial::println(
+                    "  Desktop Shell:   Purple Desktop UI (Purple Bar & Purple Dock Active)",
+                );
                 serial::println("  VFS Device Node: /dev/compositor, /dev/fb0");
                 serial::println("  Service Daemon:  /System/Services/Compositor");
                 serial::println("  Framework:       /System/Frameworks/Compositor.framework/");
@@ -4002,7 +4393,9 @@ impl Shell {
                     }
                 }
                 if !found {
-                    serial::println("  No active windows open. (Use 'compositor demo' to create demo windows)");
+                    serial::println(
+                        "  No active windows open. (Use 'compositor demo' to create demo windows)",
+                    );
                 }
                 serial::println("");
             }
@@ -4015,25 +4408,28 @@ impl Shell {
             "list" | "ls" => {
                 serial::println("\nSystem Fonts Registry (/System/Resources/Fonts/):");
                 let mut count = 0usize;
-                let _ = crate::fs::vfs::list_directory("System/Resources/Fonts", |name, size, is_dir| {
-                    if !is_dir {
-                        count += 1;
-                        serial::print("  [");
-                        serial::print_u64(count as u64);
-                        serial::print("] ");
-                        serial::print(name);
-                        serial::print(" (");
-                        serial::print_u64(size as u64);
-                        serial::print(" bytes) - ");
-                        if name.ends_with(".ttf") {
-                            serial::println("TrueType Vector Font");
-                        } else if name.ends_with(".conf") {
-                            serial::println("Font Family Descriptor");
-                        } else {
-                            serial::println("Resource Asset");
+                let _ = crate::fs::vfs::list_directory(
+                    "System/Resources/Fonts",
+                    |name, size, is_dir| {
+                        if !is_dir {
+                            count += 1;
+                            serial::print("  [");
+                            serial::print_u64(count as u64);
+                            serial::print("] ");
+                            serial::print(name);
+                            serial::print(" (");
+                            serial::print_u64(size as u64);
+                            serial::print(" bytes) - ");
+                            if name.ends_with(".ttf") {
+                                serial::println("TrueType Vector Font");
+                            } else if name.ends_with(".conf") {
+                                serial::println("Font Family Descriptor");
+                            } else {
+                                serial::println("Resource Asset");
+                            }
                         }
-                    }
-                });
+                    },
+                );
                 if count == 0 {
                     serial::println("  (No fonts installed in /System/Resources/Fonts/)");
                 }
@@ -4052,7 +4448,8 @@ impl Shell {
                     full_path[..path_len].copy_from_slice(&target_name.as_bytes()[..path_len]);
                 } else {
                     let copy_len = target_name.len().min(127 - prefix.len());
-                    full_path[prefix.len()..prefix.len() + copy_len].copy_from_slice(&target_name.as_bytes()[..copy_len]);
+                    full_path[prefix.len()..prefix.len() + copy_len]
+                        .copy_from_slice(&target_name.as_bytes()[..copy_len]);
                     path_len += copy_len;
                 }
 
@@ -4060,14 +4457,20 @@ impl Shell {
                     let mut dir_buf = [0u8; 512];
                     match crate::fs::vfs::read_at(path_str, 0, &mut dir_buf) {
                         Ok(bytes_read) if bytes_read >= 12 => {
-                            match crate::drivers::font_ttf::TtfTableDirectory::parse(&dir_buf[..bytes_read]) {
+                            match crate::drivers::font_ttf::TtfTableDirectory::parse(
+                                &dir_buf[..bytes_read],
+                            ) {
                                 Ok(ttf) => {
                                     let mut meta = crate::drivers::font_ttf::TtfMetadata::empty();
 
                                     // Parse 'head'
                                     if let Some(tbl) = ttf.find_table(b"head") {
                                         let mut head_buf = [0u8; 64];
-                                        if let Ok(n) = crate::fs::vfs::read_at(path_str, tbl.offset, &mut head_buf) {
+                                        if let Ok(n) = crate::fs::vfs::read_at(
+                                            path_str,
+                                            tbl.offset,
+                                            &mut head_buf,
+                                        ) {
                                             meta.units_per_em = crate::drivers::font_ttf::TtfTableDirectory::parse_head(&head_buf[..n]);
                                         }
                                     }
@@ -4076,15 +4479,26 @@ impl Shell {
                                     if let Some(tbl) = ttf.find_table(b"name") {
                                         let mut name_buf = [0u8; 4096];
                                         let to_read = tbl.length.min(4096);
-                                        if let Ok(n) = crate::fs::vfs::read_at(path_str, tbl.offset, &mut name_buf[..to_read]) {
-                                            crate::drivers::font_ttf::TtfTableDirectory::parse_name(&name_buf[..n], &mut meta);
+                                        if let Ok(n) = crate::fs::vfs::read_at(
+                                            path_str,
+                                            tbl.offset,
+                                            &mut name_buf[..to_read],
+                                        ) {
+                                            crate::drivers::font_ttf::TtfTableDirectory::parse_name(
+                                                &name_buf[..n],
+                                                &mut meta,
+                                            );
                                         }
                                     }
 
                                     // Parse 'hhea'
                                     if let Some(tbl) = ttf.find_table(b"hhea") {
                                         let mut hhea_buf = [0u8; 64];
-                                        if let Ok(n) = crate::fs::vfs::read_at(path_str, tbl.offset, &mut hhea_buf) {
+                                        if let Ok(n) = crate::fs::vfs::read_at(
+                                            path_str,
+                                            tbl.offset,
+                                            &mut hhea_buf,
+                                        ) {
                                             let (asc, desc, gap) = crate::drivers::font_ttf::TtfTableDirectory::parse_hhea(&hhea_buf[..n]);
                                             meta.ascender = asc;
                                             meta.descender = desc;
@@ -4095,7 +4509,11 @@ impl Shell {
                                     // Parse 'maxp'
                                     if let Some(tbl) = ttf.find_table(b"maxp") {
                                         let mut maxp_buf = [0u8; 32];
-                                        if let Ok(n) = crate::fs::vfs::read_at(path_str, tbl.offset, &mut maxp_buf) {
+                                        if let Ok(n) = crate::fs::vfs::read_at(
+                                            path_str,
+                                            tbl.offset,
+                                            &mut maxp_buf,
+                                        ) {
                                             meta.num_glyphs = crate::drivers::font_ttf::TtfTableDirectory::parse_maxp(&maxp_buf[..n]);
                                         }
                                     }
@@ -4146,11 +4564,15 @@ impl Shell {
             "set" => {
                 let face_name = parts.next().unwrap_or("inter");
                 if face_name.eq_ignore_ascii_case("vga") {
-                    crate::drivers::font::set_active_font(crate::drivers::font::FontFace::ClassicVga);
+                    crate::drivers::font::set_active_font(
+                        crate::drivers::font::FontFace::ClassicVga,
+                    );
                     serial::println("System font set to: Classic IBM VGA (8x16 Bitmap)");
                 } else {
                     crate::drivers::font::set_active_font(crate::drivers::font::FontFace::Inter);
-                    serial::println("System font set to: Inter (Subpixel Anti-Aliased Vector Font)");
+                    serial::println(
+                        "System font set to: Inter (Subpixel Anti-Aliased Vector Font)",
+                    );
                 }
             }
             _ => {
@@ -4158,14 +4580,22 @@ impl Shell {
                 serial::println("\n=== PurpleOS System Font Subsystem ===");
                 serial::print("  Active Font:     ");
                 serial::println(match face {
-                    crate::drivers::font::FontFace::Inter => "Inter 4.1 (Clean Modern Neo-Grotesque Vector Font)",
-                    crate::drivers::font::FontFace::ClassicVga => "Classic IBM VGA 8x16 (Bitmap Fallback)",
+                    crate::drivers::font::FontFace::Inter => {
+                        "Inter 4.1 (Clean Modern Neo-Grotesque Vector Font)"
+                    }
+                    crate::drivers::font::FontFace::ClassicVga => {
+                        "Classic IBM VGA 8x16 (Bitmap Fallback)"
+                    }
                 });
                 serial::println("  Anti-Aliasing:   Subpixel 8-Bit Fractional Coverage Blending");
                 serial::println("  Font Directory:  /System/Resources/Fonts/");
                 serial::println("  System Family:   Inter");
-                serial::println("  Installed:       Inter-Regular.ttf, Inter-Bold.ttf, Inter-Medium.ttf, etc.");
-                serial::println("\nCommands: 'font list', 'font info <file.ttf>', 'font set <inter|vga>'");
+                serial::println(
+                    "  Installed:       Inter-Regular.ttf, Inter-Bold.ttf, Inter-Medium.ttf, etc.",
+                );
+                serial::println(
+                    "\nCommands: 'font list', 'font info <file.ttf>', 'font set <inter|vga>'",
+                );
             }
         }
     }
@@ -4183,7 +4613,9 @@ impl Shell {
         };
         serial::print(adapter);
         for (index, byte) in mac.iter().enumerate() {
-            if index > 0 { serial::print(":"); }
+            if index > 0 {
+                serial::print(":");
+            }
             serial::print_hex(u64::from(*byte));
         }
         let ip = crate::net::get_ip();
@@ -4193,7 +4625,9 @@ impl Shell {
         }
         serial::print(", IPv4=");
         for (index, octet) in ip.into_iter().enumerate() {
-            if index > 0 { serial::print("."); }
+            if index > 0 {
+                serial::print(".");
+            }
             serial::print_u64(u64::from(octet));
         }
         serial::println("");
@@ -4206,7 +4640,7 @@ impl Shell {
     }
 
     fn show_disks(&self) {
-        serial::println("\nATA Storage Devices & GPT Partition Status:");
+        serial::println("\nStorage Devices & GPT Partition Status:");
         crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
             serial::print("  [");
             serial::print(canon);
@@ -4215,7 +4649,8 @@ impl Shell {
             serial::print(")]: ");
             serial::print_u64(dev.total_blocks());
             serial::print(" sectors (");
-            serial::print_u64(dev.total_blocks() * 512 / (1024 * 1024));
+            let capacity = u128::from(dev.total_blocks()) * u128::from(dev.block_size());
+            serial::print_u64((capacity / (1024 * 1024)) as u64);
             serial::println(" MiB)");
         });
 
@@ -4226,7 +4661,8 @@ impl Shell {
                     for i in 0..info.partition_count {
                         let p = &info.partitions[i];
                         let name_len = p.name.iter().position(|&c| c == 0).unwrap_or(p.name.len());
-                        let name_str = core::str::from_utf8(&p.name[..name_len]).unwrap_or("PurpleRootFS");
+                        let name_str =
+                            core::str::from_utf8(&p.name[..name_len]).unwrap_or("PurpleRootFS");
                         serial::print("  GPT Partition ");
                         serial::print_u64((i + 1) as u64);
                         serial::print(": '");
@@ -4257,8 +4693,13 @@ impl Shell {
                 serial::println("  Mount State:   MOUNTED (Read-Only Kernel Mode)");
             }
             serial::println("  Block Size:    4096 bytes");
-            let name_len = st.volume_name.iter().position(|&c| c == 0).unwrap_or(st.volume_name.len());
-            let name_str = core::str::from_utf8(&st.volume_name[..name_len]).unwrap_or("PurpleSystem");
+            let name_len = st
+                .volume_name
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(st.volume_name.len());
+            let name_str =
+                core::str::from_utf8(&st.volume_name[..name_len]).unwrap_or("PurpleSystem");
             serial::print("  Volume Label:  ");
             serial::println(name_str);
             serial::print("  Total Blocks:  ");
@@ -4417,7 +4858,10 @@ impl Shell {
         let mut path_buf = [0u8; 128];
         let resolved = self.resolve_path(filename, &mut path_buf);
 
-        if resolved.starts_with("/tmp/") || resolved.starts_with("/dev/") {
+        if resolved.starts_with("/tmp/")
+            || resolved.starts_with("/dev/")
+            || crate::fs::vfs::is_storage_path(resolved)
+        {
             match crate::fs::vfs::write(resolved, content.as_bytes()) {
                 Ok(bytes) => {
                     serial::print("Successfully wrote ");
@@ -4442,9 +4886,7 @@ impl Shell {
             return;
         }
         let clean = resolved.trim_start_matches('/');
-        let res = crate::kernel::storage::with_fs(|fs| {
-            fs.write_file(clean, content.as_bytes())
-        });
+        let res = crate::kernel::storage::with_fs(|fs| fs.write_file(clean, content.as_bytes()));
         match res {
             Some(Ok(bytes)) => {
                 serial::print("Successfully wrote ");
@@ -4479,8 +4921,12 @@ impl Shell {
         }
 
         // Try VFS cross-copy first if absolute or special mount
-        if resolved_src.starts_with("/tmp/") || resolved_src.starts_with("/dev/") || resolved_src.starts_with("/proc/")
-            || resolved_dst.starts_with("/tmp/") || resolved_dst.starts_with("/dev/") {
+        if resolved_src.starts_with("/tmp/")
+            || resolved_src.starts_with("/dev/")
+            || resolved_src.starts_with("/proc/")
+            || resolved_dst.starts_with("/tmp/")
+            || resolved_dst.starts_with("/dev/")
+        {
             let mut buf = [0u8; 4096];
             if let Ok(len) = crate::fs::vfs::read(resolved_src, &mut buf) {
                 if let Ok(wlen) = crate::fs::vfs::write(resolved_dst, &buf[..len]) {
@@ -4606,7 +5052,8 @@ impl Shell {
         serial::println("  Status:        ONLINE (storage integrity checks available)");
         serial::println("  Hash Engine:   SHA-256");
         if crate::kernel::storage::is_mounted() {
-            let (verified, total, unverified, missing) = crate::security::aegis_detect::verify_storage();
+            let (verified, total, unverified, missing) =
+                crate::security::aegis_detect::verify_storage();
             serial::print("  Verification:  ");
             serial::print_u64(verified as u64);
             serial::print("/");
@@ -4628,7 +5075,9 @@ impl Shell {
             None => {
                 let server = crate::net::NET_CONFIG.lock().dns;
                 let Some(server) = server else {
-                    serial::println("Configure a DNS server with ifconfig before pinging a hostname");
+                    serial::println(
+                        "Configure a DNS server with ifconfig before pinging a hostname",
+                    );
                     return;
                 };
                 match crate::net::dns::resolve(host, server) {
@@ -4683,7 +5132,10 @@ struct CalcParser<'a> {
 
 impl<'a> CalcParser<'a> {
     fn new(s: &'a str) -> Self {
-        Self { s: s.as_bytes(), pos: 0 }
+        Self {
+            s: s.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn skip_ws(&mut self) {
@@ -4698,7 +5150,10 @@ impl<'a> CalcParser<'a> {
             return Err("Expected number");
         }
         let start = self.pos;
-        if self.pos + 2 <= self.s.len() && (&self.s[self.pos..self.pos+2] == b"0x" || &self.s[self.pos..self.pos+2] == b"0X") {
+        if self.pos + 2 <= self.s.len()
+            && (&self.s[self.pos..self.pos + 2] == b"0x"
+                || &self.s[self.pos..self.pos + 2] == b"0X")
+        {
             self.pos += 2;
             let hex_start = self.pos;
             while self.pos < self.s.len() && self.s[self.pos].is_ascii_hexdigit() {
@@ -4707,7 +5162,8 @@ impl<'a> CalcParser<'a> {
             if self.pos == hex_start {
                 return Err("Invalid hex number");
             }
-            let hex_str = core::str::from_utf8(&self.s[hex_start..self.pos]).map_err(|_| "Invalid UTF-8")?;
+            let hex_str =
+                core::str::from_utf8(&self.s[hex_start..self.pos]).map_err(|_| "Invalid UTF-8")?;
             i64::from_str_radix(hex_str, 16).map_err(|_| "Hex parse error")
         } else {
             while self.pos < self.s.len() && self.s[self.pos].is_ascii_digit() {
@@ -4716,7 +5172,8 @@ impl<'a> CalcParser<'a> {
             if self.pos == start {
                 return Err("Invalid number");
             }
-            let dec_str = core::str::from_utf8(&self.s[start..self.pos]).map_err(|_| "Invalid UTF-8")?;
+            let dec_str =
+                core::str::from_utf8(&self.s[start..self.pos]).map_err(|_| "Invalid UTF-8")?;
             dec_str.parse::<i64>().map_err(|_| "Dec parse error")
         }
     }
@@ -4805,11 +5262,11 @@ impl<'a> CalcParser<'a> {
         let mut left = self.parse_add_sub()?;
         loop {
             self.skip_ws();
-            if self.pos + 1 < self.s.len() && &self.s[self.pos..self.pos+2] == b"<<" {
+            if self.pos + 1 < self.s.len() && &self.s[self.pos..self.pos + 2] == b"<<" {
                 self.pos += 2;
                 let right = self.parse_add_sub()?;
                 left = left.wrapping_shl(right as u32);
-            } else if self.pos + 1 < self.s.len() && &self.s[self.pos..self.pos+2] == b">>" {
+            } else if self.pos + 1 < self.s.len() && &self.s[self.pos..self.pos + 2] == b">>" {
                 self.pos += 2;
                 let right = self.parse_add_sub()?;
                 left = left.wrapping_shr(right as u32);
@@ -4859,7 +5316,11 @@ fn parse_u64(s: &str) -> Option<u64> {
             break;
         }
     }
-    if has { Some(val) } else { None }
+    if has {
+        Some(val)
+    } else {
+        None
+    }
 }
 
 static mut GLOBAL_SHELL: Shell = Shell::new();

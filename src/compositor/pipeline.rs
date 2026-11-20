@@ -35,7 +35,8 @@ impl CompositorPipeline {
         Self::render_windows(target, windows);
 
         // Pass 3: Desktop Shell Layers (Purple Bar & Purple Dock with mirror reflection)
-        super::desktop::render_desktop_shell(target, animation_tick, dock_lift);
+        let open_apps = super::desktop::dock_open_state(windows);
+        super::desktop::render_desktop_shell(target, animation_tick, dock_lift, &open_apps, cursor);
 
         // Pass 4: Render Cursor Overlay on Top
         super::desktop::render_panel(target, panel, cursor);

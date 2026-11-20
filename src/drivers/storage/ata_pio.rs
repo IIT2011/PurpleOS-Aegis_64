@@ -1,5 +1,7 @@
 use crate::arch::x86_64::io::{inb, inw, outb, outw};
-use crate::drivers::block_dev::{BlockDevice, StorageCategory, BLOCK_DEV_ERR_BOUNDS, BLOCK_DEV_ERR_IO, BLOCK_DEV_OK};
+use crate::drivers::block_dev::{
+    BlockDevice, StorageCategory, BLOCK_DEV_ERR_BOUNDS, BLOCK_DEV_ERR_IO, BLOCK_DEV_OK,
+};
 
 pub const ATA_PRIMARY_IO: u16 = 0x1F0;
 pub const ATA_PRIMARY_CTRL: u16 = 0x3F6;
@@ -60,7 +62,8 @@ impl AtaDevice {
                 if (status & 0x08) != 0 {
                     return true;
                 }
-                if (status & 0x01) != 0 { // ERR
+                if (status & 0x01) != 0 {
+                    // ERR
                     return false;
                 }
             }
@@ -72,7 +75,8 @@ impl AtaDevice {
                 if (status & 0x08) != 0 {
                     return true;
                 }
-                if (status & 0x01) != 0 { // ERR
+                if (status & 0x01) != 0 {
+                    // ERR
                     return false;
                 }
             }
@@ -191,14 +195,21 @@ impl BlockDevice for AtaDevice {
                 }
 
                 // LBA28 command
-                outb(self.io_base + 6, 0xE0 | ((self.is_slave as u8) << 4) | (((cur_lba >> 24) & 0x0F) as u8));
-                for _ in 0..4 { let _ = inb(self.ctrl_base); }
+                outb(
+                    self.io_base + 6,
+                    0xE0 | ((self.is_slave as u8) << 4) | (((cur_lba >> 24) & 0x0F) as u8),
+                );
+                for _ in 0..4 {
+                    let _ = inb(self.ctrl_base);
+                }
                 outb(self.io_base + 2, 1);
                 outb(self.io_base + 3, (cur_lba & 0xFF) as u8);
                 outb(self.io_base + 4, ((cur_lba >> 8) & 0xFF) as u8);
                 outb(self.io_base + 5, ((cur_lba >> 16) & 0xFF) as u8);
                 outb(self.io_base + 7, 0x20); // READ SECTORS
-                for _ in 0..4 { let _ = inb(self.ctrl_base); }
+                for _ in 0..4 {
+                    let _ = inb(self.ctrl_base);
+                }
 
                 if !self.wait_drq() {
                     return BLOCK_DEV_ERR_IO;
@@ -242,14 +253,21 @@ impl BlockDevice for AtaDevice {
                     return BLOCK_DEV_ERR_IO;
                 }
 
-                outb(self.io_base + 6, 0xE0 | ((self.is_slave as u8) << 4) | (((cur_lba >> 24) & 0x0F) as u8));
-                for _ in 0..4 { let _ = inb(self.ctrl_base); }
+                outb(
+                    self.io_base + 6,
+                    0xE0 | ((self.is_slave as u8) << 4) | (((cur_lba >> 24) & 0x0F) as u8),
+                );
+                for _ in 0..4 {
+                    let _ = inb(self.ctrl_base);
+                }
                 outb(self.io_base + 2, 1);
                 outb(self.io_base + 3, (cur_lba & 0xFF) as u8);
                 outb(self.io_base + 4, ((cur_lba >> 8) & 0xFF) as u8);
                 outb(self.io_base + 5, ((cur_lba >> 16) & 0xFF) as u8);
                 outb(self.io_base + 7, 0x30); // WRITE SECTORS
-                for _ in 0..4 { let _ = inb(self.ctrl_base); }
+                for _ in 0..4 {
+                    let _ = inb(self.ctrl_base);
+                }
 
                 if !self.wait_drq() {
                     return BLOCK_DEV_ERR_IO;
@@ -264,7 +282,9 @@ impl BlockDevice for AtaDevice {
                 }
 
                 // Wait for the drive to complete the sector write
-                for _ in 0..4 { let _ = inb(self.ctrl_base); }
+                for _ in 0..4 {
+                    let _ = inb(self.ctrl_base);
+                }
                 if !self.wait_not_busy() {
                     return BLOCK_DEV_ERR_IO;
                 }
@@ -280,9 +300,13 @@ impl BlockDevice for AtaDevice {
                 return BLOCK_DEV_ERR_IO;
             }
             outb(self.io_base + 6, 0xE0 | ((self.is_slave as u8) << 4));
-            for _ in 0..4 { let _ = inb(self.ctrl_base); }
+            for _ in 0..4 {
+                let _ = inb(self.ctrl_base);
+            }
             outb(self.io_base + 7, 0xE7); // CACHE FLUSH
-            for _ in 0..4 { let _ = inb(self.ctrl_base); }
+            for _ in 0..4 {
+                let _ = inb(self.ctrl_base);
+            }
             // Cache flush includes host media latency and can take much longer
             // than the normal PIO command timeout.
             for _ in 0..5_000 {

@@ -6,12 +6,12 @@
 use crate::drivers::block_dev::BlockDevice;
 
 pub const FAT_ATTR_READ_ONLY: u8 = 0x01;
-pub const FAT_ATTR_HIDDEN: u8    = 0x02;
-pub const FAT_ATTR_SYSTEM: u8    = 0x04;
+pub const FAT_ATTR_HIDDEN: u8 = 0x02;
+pub const FAT_ATTR_SYSTEM: u8 = 0x04;
 pub const FAT_ATTR_VOLUME_ID: u8 = 0x08;
 pub const FAT_ATTR_DIRECTORY: u8 = 0x10;
-pub const FAT_ATTR_ARCHIVE: u8   = 0x20;
-pub const FAT_ATTR_LFN: u8       = 0x0F;
+pub const FAT_ATTR_ARCHIVE: u8 = 0x20;
+pub const FAT_ATTR_LFN: u8 = 0x0F;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum FatType {
@@ -145,12 +145,17 @@ impl FatDriver {
         let fat_sz_16 = u16::from_le_bytes([buf[22], buf[23]]);
         let tot_sec_32 = u32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
 
-        let total_sectors = if tot_sec_16 != 0 { tot_sec_16 as u32 } else { tot_sec_32 };
+        let total_sectors = if tot_sec_16 != 0 {
+            tot_sec_16 as u32
+        } else {
+            tot_sec_32
+        };
         if total_sectors == 0 {
             return None;
         }
 
-        let root_dir_sectors = ((root_ent_cnt as u32 * 32) + (bytes_per_sec as u32 - 1)) / (bytes_per_sec as u32);
+        let root_dir_sectors =
+            ((root_ent_cnt as u32 * 32) + (bytes_per_sec as u32 - 1)) / (bytes_per_sec as u32);
         let fat_sz = if fat_sz_16 != 0 {
             fat_sz_16 as u32
         } else {
@@ -181,8 +186,10 @@ impl FatDriver {
     /// Probe a block device for a FAT filesystem at start_lba
     pub fn probe(&mut self, dev: &mut dyn BlockDevice, start_lba: u64) -> Option<FatType> {
         let mut buf = [0u8; 512];
-        if dev.block_size() != 512 || start_lba >= dev.total_blocks()
-            || dev.read_blocks(start_lba, 1, &mut buf) != 0 {
+        if dev.block_size() != 512
+            || start_lba >= dev.total_blocks()
+            || dev.read_blocks(start_lba, 1, &mut buf) != 0
+        {
             return None;
         }
         let fat_t = Self::probe_sector(&buf)?;

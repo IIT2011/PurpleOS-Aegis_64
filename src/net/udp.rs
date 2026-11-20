@@ -13,18 +13,37 @@ pub struct UdpHeader {
 impl UdpHeader {
     pub fn parse_ipv4(data: &[u8], source: [u8; 4], destination: [u8; 4]) -> Option<(Self, &[u8])> {
         let (header, payload) = Self::parse(data)?;
-        if header.checksum != 0 && super::ipv4::transport_checksum(
-            source, destination, super::ipv4::IP_PROTO_UDP, &data[..usize::from(header.length)],
-        )? != 0 {
+        if header.checksum != 0
+            && super::ipv4::transport_checksum(
+                source,
+                destination,
+                super::ipv4::IP_PROTO_UDP,
+                &data[..usize::from(header.length)],
+            )? != 0
+        {
             return None;
         }
         Some((header, payload))
     }
 
-    pub fn write_ipv4(&self, payload: &[u8], source: [u8; 4], destination: [u8; 4], out: &mut [u8]) -> usize {
+    pub fn write_ipv4(
+        &self,
+        payload: &[u8],
+        source: [u8; 4],
+        destination: [u8; 4],
+        out: &mut [u8],
+    ) -> usize {
         let length = self.write_to(payload, out);
-        if length == 0 { return 0; }
-        let checksum = super::ipv4::transport_checksum(source, destination, super::ipv4::IP_PROTO_UDP, &out[..length]).unwrap();
+        if length == 0 {
+            return 0;
+        }
+        let checksum = super::ipv4::transport_checksum(
+            source,
+            destination,
+            super::ipv4::IP_PROTO_UDP,
+            &out[..length],
+        )
+        .unwrap();
         out[6..8].copy_from_slice(&(if checksum == 0 { u16::MAX } else { checksum }).to_be_bytes());
         length
     }

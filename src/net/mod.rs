@@ -8,14 +8,14 @@
 //!   - `udp`: User Datagram Protocol
 //!   - `tcp`: Transmission Control Protocol
 
-pub mod eth;
 pub mod arp;
-pub mod ipv4;
-pub mod icmp;
-pub mod udp;
-pub mod tcp;
-mod https_roots;
 pub mod dns;
+pub mod eth;
+mod https_roots;
+pub mod icmp;
+pub mod ipv4;
+pub mod tcp;
+pub mod udp;
 
 use crate::sync::Spinlock;
 
@@ -60,7 +60,9 @@ impl Drop for PingGuard {
 
 pub fn init() {
     https_roots::init();
-    crate::drivers::serial::println("Network: Ethernet and IPv4 initialized; IPv4 configuration required");
+    crate::drivers::serial::println(
+        "Network: Ethernet and IPv4 initialized; IPv4 configuration required",
+    );
 }
 
 pub fn get_ip() -> [u8; 4] {
@@ -96,7 +98,12 @@ pub fn set_config(ip: [u8; 4], gw: [u8; 4], subnet: [u8; 4]) -> Result<(), &'sta
     configure(ip, gw, subnet, None)
 }
 
-pub fn configure(ip: [u8; 4], gw: [u8; 4], subnet: [u8; 4], dns: Option<[u8; 4]>) -> Result<(), &'static str> {
+pub fn configure(
+    ip: [u8; 4],
+    gw: [u8; 4],
+    subnet: [u8; 4],
+    dns: Option<[u8; 4]>,
+) -> Result<(), &'static str> {
     if dns.is_some_and(|server| !unicast(server) || server == ip) {
         return Err("Invalid DNS server address");
     }
@@ -105,8 +112,15 @@ pub fn configure(ip: [u8; 4], gw: [u8; 4], subnet: [u8; 4], dns: Option<[u8; 4]>
     let gateway = u32::from_be_bytes(gw);
     let host = !mask;
     let valid_host = |address: u32| host <= 1 || (address & host != 0 && address & host != host);
-    if mask == 0 || mask.leading_ones() != mask.count_ones() || !unicast(ip) || !valid_host(found)
-        || (gateway != 0 && (!unicast(gw) || gateway == found || gateway & mask != found & mask || !valid_host(gateway)))
+    if mask == 0
+        || mask.leading_ones() != mask.count_ones()
+        || !unicast(ip)
+        || !valid_host(found)
+        || (gateway != 0
+            && (!unicast(gw)
+                || gateway == found
+                || gateway & mask != found & mask
+                || !valid_host(gateway)))
     {
         return Err("Invalid IPv4 address, subnet mask, or gateway");
     }
@@ -140,7 +154,9 @@ pub fn poll() {
     };
     for _ in 0..RX_POLL_BUDGET {
         let len = receive(&mut rx_buf);
-        if len == 0 { break; }
+        if len == 0 {
+            break;
+        }
         process_packet(&rx_buf[..len]);
     }
 }
@@ -151,20 +167,26 @@ pub fn process_packet(data: &[u8]) {
         None => return,
     };
     let Some(my_mac) = get_my_mac() else { return };
-    if eth_hdr.dst_mac != my_mac && eth_hdr.dst_mac != [0xff; 6] { return; }
+    if eth_hdr.dst_mac != my_mac && eth_hdr.dst_mac != [0xff; 6] {
+        return;
+    }
     let my_ip = get_ip();
-    if my_ip == [0; 4] { return; }
+    if my_ip == [0; 4] {
+        return;
+    }
 
     match eth_hdr.ether_type {
         eth::ETHERTYPE_ARP => {
             if let Some(arp_pkt) = arp::ArpPacket::parse(payload) {
-                if arp_pkt.target_ip != my_ip || arp_pkt.sender_mac != eth_hdr.src_mac
+                if arp_pkt.target_ip != my_ip
+                    || arp_pkt.sender_mac != eth_hdr.src_mac
                     || (arp_pkt.opcode == arp::ARP_OP_REPLY && arp_pkt.target_mac != my_mac)
                 {
                     return;
                 }
                 if arp_pkt.opcode == arp::ARP_OP_REPLY
-                    && unicast(arp_pkt.sender_ip) && arp_pkt.sender_ip != my_ip
+                    && unicast(arp_pkt.sender_ip)
+                    && arp_pkt.sender_ip != my_ip
                 {
                     arp::accept_reply(arp_pkt.sender_ip, arp_pkt.sender_mac);
                 }
@@ -199,8 +221,12 @@ pub fn process_packet(data: &[u8]) {
         }
         eth::ETHERTYPE_IPV4 => {
             if let Some((ip_hdr, ip_payload)) = ipv4::Ipv4Header::parse(payload) {
-                if ip_hdr.dst_ip != my_ip || eth_hdr.dst_mac != my_mac || !unicast(ip_hdr.src_ip)
-                    || eth_hdr.src_mac == [0; 6] || eth_hdr.src_mac[0] & 1 != 0 {
+                if ip_hdr.dst_ip != my_ip
+                    || eth_hdr.dst_mac != my_mac
+                    || !unicast(ip_hdr.src_ip)
+                    || eth_hdr.src_mac == [0; 6]
+                    || eth_hdr.src_mac[0] & 1 != 0
+                {
                     return;
                 }
 
@@ -210,7 +236,13 @@ pub fn process_packet(data: &[u8]) {
                     if let Some((icmp_pkt, icmp_payload)) = icmp::IcmpEcho::parse(ip_payload) {
                         if icmp_pkt.msg_type == icmp::ICMP_TYPE_ECHO_REQUEST {
                             // Automatically answer ping directed at us
-                            send_icmp_reply(ip_hdr.src_ip, eth_hdr.src_mac, icmp_pkt.identifier, icmp_pkt.seq_no, icmp_payload);
+                            send_icmp_reply(
+                                ip_hdr.src_ip,
+                                eth_hdr.src_mac,
+                                icmp_pkt.identifier,
+                                icmp_pkt.seq_no,
+                                icmp_payload,
+                            );
                         } else if icmp_pkt.msg_type == icmp::ICMP_TYPE_ECHO_REPLY {
                             let mut pending = PENDING_PING.lock();
                             if let Some(ref mut p) = *pending {
@@ -283,18 +315,23 @@ fn send_icmp_reply(dst_ip: [u8; 4], dst_mac: [u8; 6], id: u16, seq: u16, payload
 }
 
 pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
-    if PING_ACTIVE.compare_exchange(
-        false,
-        true,
-        core::sync::atomic::Ordering::Acquire,
-        core::sync::atomic::Ordering::Relaxed,
-    ).is_err() {
+    if PING_ACTIVE
+        .compare_exchange(
+            false,
+            true,
+            core::sync::atomic::Ordering::Acquire,
+            core::sync::atomic::Ordering::Relaxed,
+        )
+        .is_err()
+    {
         return Err("Another ping is already in progress");
     }
     let _ping_guard = PingGuard;
     let config = *NET_CONFIG.lock();
     let my_ip = config.ip;
-    if my_ip == [0; 4] { return Err("Configure an IPv4 address before sending packets"); }
+    if my_ip == [0; 4] {
+        return Err("Configure an IPv4 address before sending packets");
+    }
     if !unicast(target_ip) || target_ip == my_ip {
         return Err("Loopback routing is not implemented");
     }
@@ -313,7 +350,9 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
         && (target_ip[3] & subnet[3] == my_ip[3] & subnet[3]);
 
     let next_hop = if is_local { target_ip } else { gateway };
-    if next_hop == [0; 4] { return Err("No IPv4 route to destination"); }
+    if next_hop == [0; 4] {
+        return Err("No IPv4 route to destination");
+    }
 
     // Resolve next-hop MAC via dynamic ARP cache or request
     let mut dst_mac_opt = arp::lookup_mac(next_hop);
@@ -400,7 +439,8 @@ pub fn ping(target_ip: [u8; 4]) -> Result<u64, &'static str> {
                     reply_received = true;
                     elapsed_ms = crate::drivers::pit::ticks_to_millis(
                         p.reply_time_ticks.saturating_sub(start_ticks),
-                    ).max(1);
+                    )
+                    .max(1);
                     break;
                 }
             }

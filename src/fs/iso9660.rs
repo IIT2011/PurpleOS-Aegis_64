@@ -9,7 +9,7 @@ pub const ISO_MAGIC: &[u8; 5] = b"CD001";
 pub const ISO_SECTOR_SIZE: usize = 2048;
 pub const ISO_PVD_LBA_OFFSET: u64 = 16; // Sector 16 (in 2048-byte sectors)
 
-pub const ISO_FLAG_HIDDEN: u8    = 0x01;
+pub const ISO_FLAG_HIDDEN: u8 = 0x01;
 pub const ISO_FLAG_DIRECTORY: u8 = 0x02;
 pub const ISO_FLAG_ASSOCIATED: u8 = 0x04;
 
@@ -75,9 +75,13 @@ impl Iso9660Driver {
         let volume_space_size_be = u32::from_be_bytes([buf[84], buf[85], buf[86], buf[87]]);
         let log_blk_sz_le = u16::from_le_bytes([buf[128], buf[129]]);
         let log_blk_sz_be = u16::from_be_bytes([buf[130], buf[131]]);
-        if vol_space_sz == 0 || vol_space_sz != volume_space_size_be
-            || log_blk_sz_le != ISO_SECTOR_SIZE as u16 || log_blk_sz_be != ISO_SECTOR_SIZE as u16
-            || buf[156] < 34 || buf[156 + 32] != 1 || buf[156 + 25] & ISO_FLAG_DIRECTORY == 0
+        if vol_space_sz == 0
+            || vol_space_sz != volume_space_size_be
+            || log_blk_sz_le != ISO_SECTOR_SIZE as u16
+            || log_blk_sz_be != ISO_SECTOR_SIZE as u16
+            || buf[156] < 34
+            || buf[156 + 32] != 1
+            || buf[156 + 25] & ISO_FLAG_DIRECTORY == 0
         {
             return None;
         }
@@ -87,8 +91,10 @@ impl Iso9660Driver {
         let root_extent_be = u32::from_be_bytes([buf[162], buf[163], buf[164], buf[165]]);
         let root_len = u32::from_le_bytes([buf[166], buf[167], buf[168], buf[169]]);
         let root_len_be = u32::from_be_bytes([buf[170], buf[171], buf[172], buf[173]]);
-        if root_extent != root_extent_be || root_len != root_len_be
-            || root_extent >= vol_space_sz || root_len == 0
+        if root_extent != root_extent_be
+            || root_len != root_len_be
+            || root_extent >= vol_space_sz
+            || root_len == 0
         {
             return None;
         }

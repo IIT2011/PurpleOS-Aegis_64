@@ -75,7 +75,7 @@ pub fn write_config_u32(bus: u8, slot: u8, func: u8, offset: u8, val: u32) {
 
 pub fn enable_bus_mastering(bus: u8, slot: u8, func: u8) {
     let cmd = read_config_u32(bus, slot, func, 0x04);
-    write_config_u32(bus, slot, func, 0x04, cmd | 0x07);
+    write_config_u32(bus, slot, func, 0x04, (cmd & 0xffff) | 0x07);
 }
 
 pub fn init() {
@@ -86,23 +86,35 @@ pub fn init() {
 
     for bus in 0..=8 {
         for slot in 0..32 {
-            let reg0 = read_config_u32(bus, slot, 0, 0);
-            let vendor = (reg0 & 0xFFFF) as u16;
-            let device = (reg0 >> 16) as u16;
-
-            if vendor != 0xFFFF && vendor != 0x0000 {
-                let reg8 = read_config_u32(bus, slot, 0, 8);
+            let first_id = read_config_u32(bus, slot, 0, 0);
+            if matches!(first_id as u16, 0 | 0xffff) {
+                continue;
+            }
+            let header = read_config_u32(bus, slot, 0, 0x0c);
+            let functions = if header & (1 << 23) != 0 { 8 } else { 1 };
+            for func in 0..functions {
+                let id = if func == 0 {
+                    first_id
+                } else {
+                    read_config_u32(bus, slot, func, 0)
+                };
+                let vendor = id as u16;
+                if vendor == 0xffff || vendor == 0 {
+                    continue;
+                }
+                let device = (id >> 16) as u16;
+                let reg8 = read_config_u32(bus, slot, func, 8);
                 let class_id = ((reg8 >> 24) & 0xFF) as u8;
                 let subclass_id = ((reg8 >> 16) & 0xFF) as u8;
                 let prog_if = ((reg8 >> 8) & 0xFF) as u8;
 
-                let bar0 = read_config_u32(bus, slot, 0, 0x10);
-                let bar1 = read_config_u32(bus, slot, 0, 0x14);
-                let bar2 = read_config_u32(bus, slot, 0, 0x18);
-                let bar3 = read_config_u32(bus, slot, 0, 0x1C);
-                let bar4 = read_config_u32(bus, slot, 0, 0x20);
-                let bar5 = read_config_u32(bus, slot, 0, 0x24);
-                let reg3c = read_config_u32(bus, slot, 0, 0x3C);
+                let bar0 = read_config_u32(bus, slot, func, 0x10);
+                let bar1 = read_config_u32(bus, slot, func, 0x14);
+                let bar2 = read_config_u32(bus, slot, func, 0x18);
+                let bar3 = read_config_u32(bus, slot, func, 0x1C);
+                let bar4 = read_config_u32(bus, slot, func, 0x20);
+                let bar5 = read_config_u32(bus, slot, func, 0x24);
+                let reg3c = read_config_u32(bus, slot, func, 0x3C);
                 let irq_line = (reg3c & 0xFF) as u8;
 
                 if state.count < state.devices.len() {
@@ -110,7 +122,7 @@ pub fn init() {
                     state.devices[idx] = PciDevice {
                         bus,
                         slot,
-                        func: 0,
+                        func,
                         vendor_id: vendor,
                         device_id: device,
                         class_id,

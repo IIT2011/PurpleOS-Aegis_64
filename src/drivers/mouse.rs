@@ -109,7 +109,8 @@ pub fn handle_byte(b: u8) {
     let mut m = MOUSE.lock();
     match m.cycle {
         0 => {
-            if (b & 0x08) != 0 { // Check sync bit
+            if (b & 0x08) != 0 {
+                // Check sync bit
                 m.packet[0] = b;
                 m.cycle = 1;
             }
@@ -141,7 +142,10 @@ pub fn handle_byte(b: u8) {
 
             m.buttons = flags & 0x07;
             let (max_x, max_y) = if video::is_available() {
-                ((video::get_width() as i32).saturating_sub(1), (video::get_height() as i32).saturating_sub(1))
+                (
+                    (video::get_width() as i32).saturating_sub(1),
+                    (video::get_height() as i32).saturating_sub(1),
+                )
             } else {
                 (1023, 767)
             };

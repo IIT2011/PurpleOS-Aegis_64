@@ -5,8 +5,7 @@ pub const GPT_SECTOR_SIZE: usize = 512;
 pub const GPT_MAX_PARTITION_ENTRIES: usize = 128;
 pub const GPT_MAX_PARTITIONS: usize = 32;
 pub const PURPLEFS_GUID: [u8; 16] = [
-    0x50, 0x55, 0x52, 0x50, 0x4C, 0x45, 0x2D, 0x4F,
-    0x53, 0x2D, 0x46, 0x53, 0x2D, 0x56, 0x32, 0x30,
+    0x50, 0x55, 0x52, 0x50, 0x4C, 0x45, 0x2D, 0x4F, 0x53, 0x2D, 0x46, 0x53, 0x2D, 0x56, 0x32, 0x30,
 ];
 
 #[derive(Copy, Clone)]
@@ -61,13 +60,24 @@ impl GptInfo {
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+    u32::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ])
 }
 
 fn read_u64(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes([
-        bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3],
-        bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7],
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7],
     ])
 }
 
@@ -174,13 +184,21 @@ pub fn parse(bdev: &mut dyn BlockDevice) -> Result<GptInfo, &'static str> {
     if !(128..=GPT_SECTOR_SIZE).contains(&entry_size) || entry_size % 8 != 0 {
         return Err("Invalid GPT partition entry size");
     }
-    let table_bytes = entry_count.checked_mul(entry_size).ok_or("GPT entry table size overflow")?;
-    let table_sectors = table_bytes.checked_add(GPT_SECTOR_SIZE - 1)
-        .ok_or("GPT entry table size overflow")? / GPT_SECTOR_SIZE;
-    let table_end_lba = entry_lba.checked_add(table_sectors as u64)
+    let table_bytes = entry_count
+        .checked_mul(entry_size)
+        .ok_or("GPT entry table size overflow")?;
+    let table_sectors = table_bytes
+        .checked_add(GPT_SECTOR_SIZE - 1)
+        .ok_or("GPT entry table size overflow")?
+        / GPT_SECTOR_SIZE;
+    let table_end_lba = entry_lba
+        .checked_add(table_sectors as u64)
         .ok_or("GPT entry table LBA overflow")?;
-    if entry_lba < 2 || table_end_lba > total_blocks || table_end_lba > backup_lba
-        || table_end_lba > first_usable_lba {
+    if entry_lba < 2
+        || table_end_lba > total_blocks
+        || table_end_lba > backup_lba
+        || table_end_lba > first_usable_lba
+    {
         return Err("GPT entry table is outside the usable device range");
     }
     read_gpt_entry_table(bdev, entry_lba, table_bytes, expected_table_crc)?;
@@ -197,7 +215,8 @@ pub fn parse(bdev: &mut dyn BlockDevice) -> Result<GptInfo, &'static str> {
     for index in 0..entry_count {
         let sector_offset = index / entries_per_sector;
         let entry_offset = (index % entries_per_sector) * entry_size;
-        let lba = entry_lba.checked_add(sector_offset as u64)
+        let lba = entry_lba
+            .checked_add(sector_offset as u64)
             .ok_or("GPT partition entry LBA overflow")?;
         if lba != cached_sector {
             if bdev.read_blocks(lba, 1, &mut sector_buf) != 0 {

@@ -37,7 +37,10 @@ pub struct Bundle<'a> {
 }
 
 fn field(bytes: &[u8]) -> Result<&str, Error> {
-    let end = bytes.iter().position(|&byte| byte == 0).ok_or(Error::Format)?;
+    let end = bytes
+        .iter()
+        .position(|&byte| byte == 0)
+        .ok_or(Error::Format)?;
     let value = str::from_utf8(&bytes[..end]).map_err(|_| Error::Format)?;
     if bytes[end..].iter().any(|&byte| byte != 0) || value.chars().any(char::is_control) {
         return Err(Error::Format);
@@ -47,12 +50,19 @@ fn field(bytes: &[u8]) -> Result<&str, Error> {
 
 pub fn valid_id(id: &str) -> bool {
     id.split('.').all(|part| {
-        !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
     })
 }
 
 impl<'a> Bundle<'a> {
-    pub fn parse(bytes: &'a [u8], size_limit: usize, max_surface: (u32, u32)) -> Result<Self, Error> {
+    pub fn parse(
+        bytes: &'a [u8],
+        size_limit: usize,
+        max_surface: (u32, u32),
+    ) -> Result<Self, Error> {
         if bytes.len() > size_limit {
             return Err(Error::Format);
         }
@@ -78,7 +88,10 @@ impl<'a> Bundle<'a> {
         } else {
             width == 0 && height == 0
         };
-        if !valid_id(id) || name.is_empty() || version.is_empty() || !(1..=3).contains(&priority)
+        if !valid_id(id)
+            || name.is_empty()
+            || version.is_empty()
+            || !(1..=3).contains(&priority)
             || !valid_geometry
         {
             return Err(Error::Format);
@@ -108,7 +121,15 @@ impl<'a> Bundle<'a> {
             return Err(Error::Format);
         }
         Ok(Self {
-            id, name, capabilities, priority, width, height, executable, resources, metadata,
+            id,
+            name,
+            capabilities,
+            priority,
+            width,
+            height,
+            executable,
+            resources,
+            metadata,
             key_id: header[0xf0..0x110].try_into().unwrap(),
             signature: header[0x110..0x150].try_into().unwrap(),
         })

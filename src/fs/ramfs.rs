@@ -6,7 +6,7 @@
 use crate::sync::Spinlock;
 
 pub const RAMFS_MAX_NODES: usize = 32;
-pub const RAMFS_MAX_NAME: usize  = 32;
+pub const RAMFS_MAX_NAME: usize = 32;
 pub const RAMFS_NODE_CAPACITY: usize = 4096;
 
 #[derive(Copy, Clone)]
@@ -52,7 +52,9 @@ impl RamfsDriver {
         // Check if file exists
         for (i, node) in st.nodes.iter().enumerate() {
             if node.in_use {
-                let node_name = core::str::from_utf8(&node.name).unwrap_or("").trim_matches('\0');
+                let node_name = core::str::from_utf8(&node.name)
+                    .unwrap_or("")
+                    .trim_matches('\0');
                 if node_name == name {
                     return Ok(i);
                 }
@@ -81,7 +83,9 @@ impl RamfsDriver {
         let mut st = RAMFS.lock();
         for node in st.nodes.iter_mut() {
             if node.in_use {
-                let node_name = core::str::from_utf8(&node.name).unwrap_or("").trim_matches('\0');
+                let node_name = core::str::from_utf8(&node.name)
+                    .unwrap_or("")
+                    .trim_matches('\0');
                 if node_name == name {
                     let len = data.len().min(RAMFS_NODE_CAPACITY);
                     node.data[..len].copy_from_slice(&data[..len]);
@@ -97,7 +101,9 @@ impl RamfsDriver {
         let st = RAMFS.lock();
         for node in st.nodes.iter() {
             if node.in_use {
-                let node_name = core::str::from_utf8(&node.name).unwrap_or("").trim_matches('\0');
+                let node_name = core::str::from_utf8(&node.name)
+                    .unwrap_or("")
+                    .trim_matches('\0');
                 if node_name == name {
                     let len = node.size.min(buf.len());
                     buf[..len].copy_from_slice(&node.data[..len]);
@@ -112,7 +118,9 @@ impl RamfsDriver {
         let mut st = RAMFS.lock();
         for node in st.nodes.iter_mut() {
             if node.in_use {
-                let node_name = core::str::from_utf8(&node.name).unwrap_or("").trim_matches('\0');
+                let node_name = core::str::from_utf8(&node.name)
+                    .unwrap_or("")
+                    .trim_matches('\0');
                 if node_name == name {
                     node.in_use = false;
                     node.size = 0;
@@ -128,7 +136,9 @@ impl RamfsDriver {
         let st = RAMFS.lock();
         for node in st.nodes.iter() {
             if node.in_use {
-                let name = core::str::from_utf8(&node.name).unwrap_or("").trim_matches('\0');
+                let name = core::str::from_utf8(&node.name)
+                    .unwrap_or("")
+                    .trim_matches('\0');
                 cb(name, node.size, node.is_dir);
             }
         }

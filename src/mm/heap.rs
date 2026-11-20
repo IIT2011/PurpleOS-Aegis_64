@@ -5,9 +5,9 @@
 //! implementing `core::alloc::GlobalAlloc`. Unlocks standard dynamic data structures:
 //! `Vec`, `String`, `Box`, `BTreeMap`, and heap-allocated driver structures.
 
+use crate::sync::Spinlock;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
-use crate::sync::Spinlock;
 
 /// Minimum block allocation size (must fit free list node)
 const MIN_ALLOC_SIZE: usize = 32;
@@ -61,7 +61,11 @@ impl Heap {
         let align = layout.align().max(16);
         // The split remainder becomes a FreeListNode and must stay aligned.
         let node_align = core::mem::align_of::<FreeListNode>();
-        let Some(rounded_size) = layout.size().max(MIN_ALLOC_SIZE).checked_add(node_align - 1) else {
+        let Some(rounded_size) = layout
+            .size()
+            .max(MIN_ALLOC_SIZE)
+            .checked_add(node_align - 1)
+        else {
             return null_mut();
         };
         let size = rounded_size & !(node_align - 1);

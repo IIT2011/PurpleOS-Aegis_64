@@ -73,7 +73,13 @@ pub fn init() -> bool {
 fn setup_fallback_paths() {
     let mut table = PATH_TABLE.lock();
     table.count = 0;
-    let defaults = ["/System/Applications", "/System/CLI/scripts", "/System/Drivers", "/tmp", "/"];
+    let defaults = [
+        "/System/Applications",
+        "/System/CLI/scripts",
+        "/System/Drivers",
+        "/tmp",
+        "/",
+    ];
     for &d in &defaults {
         if table.count < MAX_SEARCH_PATHS {
             let idx = table.count;
@@ -122,7 +128,11 @@ fn parse_paths(data: &[u8]) -> bool {
             }
         }
 
-        line_start = if line_end < data.len() { line_end + 1 } else { line_end };
+        line_start = if line_end < data.len() {
+            line_end + 1
+        } else {
+            line_end
+        };
     }
 
     table.initialized = true;

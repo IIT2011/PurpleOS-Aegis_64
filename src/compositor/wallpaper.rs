@@ -7,8 +7,7 @@ const RAW_MAGIC: &[u8; 8] = b"PWRAW001";
 const RAW_HEADER_SIZE: usize = 16;
 const BYTES_PER_PIXEL: usize = 3;
 
-static WALLPAPER_ASSET: &[u8] =
-    include_bytes!("../../assets/wallpapers/purple_nebula.pwraw");
+static WALLPAPER_ASSET: &[u8] = include_bytes!("../../assets/wallpapers/purple_nebula.pwraw");
 static WALLPAPER_CACHE: Spinlock<Option<Surface>> = Spinlock::new(None);
 
 pub struct Wallpaper;
@@ -160,16 +159,31 @@ impl Wallpaper {
             let crop_height = ((source_width as u128) * (target_height as u128)
                 / (target_width as u128)) as usize;
             let crop_height = crop_height.clamp(1, source_height);
-            (0, (source_height - crop_height) / 2, source_width, crop_height)
+            (
+                0,
+                (source_height - crop_height) / 2,
+                source_width,
+                crop_height,
+            )
         } else {
             let crop_width = ((source_height as u128) * (target_width as u128)
                 / (target_height as u128)) as usize;
             let crop_width = crop_width.clamp(1, source_width);
-            ((source_width - crop_width) / 2, 0, crop_width, source_height)
+            (
+                (source_width - crop_width) / 2,
+                0,
+                crop_width,
+                source_height,
+            )
         }
     }
 
-    fn map_axis(position: usize, target_length: usize, crop_start: usize, crop_length: usize) -> u64 {
+    fn map_axis(
+        position: usize,
+        target_length: usize,
+        crop_start: usize,
+        crop_length: usize,
+    ) -> u64 {
         if target_length <= 1 || crop_length <= 1 {
             return ((crop_start + crop_length / 2) as u64) << 16;
         }

@@ -32,14 +32,54 @@ impl TmpFs {
     const fn new() -> Self {
         Self {
             entries: [
-                TmpEntry { name: [0; 32], data: [0; MAX_TMPFS_SIZE], len: 0, in_use: false },
-                TmpEntry { name: [0; 32], data: [0; MAX_TMPFS_SIZE], len: 0, in_use: false },
-                TmpEntry { name: [0; 32], data: [0; MAX_TMPFS_SIZE], len: 0, in_use: false },
-                TmpEntry { name: [0; 32], data: [0; MAX_TMPFS_SIZE], len: 0, in_use: false },
-                TmpEntry { name: [0; 32], data: [0; MAX_TMPFS_SIZE], len: 0, in_use: false },
-                TmpEntry { name: [0; 32], data: [0; MAX_TMPFS_SIZE], len: 0, in_use: false },
-                TmpEntry { name: [0; 32], data: [0; MAX_TMPFS_SIZE], len: 0, in_use: false },
-                TmpEntry { name: [0; 32], data: [0; MAX_TMPFS_SIZE], len: 0, in_use: false },
+                TmpEntry {
+                    name: [0; 32],
+                    data: [0; MAX_TMPFS_SIZE],
+                    len: 0,
+                    in_use: false,
+                },
+                TmpEntry {
+                    name: [0; 32],
+                    data: [0; MAX_TMPFS_SIZE],
+                    len: 0,
+                    in_use: false,
+                },
+                TmpEntry {
+                    name: [0; 32],
+                    data: [0; MAX_TMPFS_SIZE],
+                    len: 0,
+                    in_use: false,
+                },
+                TmpEntry {
+                    name: [0; 32],
+                    data: [0; MAX_TMPFS_SIZE],
+                    len: 0,
+                    in_use: false,
+                },
+                TmpEntry {
+                    name: [0; 32],
+                    data: [0; MAX_TMPFS_SIZE],
+                    len: 0,
+                    in_use: false,
+                },
+                TmpEntry {
+                    name: [0; 32],
+                    data: [0; MAX_TMPFS_SIZE],
+                    len: 0,
+                    in_use: false,
+                },
+                TmpEntry {
+                    name: [0; 32],
+                    data: [0; MAX_TMPFS_SIZE],
+                    len: 0,
+                    in_use: false,
+                },
+                TmpEntry {
+                    name: [0; 32],
+                    data: [0; MAX_TMPFS_SIZE],
+                    len: 0,
+                    in_use: false,
+                },
             ],
         }
     }
@@ -60,11 +100,13 @@ pub struct VfsDir {
     pub len: usize,
 }
 
-pub static VFS_DIRS: Spinlock<[VfsDir; 32]> = Spinlock::new([VfsDir {
-    in_use: false,
-    path: [0; 64],
-    len: 0,
-}; 32]);
+pub static VFS_DIRS: Spinlock<[VfsDir; 32]> = Spinlock::new(
+    [VfsDir {
+        in_use: false,
+        path: [0; 64],
+        len: 0,
+    }; 32],
+);
 
 pub fn is_directory(path: &str) -> bool {
     let p = path.trim_start_matches('/').trim_end_matches('/');
@@ -135,9 +177,7 @@ pub fn mkdir(path: &str) -> Result<(), &'static str> {
     }
 
     // 1. If persistent storage filesystem is mounted, create persistent directory in PurpleFS on disk!
-    let disk_res = crate::kernel::storage::with_fs(|fs| {
-        fs.mkdir(p)
-    });
+    let disk_res = crate::kernel::storage::with_fs(|fs| fs.mkdir(p));
 
     match disk_res {
         Some(Ok(_ino)) => {
@@ -224,9 +264,7 @@ pub fn rmdir(path: &str) -> Result<(), &'static str> {
     }
 
     // Remove from persistent PurpleFS on disk
-    let disk_res = crate::kernel::storage::with_fs(|fs| {
-        fs.rmdir(p)
-    });
+    let disk_res = crate::kernel::storage::with_fs(|fs| fs.rmdir(p));
 
     match disk_res {
         Some(Ok(())) => Ok(()),
@@ -253,11 +291,11 @@ pub enum VfsMountType {
     DevFs,
     ProcFs,
     TmpFs,
-    SsdDev,   // /ssd/...
-    HddDev,   // /hdd/...
-    UsbDev,   // /usb/...
-    SdxcDev,  // /sdxc/...
-    SdhcDev,  // /sdhc/...
+    SsdDev,  // /ssd/...
+    HddDev,  // /hdd/...
+    UsbDev,  // /usb/...
+    SdxcDev, // /sdxc/...
+    SdhcDev, // /sdhc/...
 }
 
 pub fn classify_path(path: &str) -> (VfsMountType, &str) {
@@ -275,9 +313,15 @@ pub fn classify_path(path: &str) -> (VfsMountType, &str) {
     } else if p.starts_with("usb/") || p == "usb" {
         (VfsMountType::UsbDev, if p.len() > 4 { &p[4..] } else { "" })
     } else if p.starts_with("sdxc/") || p == "sdxc" {
-        (VfsMountType::SdxcDev, if p.len() > 5 { &p[5..] } else { "" })
+        (
+            VfsMountType::SdxcDev,
+            if p.len() > 5 { &p[5..] } else { "" },
+        )
     } else if p.starts_with("sdhc/") || p == "sdhc" {
-        (VfsMountType::SdhcDev, if p.len() > 5 { &p[5..] } else { "" })
+        (
+            VfsMountType::SdhcDev,
+            if p.len() > 5 { &p[5..] } else { "" },
+        )
     } else {
         (VfsMountType::RootPurpleFs, p)
     }
@@ -320,7 +364,11 @@ pub fn file_size(path: &str) -> Result<usize, &'static str> {
             let tmp = TMPFS.lock();
             for entry in tmp.entries.iter() {
                 if entry.in_use {
-                    let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+                    let name_len = entry
+                        .name
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.name.len());
                     if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
                         if n == sub {
                             return Ok(entry.len);
@@ -330,8 +378,11 @@ pub fn file_size(path: &str) -> Result<usize, &'static str> {
             }
             Err("File not found in /tmp")
         }
-        VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
-        VfsMountType::SdxcDev | VfsMountType::SdhcDev => {
+        VfsMountType::SsdDev
+        | VfsMountType::HddDev
+        | VfsMountType::UsbDev
+        | VfsMountType::SdxcDev
+        | VfsMountType::SdhcDev => {
             if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(path) {
                 let mut sz = 0;
                 let _ = crate::drivers::block_dev::with_dev(idx, |dev| {
@@ -356,8 +407,16 @@ pub fn file_size(path: &str) -> Result<usize, &'static str> {
                 } else {
                     let mut found_ino = None;
                     fs.list_files(|ino, _ftype, _fsize, name| {
-                        if found_ino.is_some() { return; }
-                        if name == sub || (name.ends_with(sub) && name.as_bytes().get(name.len().saturating_sub(sub.len() + 1)) == Some(&b'/')) {
+                        if found_ino.is_some() {
+                            return;
+                        }
+                        if name == sub
+                            || (name.ends_with(sub)
+                                && name
+                                    .as_bytes()
+                                    .get(name.len().saturating_sub(sub.len() + 1))
+                                    == Some(&b'/'))
+                        {
                             found_ino = Some(ino);
                         }
                     });
@@ -402,7 +461,11 @@ pub fn read_at(path: &str, offset: usize, buf: &mut [u8]) -> Result<usize, &'sta
             let tmp = TMPFS.lock();
             for entry in tmp.entries.iter() {
                 if entry.in_use {
-                    let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+                    let name_len = entry
+                        .name
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.name.len());
                     if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
                         if n == sub {
                             if offset >= entry.len {
@@ -418,10 +481,11 @@ pub fn read_at(path: &str, offset: usize, buf: &mut [u8]) -> Result<usize, &'sta
             }
             Err("File not found in /tmp")
         }
-        VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
-        VfsMountType::SdxcDev | VfsMountType::SdhcDev => {
-            read_storage_node(path, buf)
-        }
+        VfsMountType::SsdDev
+        | VfsMountType::HddDev
+        | VfsMountType::UsbDev
+        | VfsMountType::SdxcDev
+        | VfsMountType::SdhcDev => read_storage_node(path, buf),
         VfsMountType::RootPurpleFs => {
             let res = crate::kernel::storage::with_fs(|fs| {
                 if let Some(ino) = fs.lookup(sub) {
@@ -436,8 +500,16 @@ pub fn read_at(path: &str, offset: usize, buf: &mut [u8]) -> Result<usize, &'sta
                 } else {
                     let mut found_ino = None;
                     fs.list_files(|ino, _ftype, _fsize, name| {
-                        if found_ino.is_some() { return; }
-                        if name == sub || (name.ends_with(sub) && name.as_bytes().get(name.len().saturating_sub(sub.len() + 1)) == Some(&b'/')) {
+                        if found_ino.is_some() {
+                            return;
+                        }
+                        if name == sub
+                            || (name.ends_with(sub)
+                                && name
+                                    .as_bytes()
+                                    .get(name.len().saturating_sub(sub.len() + 1))
+                                    == Some(&b'/'))
+                        {
                             found_ino = Some(ino);
                         }
                     });
@@ -456,19 +528,28 @@ pub fn read_at(path: &str, offset: usize, buf: &mut [u8]) -> Result<usize, &'sta
                             return true;
                         }
                         if let Some(p) = sub.rfind('/') {
-                            if fs.lookup(&sub[p+1..]).is_some() {
+                            if fs.lookup(&sub[p + 1..]).is_some() {
                                 return true;
                             }
                         }
                         let mut found = false;
                         fs.list_files(|_ino, _ftype, _fsize, name| {
-                            if found { return; }
-                            if name == sub || (name.ends_with(sub) && name.as_bytes().get(name.len().saturating_sub(sub.len() + 1)) == Some(&b'/')) {
+                            if found {
+                                return;
+                            }
+                            if name == sub
+                                || (name.ends_with(sub)
+                                    && name
+                                        .as_bytes()
+                                        .get(name.len().saturating_sub(sub.len() + 1))
+                                        == Some(&b'/'))
+                            {
                                 found = true;
                             }
                         });
                         found
-                    }).unwrap_or(false);
+                    })
+                    .unwrap_or(false);
                     if exists {
                         Ok(0)
                     } else {
@@ -491,12 +572,13 @@ pub fn write_at(path: &str, offset: usize, content: &[u8]) -> Result<usize, &'st
         VfsMountType::DevFs => write_devfs(sub, content),
         VfsMountType::ProcFs => Err("ProcFS is a read-only virtual filesystem"),
         VfsMountType::TmpFs => write_tmpfs_at(sub, offset, content),
-        VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
-        VfsMountType::SdxcDev | VfsMountType::SdhcDev => write_storage_node(path, content),
+        VfsMountType::SsdDev
+        | VfsMountType::HddDev
+        | VfsMountType::UsbDev
+        | VfsMountType::SdxcDev
+        | VfsMountType::SdhcDev => write_storage_node(path, content),
         VfsMountType::RootPurpleFs => {
-            let res = crate::kernel::storage::with_fs(|fs| {
-                fs.write_file_at(sub, offset, content)
-            });
+            let res = crate::kernel::storage::with_fs(|fs| fs.write_file_at(sub, offset, content));
             match res {
                 Some(Ok(len)) => Ok(len),
                 Some(Err(e)) => Err(e),
@@ -513,7 +595,11 @@ pub fn delete(path: &str) -> Result<(), &'static str> {
             let mut tmp = TMPFS.lock();
             for entry in tmp.entries.iter_mut() {
                 if entry.in_use {
-                    let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+                    let name_len = entry
+                        .name
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.name.len());
                     if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
                         if n == sub {
                             entry.in_use = false;
@@ -528,9 +614,7 @@ pub fn delete(path: &str) -> Result<(), &'static str> {
             Err("File not found in /tmp")
         }
         VfsMountType::RootPurpleFs => {
-            let res = crate::kernel::storage::with_fs(|fs| {
-                fs.delete_file(sub)
-            });
+            let res = crate::kernel::storage::with_fs(|fs| fs.delete_file(sub));
             match res {
                 Some(Ok(())) => Ok(()),
                 Some(Err(e)) => Err(e),
@@ -542,21 +626,35 @@ pub fn delete(path: &str) -> Result<(), &'static str> {
 }
 
 fn read_storage_node(path: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
-    if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(path) {
-        let mut blk = [0u8; 512];
-        let res = crate::drivers::block_dev::with_dev(idx, |dev| {
-            dev.read_blocks(0, 1, &mut blk)
-        });
-        if res == Some(crate::drivers::block_dev::BLOCK_DEV_OK) {
-            let len = buf.len().min(512);
-            buf[..len].copy_from_slice(&blk[..len]);
-            Ok(len)
-        } else {
-            Err("I/O error reading storage device sector 0")
+    let idx = crate::drivers::block_dev::find_by_canonical_path(path)
+        .ok_or("Storage device not found")?;
+    let mut block = [0u8; crate::mm::pmm::PAGE_SIZE];
+    crate::drivers::block_dev::with_dev(idx, |dev| {
+        let sector_size = dev.block_size() as usize;
+        if !(1..=block.len()).contains(&sector_size) {
+            return Err("Unsupported storage logical block size");
         }
-    } else {
-        Err("Storage device not found")
-    }
+        if dev.read_blocks(0, 1, &mut block[..sector_size])
+            != crate::drivers::block_dev::BLOCK_DEV_OK
+        {
+            return Err("I/O error reading storage device sector 0");
+        }
+        let len = buf.len().min(sector_size);
+        buf[..len].copy_from_slice(&block[..len]);
+        Ok(len)
+    })
+    .ok_or("Storage device not found")?
+}
+
+pub(crate) fn is_storage_path(path: &str) -> bool {
+    matches!(
+        classify_path(path).0,
+        VfsMountType::SsdDev
+            | VfsMountType::HddDev
+            | VfsMountType::UsbDev
+            | VfsMountType::SdxcDev
+            | VfsMountType::SdhcDev
+    )
 }
 
 fn write_storage_node(_path: &str, _content: &[u8]) -> Result<usize, &'static str> {
@@ -592,7 +690,10 @@ fn read_devfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
             };
             let append_u64 = |dest: &mut [u8], pos: &mut usize, mut val: u64| {
                 if val == 0 {
-                    if *pos < dest.len() { dest[*pos] = b'0'; *pos += 1; }
+                    if *pos < dest.len() {
+                        dest[*pos] = b'0';
+                        *pos += 1;
+                    }
                     return;
                 }
                 let mut tmp = [0u8; 20];
@@ -641,9 +742,8 @@ fn read_devfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
             });
             if let Some(idx) = found_idx {
                 let mut blk = [0u8; 512];
-                let res = crate::drivers::block_dev::with_dev(idx, |dev| {
-                    dev.read_blocks(0, 1, &mut blk)
-                });
+                let res =
+                    crate::drivers::block_dev::with_dev(idx, |dev| dev.read_blocks(0, 1, &mut blk));
                 if res == Some(crate::drivers::block_dev::BLOCK_DEV_OK) {
                     let len = buf.len().min(512);
                     buf[..len].copy_from_slice(&blk[..len]);
@@ -758,12 +858,16 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
                     let nlen = format_u64(t.id as u64, &mut num_buf);
                     if let Ok(ns) = core::str::from_utf8(&num_buf[..nlen]) {
                         write_str(ns);
-                        for _ in ns.len()..6 { write_str(" "); }
+                        for _ in ns.len()..6 {
+                            write_str(" ");
+                        }
                     }
                     let name_len = t.name.iter().position(|&c| c == 0).unwrap_or(t.name.len());
                     if let Ok(name_str) = core::str::from_utf8(&t.name[..name_len]) {
                         write_str(name_str);
-                        for _ in name_str.len()..17 { write_str(" "); }
+                        for _ in name_str.len()..17 {
+                            write_str(" ");
+                        }
                     } else {
                         write_str("unknown          ");
                     }
@@ -772,9 +876,9 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
                     } else {
                         match t.state {
                             crate::kernel::task::TaskState::Running => write_str("RUNNING     "),
-                            crate::kernel::task::TaskState::Ready =>   write_str("READY       "),
+                            crate::kernel::task::TaskState::Ready => write_str("READY       "),
                             crate::kernel::task::TaskState::Blocked => write_str("BLOCKED     "),
-                            crate::kernel::task::TaskState::Sleeping =>write_str("SLEEPING    "),
+                            crate::kernel::task::TaskState::Sleeping => write_str("SLEEPING    "),
                             crate::kernel::task::TaskState::Terminated => write_str("TERMINATED  "),
                             _ => write_str("UNKNOWN     "),
                         }
@@ -782,7 +886,9 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
                     let clen = format_u64(t.last_cpu as u64, &mut num_buf);
                     if let Ok(cs) = core::str::from_utf8(&num_buf[..clen]) {
                         write_str(cs);
-                        for _ in cs.len()..5 { write_str(" "); }
+                        for _ in cs.len()..5 {
+                            write_str(" ");
+                        }
                     }
                     write_str("0x");
                     let mut hex_buf = [0u8; 16];
@@ -800,10 +906,31 @@ fn read_procfs(name: &str, buf: &mut [u8]) -> Result<usize, &'static str> {
 }
 
 fn write_tmpfs_at(name: &str, offset: usize, content: &[u8]) -> Result<usize, &'static str> {
+    write_tmpfs(name, Some(offset), false, content)
+}
+
+/// GUI redirection writes only volatile regular files, with atomic append or replacement.
+pub(crate) fn redirect_tmpfs(
+    path: &str,
+    append: bool,
+    content: &[u8],
+) -> Result<usize, &'static str> {
+    let name = path
+        .strip_prefix("/tmp/")
+        .ok_or("GUI redirection writes only /tmp files.")?;
+    write_tmpfs(name, if append { None } else { Some(0) }, true, content)
+}
+
+fn write_tmpfs(
+    name: &str,
+    offset: Option<usize>,
+    redirect: bool,
+    content: &[u8],
+) -> Result<usize, &'static str> {
     if name.is_empty() || name.len() > 31 || name.contains('/') || name.as_bytes().contains(&0) {
         return Err("Invalid TmpFS file name");
     }
-    if offset >= MAX_TMPFS_SIZE {
+    if !redirect && offset.is_some_and(|offset| offset >= MAX_TMPFS_SIZE) {
         return Err("Write offset exceeds maximum TmpFS file size");
     }
     let mut tmp = TMPFS.lock();
@@ -811,7 +938,11 @@ fn write_tmpfs_at(name: &str, offset: usize, content: &[u8]) -> Result<usize, &'
 
     for (i, entry) in tmp.entries.iter_mut().enumerate() {
         if entry.in_use {
-            let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+            let name_len = entry
+                .name
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.name.len());
             if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
                 if n == name {
                     slot = Some(i);
@@ -832,6 +963,10 @@ fn write_tmpfs_at(name: &str, offset: usize, content: &[u8]) -> Result<usize, &'
 
     let idx = slot.ok_or("TmpFS full (maximum 8 files)")?;
     let entry = &mut tmp.entries[idx];
+    let start = offset.unwrap_or(entry.len);
+    if redirect && content.len() > MAX_TMPFS_SIZE - start {
+        return Err("Redirection exceeds maximum TmpFS file size.");
+    }
     if !entry.in_use {
         entry.name.fill(0);
         let b = name.as_bytes();
@@ -842,16 +977,22 @@ fn write_tmpfs_at(name: &str, offset: usize, content: &[u8]) -> Result<usize, &'
         entry.in_use = true;
     }
 
-    let avail = MAX_TMPFS_SIZE - offset;
-    let write_len = content.len().min(avail);
-    entry.data[offset..offset + write_len].copy_from_slice(&content[..write_len]);
-    entry.len = entry.len.max(offset + write_len);
+    let write_len = content.len().min(MAX_TMPFS_SIZE - start);
+    entry.data[start..start + write_len].copy_from_slice(&content[..write_len]);
+    entry.len = if redirect {
+        start + write_len
+    } else {
+        entry.len.max(start + write_len)
+    };
 
     Ok(write_len)
 }
 
 /// Enumerate directory entries across unified VFS namespaces
-pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Result<(), &'static str> {
+pub fn list_directory<F: FnMut(&str, usize, bool)>(
+    path: &str,
+    mut cb: F,
+) -> Result<(), &'static str> {
     let (mount, sub) = classify_path(path);
     match mount {
         VfsMountType::DevFs => {
@@ -859,8 +1000,12 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
             cb("zero", 0, false);
             cb("console", 0, false);
             cb("compositor", 256, false);
-            if let Some((_width, height, pitch, bits_per_pixel, _address)) = crate::drivers::video::get_fb_info() {
-                let bytes = pitch.saturating_mul(height).saturating_mul(bits_per_pixel / 8);
+            if let Some((_width, height, pitch, bits_per_pixel, _address)) =
+                crate::drivers::video::get_fb_info()
+            {
+                let bytes = pitch
+                    .saturating_mul(height)
+                    .saturating_mul(bits_per_pixel / 8);
                 cb("fb0", bytes, false);
             }
             crate::drivers::block_dev::for_each_dev(|_idx, canon, dev| {
@@ -883,7 +1028,11 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
             let tmp = TMPFS.lock();
             for entry in tmp.entries.iter() {
                 if entry.in_use {
-                    let name_len = entry.name.iter().position(|&c| c == 0).unwrap_or(entry.name.len());
+                    let name_len = entry
+                        .name
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.name.len());
                     if let Ok(n) = core::str::from_utf8(&entry.name[..name_len]) {
                         cb(n, entry.len, false);
                     }
@@ -891,10 +1040,11 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
             }
             Ok(())
         }
-        VfsMountType::SsdDev | VfsMountType::HddDev | VfsMountType::UsbDev |
-        VfsMountType::SdxcDev | VfsMountType::SdhcDev => {
-            Ok(())
-        }
+        VfsMountType::SsdDev
+        | VfsMountType::HddDev
+        | VfsMountType::UsbDev
+        | VfsMountType::SdxcDev
+        | VfsMountType::SdhcDev => Ok(()),
         VfsMountType::RootPurpleFs => {
             let clean_sub = sub.trim_start_matches('/').trim_end_matches('/');
             if clean_sub.is_empty() {
@@ -916,10 +1066,18 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                         if d.in_use {
                             if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
                                 if !s.contains('/') {
-                                    if s != "dev" && s != "proc" && s != "tmp" && s != "Boot" && s != "System" && s != "Users" && s != "Recovery" {
+                                    if s != "dev"
+                                        && s != "proc"
+                                        && s != "tmp"
+                                        && s != "Boot"
+                                        && s != "System"
+                                        && s != "Users"
+                                        && s != "Recovery"
+                                    {
                                         let on_disk = crate::kernel::storage::with_fs(|fs| {
                                             fs.lookup(s).is_some()
-                                        }).unwrap_or(false);
+                                        })
+                                        .unwrap_or(false);
                                         if !on_disk {
                                             cb(s, 0, true);
                                         }
@@ -934,7 +1092,14 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                 crate::kernel::storage::with_fs(|fs| {
                     fs.list_files(|_ino, ftype, fsize, name| {
                         if !name.contains('/') {
-                            if name != "dev" && name != "proc" && name != "tmp" && name != "Boot" && name != "System" && name != "Users" && name != "Recovery" {
+                            if name != "dev"
+                                && name != "proc"
+                                && name != "tmp"
+                                && name != "Boot"
+                                && name != "System"
+                                && name != "Users"
+                                && name != "Recovery"
+                            {
                                 cb(name, fsize as usize, ftype == 2);
                             }
                         }
@@ -984,12 +1149,15 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                     for d in dirs.iter() {
                         if d.in_use {
                             if let Ok(s) = core::str::from_utf8(&d.path[..d.len]) {
-                                if s.starts_with(clean_sub) && s.as_bytes().get(clean_sub.len()) == Some(&b'/') {
+                                if s.starts_with(clean_sub)
+                                    && s.as_bytes().get(clean_sub.len()) == Some(&b'/')
+                                {
                                     let rel = &s[clean_sub.len() + 1..];
                                     if !rel.is_empty() && !rel.contains('/') {
                                         let on_disk = crate::kernel::storage::with_fs(|fs| {
                                             fs.lookup(s).is_some()
-                                        }).unwrap_or(false);
+                                        })
+                                        .unwrap_or(false);
                                         if !on_disk {
                                             cb(rel, 0, true);
                                         }
@@ -1003,14 +1171,31 @@ pub fn list_directory<F: FnMut(&str, usize, bool)>(path: &str, mut cb: F) -> Res
                 // Storage files matching this directory prefix
                 crate::kernel::storage::with_fs(|fs| {
                     fs.list_files(|_ino, ftype, fsize, name| {
-                        if name.starts_with(clean_sub) && name.as_bytes().get(clean_sub.len()) == Some(&b'/') {
+                        if name.starts_with(clean_sub)
+                            && name.as_bytes().get(clean_sub.len()) == Some(&b'/')
+                        {
                             let rel = &name[clean_sub.len() + 1..];
                             if let Some(slash_idx) = rel.find('/') {
                                 let sub_dir = &rel[..slash_idx];
-                                if clean_sub == "System" && matches!(sub_dir, "Applications" | "CLI" | "Configuration" | "Drivers" | "Frameworks" | "Kernel" | "Libraries" | "Resources" | "Services") {
+                                if clean_sub == "System"
+                                    && matches!(
+                                        sub_dir,
+                                        "Applications"
+                                            | "CLI"
+                                            | "Configuration"
+                                            | "Drivers"
+                                            | "Frameworks"
+                                            | "Kernel"
+                                            | "Libraries"
+                                            | "Resources"
+                                            | "Services"
+                                    )
+                                {
                                     return;
                                 }
-                                if clean_sub == "System/Resources" && matches!(sub_dir, "Fonts" | "Icons" | "Wallpapers") {
+                                if clean_sub == "System/Resources"
+                                    && matches!(sub_dir, "Fonts" | "Icons" | "Wallpapers")
+                                {
                                     return;
                                 }
                                 cb(sub_dir, 0, true);

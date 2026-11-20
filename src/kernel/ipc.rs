@@ -5,8 +5,8 @@
 //!     read/write endpoints, EOF detection, and EPIPE / SIGPIPE semantics.
 //!   - Shared Memory: Page-level cross-task mappings.
 
-use crate::sync::Spinlock;
 use crate::kernel::posix::EPIPE;
+use crate::sync::Spinlock;
 
 pub const PIPE_BUFFER_SIZE: usize = 4096;
 
@@ -79,8 +79,7 @@ impl Pipe {
 
 pub const MAX_PIPES: usize = 16;
 static PIPE_REGISTRY: Spinlock<[Option<Pipe>; MAX_PIPES]> = Spinlock::new([
-    None, None, None, None, None, None, None, None,
-    None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
 ]);
 
 pub fn create_pipe() -> Option<usize> {

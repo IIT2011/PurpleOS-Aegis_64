@@ -16,7 +16,11 @@ static SYSTEM_TICK_HZ: AtomicU32 = AtomicU32::new(PIT_DEFAULT_TICK_HZ);
 static SYSTEM_TICKS: AtomicU64 = AtomicU64::new(0);
 
 pub fn init(frequency_hz: u32) {
-    let requested_hz = if frequency_hz == 0 { PIT_DEFAULT_TICK_HZ } else { frequency_hz };
+    let requested_hz = if frequency_hz == 0 {
+        PIT_DEFAULT_TICK_HZ
+    } else {
+        frequency_hz
+    };
     let bounded_hz = requested_hz.clamp(PIT_MIN_TICK_HZ, PIT_BASE_FREQ_HZ);
     let divisor = (PIT_BASE_FREQ_HZ / bounded_hz).clamp(1, u16::MAX as u32) as u16;
     let actual_hz = PIT_BASE_FREQ_HZ / divisor as u32;
@@ -59,8 +63,8 @@ pub fn delay_us(us: u32) {
     if us == 0 {
         return;
     }
-    let count = ((PIT_BASE_FREQ_HZ as u64 * us as u64) / 1_000_000)
-        .clamp(1, PIT_MAX_COUNTER as u64) as u16;
+    let count =
+        ((PIT_BASE_FREQ_HZ as u64 * us as u64) / 1_000_000).clamp(1, PIT_MAX_COUNTER as u64) as u16;
 
     unsafe {
         outb(0x61, (inb(0x61) & !0x02) | 0x01); // Gate high, speaker low
@@ -105,10 +109,7 @@ pub fn play_tone(freq_hz: u32, duration_ms: u32) {
         outb(0x61, val | 0x03);
     }
     let hz = SYSTEM_TICK_HZ.load(Ordering::Relaxed).max(1) as u64;
-    let wait_ticks = (duration_ms as u64)
-        .saturating_mul(hz)
-        .saturating_add(999)
-        / 1_000;
+    let wait_ticks = (duration_ms as u64).saturating_mul(hz).saturating_add(999) / 1_000;
     if crate::arch::x86_64::cpu::read_rflags() & (1 << 9) != 0 {
         let start_ticks = get_ticks();
         while get_ticks().wrapping_sub(start_ticks) < wait_ticks {

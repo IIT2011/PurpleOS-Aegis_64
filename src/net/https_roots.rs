@@ -28,7 +28,9 @@ fn load() -> Result<Vec<u8>, &'static str> {
         return Err("invalid CA bundle size");
     }
     let mut bytes = Vec::new();
-    bytes.try_reserve_exact(len + 1).map_err(|_| "CA bundle allocation failed")?;
+    bytes
+        .try_reserve_exact(len + 1)
+        .map_err(|_| "CA bundle allocation failed")?;
     bytes.resize(len + 1, 0);
     if vfs::read(PATH, &mut bytes)? != len {
         return Err("CA bundle size changed during read");

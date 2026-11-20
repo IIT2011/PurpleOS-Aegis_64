@@ -225,7 +225,11 @@ fn parse_and_verify(data: &[u8]) -> bool {
             }
         }
 
-        line_start = if line_end < data.len() { line_end + 1 } else { line_end };
+        line_start = if line_end < data.len() {
+            line_end + 1
+        } else {
+            line_end
+        };
     }
 
     table.initialized = true;
@@ -251,10 +255,15 @@ fn trim_slice(s: &[u8]) -> &[u8] {
 /// Lookup a command by name from the authenticated database.
 pub fn lookup(name: &str) -> Option<CmdRecord> {
     let table = CMD_TABLE.lock();
+    if !table.signature_verified {
+        return None;
+    }
     let name_b = name.as_bytes();
     for i in 0..table.count {
         let entry = &table.entries[i];
-        if entry.name_len as usize == name_b.len() && &entry.name[..entry.name_len as usize] == name_b {
+        if entry.name_len as usize == name_b.len()
+            && &entry.name[..entry.name_len as usize] == name_b
+        {
             return Some(*entry);
         }
     }
@@ -288,7 +297,9 @@ pub fn verify_integrity() -> bool {
         return false;
     }
 
-    let Some(payload) = crate::security::aegis_detect::verify_command_database(&raw_buf[..read_bytes]) else {
+    let Some(payload) =
+        crate::security::aegis_detect::verify_command_database(&raw_buf[..read_bytes])
+    else {
         return false;
     };
     crate::crypto::sha256::hash(payload) == table.payload_hash && table.signature_verified
@@ -371,7 +382,9 @@ pub fn print_categorized_help() {
         }
     }
 
-    serial::println("\nType 'help <command>' for detailed manual, or 'cmd info' for signature status.");
+    serial::println(
+        "\nType 'help <command>' for detailed manual, or 'cmd info' for signature status.",
+    );
 }
 
 /// Print manual entry for a specific command from the database.

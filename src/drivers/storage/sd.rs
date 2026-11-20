@@ -3,7 +3,7 @@
 //! Provides SD card block device abstractions mapped to
 //! canonical storage paths (`/sdxc/card1`, `/sdhc/card1`, ...).
 
-use crate::drivers::block_dev::{BlockDevice, StorageCategory, BLOCK_DEV_OK, BLOCK_DEV_ERR_IO};
+use crate::drivers::block_dev::{BlockDevice, StorageCategory, BLOCK_DEV_ERR_IO, BLOCK_DEV_OK};
 
 pub struct SdCardDevice {
     pub name: &'static str,
@@ -45,10 +45,18 @@ impl BlockDevice for SdCardDevice {
     }
 
     fn read_blocks(&mut self, _lba: u64, count: u32, _buf: &mut [u8]) -> i32 {
-        if count == 0 { BLOCK_DEV_OK } else { BLOCK_DEV_ERR_IO }
+        if count == 0 {
+            BLOCK_DEV_OK
+        } else {
+            BLOCK_DEV_ERR_IO
+        }
     }
 
     fn write_blocks(&mut self, _lba: u64, count: u32, _buf: &[u8]) -> i32 {
-        if count == 0 { BLOCK_DEV_OK } else { BLOCK_DEV_ERR_IO }
+        if count == 0 {
+            BLOCK_DEV_OK
+        } else {
+            BLOCK_DEV_ERR_IO
+        }
     }
 }

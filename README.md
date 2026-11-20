@@ -131,14 +131,15 @@ Storage devices in Aegis64 are decoupled from generic `/dev` character devices a
 
 | Storage Mount Path | Hardware Category | Supported Controllers & Protocols |
 | :--- | :--- | :--- |
-| `/hdd/hdd1`, ... | ATA devices | Legacy ATA PIO, addressable through LBA28 |
-| `/ssd`, `/usb`, `/sdxc`, `/sdhc` | — | No devices registered; AHCI, NVMe, USB MSC, and SD block I/O are not implemented |
+| `/hdd/hdd1`, ... | Hard disks | Legacy ATA PIO (LBA28) and SATA AHCI (LBA48) |
+| `/ssd/ssd1`, ... | Solid-state storage | SATA AHCI and the first active namespace on each NVMe controller |
+| `/usb`, `/sdxc`, `/sdhc` | Removable storage | USB mass storage and SD block I/O are unavailable |
 | `/dev` | Non-Storage Devices | Character & pseudo devices (`null`, `zero`, `console`) |
 | `/proc` | Introspection | Virtual procfs (`version`, `meminfo`, `uptime`, `cpuinfo`, `tasks`) |
 | `/tmp` | Volatile Storage | In-memory RAM disk (TmpFS) |
 | `/` | Root Storage | Mounted PurpleFS v2 volume from GPT partition |
 
-Storage paths expose read-only sector-zero inspection. Writes to raw device paths are rejected to protect partition metadata; persistent file writes are available only through the mounted filesystem.
+AHCI and NVMe support logical blocks of 512 to 4096 bytes. GPT and PurpleFS v2 currently require 512-byte logical blocks. Storage paths expose read-only sector-zero inspection. Writes to raw device paths are rejected to protect partition metadata; persistent file writes are available only through the mounted filesystem.
 
 ---
 

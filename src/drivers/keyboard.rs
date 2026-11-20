@@ -15,6 +15,7 @@ struct KbdState {
     last_scancode: u8,
     last_tick: u64,
     buf: [u8; 256],
+    buf_modifiers: [u8; 256],
     head: usize,
     tail: usize,
 }
@@ -25,6 +26,7 @@ static KBD: Spinlock<KbdState> = Spinlock::new(KbdState {
     last_scancode: 0,
     last_tick: 0,
     buf: [0; 256],
+    buf_modifiers: [0; 256],
     head: 0,
     tail: 0,
 });
@@ -58,14 +60,18 @@ pub fn init() {
         // 2. Read 8042 Controller Configuration Byte (cmd 0x20)
         wait_write();
         outb(KBD_STATUS_PORT, 0x20);
-        let mut config = if wait_read() { inb(KBD_DATA_PORT) } else { 0x01 | 0x40 };
+        let mut config = if wait_read() {
+            inb(KBD_DATA_PORT)
+        } else {
+            0x01 | 0x40
+        };
 
         // Bit 0: First PS/2 port interrupt enable (1)
         // Bit 4: First PS/2 port clock disable (0 = enabled)
         // Bit 6: First PS/2 port translation (1 = scancode translation to Set 1)
-        config |= 0x01;  // Enable IRQ 1
+        config |= 0x01; // Enable IRQ 1
         config &= !0x10; // Enable clock
-        config |= 0x40;  // Enable scancode translation
+        config |= 0x40; // Enable scancode translation
 
         // 3. Write Controller Configuration Byte (cmd 0x60)
         wait_write();
@@ -101,7 +107,9 @@ pub fn init() {
     crate::arch::x86_64::pic::clear_mask(1); // Unmask IRQ 1 (Keyboard)
     crate::arch::x86_64::idt::register_handler(33, on_interrupt);
     crate::drivers::serial::println("Keyboard: 8042 controller initialized, IRQ 1 unmasked");
-    crate::drivers::serial::println("Keyboard: PS/2 Keyboard Initialized (256-Byte Ring Buffer Active)");
+    crate::drivers::serial::println(
+        "Keyboard: PS/2 Keyboard Initialized (256-Byte Ring Buffer Active)",
+    );
 }
 
 pub fn poll_hardware() {
@@ -137,35 +145,35 @@ fn on_interrupt(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
 }
 
 const SCANCODE_TABLE: [u8; 135] = [
-    0, 27, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'=', b'\x08',
-    b'\t', b'q', b'w', b'e', b'r', b't', b'y', b'u', b'i', b'o', b'p', b'[', b']', b'\n',
+    0, 27, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'=', b'\x08', b'\t',
+    b'q', b'w', b'e', b'r', b't', b'y', b'u', b'i', b'o', b'p', b'[', b']', b'\n',
     0, /* Ctrl */
     b'a', b's', b'd', b'f', b'g', b'h', b'j', b'k', b'l', b';', b'\'', b'`',
     0, /* Left Shift */
-    b'\\', b'z', b'x', b'c', b'v', b'b', b'n', b'm', b',', b'.', b'/',
-    0, /* Right Shift */
+    b'\\', b'z', b'x', b'c', b'v', b'b', b'n', b'm', b',', b'.', b'/', 0, /* Right Shift */
     b'*', 0, /* Alt */ b' ', 0, /* Caps */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, /* F1-F10: 0x3B..0x44 */
     0, 0, /* Num/Scroll lock: 0x45, 0x46 */
-    b'7', b'8', b'9', b'-', b'4', b'5', b'6', b'+', b'1', b'2', b'3', b'0', b'.', /* Keypad: 0x47..0x53 */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    b'7', b'8', b'9', b'-', b'4', b'5', b'6', b'+', b'1', b'2', b'3', b'0',
+    b'.', /* Keypad: 0x47..0x53 */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 const SCANCODE_SHIFT_TABLE: [u8; 135] = [
-    0, 27, b'!', b'@', b'#', b'$', b'%', b'^', b'&', b'*', b'(', b')', b'_', b'+', b'\x08',
-    b'\t', b'Q', b'W', b'E', b'R', b'T', b'Y', b'U', b'I', b'O', b'P', b'{', b'}', b'\n',
+    0, 27, b'!', b'@', b'#', b'$', b'%', b'^', b'&', b'*', b'(', b')', b'_', b'+', b'\x08', b'\t',
+    b'Q', b'W', b'E', b'R', b'T', b'Y', b'U', b'I', b'O', b'P', b'{', b'}', b'\n',
     0, /* Ctrl */
     b'A', b'S', b'D', b'F', b'G', b'H', b'J', b'K', b'L', b':', b'"', b'~',
     0, /* Left Shift */
-    b'|', b'Z', b'X', b'C', b'V', b'B', b'N', b'M', b'<', b'>', b'?',
-    0, /* Right Shift */
+    b'|', b'Z', b'X', b'C', b'V', b'B', b'N', b'M', b'<', b'>', b'?', 0, /* Right Shift */
     b'*', 0, /* Alt */ b' ', 0, /* Caps */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, /* F1-F10: 0x3B..0x44 */
     0, 0, /* Num/Scroll lock: 0x45, 0x46 */
-    b'7', b'8', b'9', b'-', b'4', b'5', b'6', b'+', b'1', b'2', b'3', b'0', b'.', /* Keypad: 0x47..0x53 */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    b'7', b'8', b'9', b'-', b'4', b'5', b'6', b'+', b'1', b'2', b'3', b'0',
+    b'.', /* Keypad: 0x47..0x53 */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 pub fn process_scancode(sc: u8) {
@@ -192,8 +200,10 @@ pub fn process_scancode(sc: u8) {
             0x47 => b"\x1b[H",  // Home
             0x4F => b"\x1b[F",  // End
             0x53 => b"\x1b[3~", // Delete
-            0x1C => b"\n",     // Keypad Enter
-            0x35 => b"/",      // Keypad /
+            0x49 => b"\x1b[5~", // Page Up
+            0x51 => b"\x1b[6~", // Page Down
+            0x1C => b"\n",      // Keypad Enter
+            0x35 => b"/",       // Keypad /
             _ => b"",
         };
         for &byte in ext_seq {
@@ -201,6 +211,7 @@ pub fn process_scancode(sc: u8) {
             if next != k.tail {
                 let head = k.head;
                 k.buf[head] = byte;
+                k.buf_modifiers[head] = k.modifiers;
                 k.head = next;
             }
         }
@@ -275,6 +286,7 @@ pub fn process_scancode(sc: u8) {
             if next != k.tail {
                 let head = k.head;
                 k.buf[head] = ch;
+                k.buf_modifiers[head] = k.modifiers;
                 k.head = next;
             }
         }
@@ -287,16 +299,20 @@ pub fn has_char() -> bool {
     k.head != k.tail
 }
 
-pub fn try_getchar() -> Option<u8> {
+pub fn try_getchar_with_modifiers() -> Option<(u8, u8)> {
     poll_hardware();
     let mut k = KBD.lock();
-    if k.head != k.tail {
-        let ch = k.buf[k.tail];
-        k.tail = (k.tail + 1) % k.buf.len();
-        Some(ch)
-    } else {
-        None
+    if k.head == k.tail {
+        return None;
     }
+    let at = k.tail;
+    let result = (k.buf[at], k.buf_modifiers[at]);
+    k.tail = (k.tail + 1) % k.buf.len();
+    Some(result)
+}
+
+pub fn try_getchar() -> Option<u8> {
+    try_getchar_with_modifiers().map(|(byte, _)| byte)
 }
 
 pub fn getchar() -> u8 {
@@ -306,4 +322,9 @@ pub fn getchar() -> u8 {
         }
         core::hint::spin_loop();
     }
+}
+
+/// Current keyboard modifier flags for compositor shortcuts.
+pub fn modifier_state() -> u8 {
+    KBD.lock().modifiers
 }

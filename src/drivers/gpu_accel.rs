@@ -22,28 +22,28 @@ use crate::sync::Spinlock;
 pub const INTEL_PCI_VENDOR: u16 = 0x8086;
 
 /* Intel MI (Memory Interface) Command Opcodes */
-pub const INTEL_MI_NOOP: u32                = 0x00000000;
-pub const INTEL_MI_USER_INTERRUPT: u32      = 0x02000000;
-pub const INTEL_MI_WAIT_FOR_EVENT: u32      = 0x03000000;
-pub const INTEL_MI_FLUSH_DW: u32            = 0x26000004; // Flush & Invalidate
-pub const INTEL_MI_BATCH_BUFFER_START: u32  = 0x31000001; // Dispatch 3D Batch
+pub const INTEL_MI_NOOP: u32 = 0x00000000;
+pub const INTEL_MI_USER_INTERRUPT: u32 = 0x02000000;
+pub const INTEL_MI_WAIT_FOR_EVENT: u32 = 0x03000000;
+pub const INTEL_MI_FLUSH_DW: u32 = 0x26000004; // Flush & Invalidate
+pub const INTEL_MI_BATCH_BUFFER_START: u32 = 0x31000001; // Dispatch 3D Batch
 
 /* Intel 3D Pipeline Commands */
 pub const INTEL_CMD_3D_PIPELINE_SELECT: u32 = 0x69040000; // Select 3D vs Media GPGPU
 pub const INTEL_CMD_3D_STATE_BASE_ADDR: u32 = 0x6101000E; // 3D State Base Addresses (16 DWORDS)
-pub const INTEL_CMD_3D_VIEWPORT_STATE: u32  = 0x610D0000; // Viewport state pointer
-pub const INTEL_CMD_3D_PRIMITIVE: u32       = 0x78000005; // 3D Primitive Draw Call
+pub const INTEL_CMD_3D_VIEWPORT_STATE: u32 = 0x610D0000; // Viewport state pointer
+pub const INTEL_CMD_3D_PRIMITIVE: u32 = 0x78000005; // 3D Primitive Draw Call
 
 /* Topology types */
-pub const INTEL_3D_PRIM_TRIANGLES: u32      = 0x03;
-pub const INTEL_3D_PRIM_TRISTRIP: u32       = 0x04;
-pub const INTEL_3D_PRIM_LINES: u32          = 0x01;
+pub const INTEL_3D_PRIM_TRIANGLES: u32 = 0x03;
+pub const INTEL_3D_PRIM_TRISTRIP: u32 = 0x04;
+pub const INTEL_3D_PRIM_LINES: u32 = 0x01;
 
 /* Render Command Streamer (RCS) MMIO Offsets */
-pub const INTEL_RCS_RING_TAIL: usize        = 0x02030;
-pub const INTEL_RCS_RING_HEAD: usize        = 0x02034;
-pub const INTEL_RCS_RING_START: usize       = 0x02038;
-pub const INTEL_RCS_RING_CTL: usize         = 0x0203C;
+pub const INTEL_RCS_RING_TAIL: usize = 0x02030;
+pub const INTEL_RCS_RING_HEAD: usize = 0x02034;
+pub const INTEL_RCS_RING_START: usize = 0x02038;
+pub const INTEL_RCS_RING_CTL: usize = 0x0203C;
 
 /* =========================================================================
  * 2. AMD RADEON GRAPHICS DRIVER ("radeongd") PM4 3D CONSTANTS & COMMANDS
@@ -58,20 +58,20 @@ pub const fn amd_packet3(op: u32, count: u32) -> u32 {
 }
 
 /* PM4 Packet 3 Opcodes */
-pub const AMD_PACKET3_NOP: u32               = 0x10;
-pub const AMD_PACKET3_SET_BASE: u32          = 0x11;
-pub const AMD_PACKET3_CLEAR_STATE: u32       = 0x12;
+pub const AMD_PACKET3_NOP: u32 = 0x10;
+pub const AMD_PACKET3_SET_BASE: u32 = 0x11;
+pub const AMD_PACKET3_CLEAR_STATE: u32 = 0x12;
 pub const AMD_PACKET3_INDEX_BUFFER_SIZE: u32 = 0x13;
-pub const AMD_PACKET3_DISPATCH_DIRECT: u32   = 0x15;
-pub const AMD_PACKET3_DRAW_INDEX_AUTO: u32   = 0x2D;
-pub const AMD_PACKET3_INDIRECT_BUFFER: u32   = 0x3F;
-pub const AMD_PACKET3_SET_CONTEXT_REG: u32   = 0x69;
+pub const AMD_PACKET3_DISPATCH_DIRECT: u32 = 0x15;
+pub const AMD_PACKET3_DRAW_INDEX_AUTO: u32 = 0x2D;
+pub const AMD_PACKET3_INDIRECT_BUFFER: u32 = 0x3F;
+pub const AMD_PACKET3_SET_CONTEXT_REG: u32 = 0x69;
 
 /* AMD GFX CP (Command Processor) MMIO Offsets */
-pub const AMD_CP_RB0_BASE: usize             = 0xC0C0;
-pub const AMD_CP_RB0_CNTL: usize             = 0xC0C4;
-pub const AMD_CP_RB0_WPTR: usize             = 0xC0C8;
-pub const AMD_CP_RB0_RPTR: usize             = 0xC0CC;
+pub const AMD_CP_RB0_BASE: usize = 0xC0C0;
+pub const AMD_CP_RB0_CNTL: usize = 0xC0C4;
+pub const AMD_CP_RB0_WPTR: usize = 0xC0C8;
+pub const AMD_CP_RB0_RPTR: usize = 0xC0CC;
 
 /* =========================================================================
  * 3. NVIDIA GRAPHICS DRIVER ("nvgd") PUSHBUFFER & 3D METHODS
@@ -87,20 +87,20 @@ pub const fn nv_method(subchannel: u32, method: u32, count: u32) -> u32 {
 }
 
 /* NV9097 / NVC0 3D Object Class Methods */
-pub const NV9097_SET_OBJECT: u32            = 0x0000;
-pub const NV9097_CLEAR_SURFACE: u32         = 0x0360;
-pub const NV9097_SET_VIEWPORT_HORIZ: u32    = 0x0380;
-pub const NV9097_SET_VIEWPORT_VERT: u32     = 0x0384;
-pub const NV9097_VERTEX_BUFFER_ARRAY: u32   = 0x1600;
-pub const NV9097_DRAW_ELEMENTS: u32         = 0x1B00;
-pub const NV9097_PAGE_FLIP: u32             = 0x0500;
+pub const NV9097_SET_OBJECT: u32 = 0x0000;
+pub const NV9097_CLEAR_SURFACE: u32 = 0x0360;
+pub const NV9097_SET_VIEWPORT_HORIZ: u32 = 0x0380;
+pub const NV9097_SET_VIEWPORT_VERT: u32 = 0x0384;
+pub const NV9097_VERTEX_BUFFER_ARRAY: u32 = 0x1600;
+pub const NV9097_DRAW_ELEMENTS: u32 = 0x1B00;
+pub const NV9097_PAGE_FLIP: u32 = 0x0500;
 
 /* Channel User Aperture Offset */
-pub const NVGD_USER_PUT: usize              = 0x0040;
-pub const NVGD_USER_GET: usize              = 0x0044;
+pub const NVGD_USER_PUT: usize = 0x0040;
+pub const NVGD_USER_GET: usize = 0x0044;
 // Spec reference aliases
-pub const NOUVEAU_USER_PUT: usize           = NVGD_USER_PUT;
-pub const NOUVEAU_USER_GET: usize           = NVGD_USER_GET;
+pub const NOUVEAU_USER_PUT: usize = NVGD_USER_PUT;
+pub const NOUVEAU_USER_GET: usize = NVGD_USER_GET;
 
 /* =========================================================================
  * 4. UNIFIED 3D ACCELERATION ENGINE ABSTRACTION
@@ -159,7 +159,11 @@ impl Gpu3dEngine {
      * 1. INTEL GRAPHICS DRIVER ("igd") 3D COMMAND STREAM GENERATION
      * (Clean-room implementation; Linux i915 specification used as reference)
      * --------------------------------------------------------------------- */
-    pub fn igd_submit_draw_triangles(&mut self, vertex_count: u32, start_vertex: u32) -> Result<(), &'static str> {
+    pub fn igd_submit_draw_triangles(
+        &mut self,
+        vertex_count: u32,
+        start_vertex: u32,
+    ) -> Result<(), &'static str> {
         if self.gpu_type != AccelGpuType::Igd || !self.is_ready {
             return Err("igd 3D engine not active");
         }
@@ -170,11 +174,11 @@ impl Gpu3dEngine {
 
             // 2. 3D Primitive Draw Call
             self.write_dword(INTEL_CMD_3D_PRIMITIVE | (INTEL_3D_PRIM_TRIANGLES << 16));
-            self.write_dword(vertex_count);       // Vertex count per instance
-            self.write_dword(start_vertex);       // Start vertex location
-            self.write_dword(1);                  // Instance count
-            self.write_dword(0);                  // Start instance location
-            self.write_dword(0);                  // Base vertex location
+            self.write_dword(vertex_count); // Vertex count per instance
+            self.write_dword(start_vertex); // Start vertex location
+            self.write_dword(1); // Instance count
+            self.write_dword(0); // Start instance location
+            self.write_dword(0); // Base vertex location
 
             // 3. Flush Cache & Invalidate
             self.write_dword(INTEL_MI_FLUSH_DW);
@@ -194,7 +198,11 @@ impl Gpu3dEngine {
     }
 
     #[inline(always)]
-    pub fn intel_submit_draw_triangles(&mut self, vertex_count: u32, start_vertex: u32) -> Result<(), &'static str> {
+    pub fn intel_submit_draw_triangles(
+        &mut self,
+        vertex_count: u32,
+        start_vertex: u32,
+    ) -> Result<(), &'static str> {
         self.igd_submit_draw_triangles(vertex_count, start_vertex)
     }
 
@@ -202,7 +210,11 @@ impl Gpu3dEngine {
      * 2. AMD RADEON GRAPHICS DRIVER ("radeongd") PM4 COMMAND STREAM GENERATION
      * (Clean-room implementation; Linux amdgpu specification used as reference)
      * --------------------------------------------------------------------- */
-    pub fn radeongd_submit_pm4_draw(&mut self, index_count: u32, is_32bit: bool) -> Result<(), &'static str> {
+    pub fn radeongd_submit_pm4_draw(
+        &mut self,
+        index_count: u32,
+        is_32bit: bool,
+    ) -> Result<(), &'static str> {
         if self.gpu_type != AccelGpuType::Radeongd || !self.is_ready {
             return Err("radeongd 3D engine not active");
         }
@@ -217,7 +229,7 @@ impl Gpu3dEngine {
             // 2. Packet 3: Auto Index Draw Call
             self.write_dword(amd_packet3(AMD_PACKET3_DRAW_INDEX_AUTO, 2));
             self.write_dword(index_count); // Index count
-            self.write_dword(0);           // Draw initiator flags
+            self.write_dword(0); // Draw initiator flags
 
             // 3. Packet 3: NOP Padding
             self.write_dword(amd_packet3(AMD_PACKET3_NOP, 0));
@@ -235,7 +247,11 @@ impl Gpu3dEngine {
     }
 
     #[inline(always)]
-    pub fn amd_submit_pm4_draw(&mut self, index_count: u32, is_32bit: bool) -> Result<(), &'static str> {
+    pub fn amd_submit_pm4_draw(
+        &mut self,
+        index_count: u32,
+        is_32bit: bool,
+    ) -> Result<(), &'static str> {
         self.radeongd_submit_pm4_draw(index_count, is_32bit)
     }
 
@@ -258,7 +274,7 @@ impl Gpu3dEngine {
             // 2. Subchannel 0: Configure Viewport Dimensions (1024x768)
             self.write_dword(nv_method(0, NV9097_SET_VIEWPORT_HORIZ, 2));
             self.write_dword((1024 << 16) | 0); // Width | X
-            self.write_dword((768 << 16) | 0);  // Height | Y
+            self.write_dword((768 << 16) | 0); // Height | Y
 
             // 3. Subchannel 0: Draw Elements
             self.write_dword(nv_method(0, NV9097_DRAW_ELEMENTS, 1));
@@ -276,7 +292,10 @@ impl Gpu3dEngine {
     }
 
     #[inline(always)]
-    pub fn nouveau_submit_pushbuffer_draw(&mut self, vertex_count: u32) -> Result<(), &'static str> {
+    pub fn nouveau_submit_pushbuffer_draw(
+        &mut self,
+        vertex_count: u32,
+    ) -> Result<(), &'static str> {
         self.nvgd_submit_pushbuffer_draw(vertex_count)
     }
 }
@@ -295,7 +314,8 @@ pub fn init() {
     });
 
     if let Some(dev) = intel_dev {
-        let (ring_ptr, ring_phys) = unsafe { alloc_coherent(4096) }.unwrap_or((core::ptr::null_mut(), 0));
+        let (ring_ptr, ring_phys) =
+            unsafe { alloc_coherent(4096) }.unwrap_or((core::ptr::null_mut(), 0));
         engine.gpu_type = AccelGpuType::Igd;
         engine.vendor_id = INTEL_PCI_VENDOR;
         engine.device_id = dev.device_id;
@@ -319,7 +339,8 @@ pub fn init() {
     });
 
     if let Some(dev) = amd_dev {
-        let (ring_ptr, ring_phys) = unsafe { alloc_coherent(4096) }.unwrap_or((core::ptr::null_mut(), 0));
+        let (ring_ptr, ring_phys) =
+            unsafe { alloc_coherent(4096) }.unwrap_or((core::ptr::null_mut(), 0));
         engine.gpu_type = AccelGpuType::Radeongd;
         engine.vendor_id = AMD_PCI_VENDOR;
         engine.device_id = dev.device_id;
@@ -328,7 +349,9 @@ pub fn init() {
         engine.ring_buffer = ring_ptr as *mut u32;
         engine.ring_phys = ring_phys;
         engine.is_ready = true;
-        crate::drivers::serial::print("GPU 3D: radeongd (AMD Radeon Graphics Driver) online (PCI 1002:");
+        crate::drivers::serial::print(
+            "GPU 3D: radeongd (AMD Radeon Graphics Driver) online (PCI 1002:",
+        );
         crate::drivers::serial::print_hex(dev.device_id as u64);
         crate::drivers::serial::println(", CP Packet 3 Pipeline Ready)");
         return;
@@ -344,7 +367,8 @@ pub fn init() {
     });
 
     if let Some(dev) = nv_dev {
-        let (ring_ptr, ring_phys) = unsafe { alloc_coherent(4096) }.unwrap_or((core::ptr::null_mut(), 0));
+        let (ring_ptr, ring_phys) =
+            unsafe { alloc_coherent(4096) }.unwrap_or((core::ptr::null_mut(), 0));
         engine.gpu_type = AccelGpuType::Nvgd;
         engine.vendor_id = NVIDIA_PCI_VENDOR;
         engine.device_id = dev.device_id;
@@ -353,13 +377,17 @@ pub fn init() {
         engine.ring_buffer = ring_ptr as *mut u32;
         engine.ring_phys = ring_phys;
         engine.is_ready = true;
-        crate::drivers::serial::print("GPU 3D: nvgd (NVIDIA Graphics Driver - Daily 3D Accel) online (PCI 10DE:");
+        crate::drivers::serial::print(
+            "GPU 3D: nvgd (NVIDIA Graphics Driver - Daily 3D Accel) online (PCI 10DE:",
+        );
         crate::drivers::serial::print_hex(dev.device_id as u64);
         crate::drivers::serial::println(", NV9097 Class FIFO Active)");
         return;
     }
 
-    crate::drivers::serial::println("GPU 3D: Hardware 3D Command Processor initialized (Software Raster Fallback)");
+    crate::drivers::serial::println(
+        "GPU 3D: Hardware 3D Command Processor initialized (Software Raster Fallback)",
+    );
 }
 
 pub fn is_available() -> bool {

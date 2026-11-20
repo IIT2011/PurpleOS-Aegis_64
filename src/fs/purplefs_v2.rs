@@ -55,7 +55,8 @@ impl<'a> PurpleFsV2<'a> {
 
         let expected_crc = u32::from_le_bytes(
             sb_buf[PFS2_SUPERBLOCK_CRC_OFFSET..PFS2_SUPERBLOCK_CRC_OFFSET + 4]
-                .try_into().unwrap(),
+                .try_into()
+                .unwrap(),
         );
         if crc32(&sb_buf[..PFS2_SUPERBLOCK_CRC_OFFSET]) != expected_crc {
             return Err("PurpleFS v2 superblock CRC mismatch");
@@ -69,31 +70,43 @@ impl<'a> PurpleFsV2<'a> {
         let (mut total_blocks, mut free_blocks) = (field(24), field(28));
         let journal_start = field(60);
         let journal_blocks = field(64);
-        let journal_end = journal_start.checked_add(journal_blocks)
+        let journal_end = journal_start
+            .checked_add(journal_blocks)
             .ok_or("PurpleFS v2 journal range overflow")?;
 
         // Older image builders stored free blocks at 24 and free inodes at 28.
         // Their contiguous journal still records the formatted volume boundary.
-        if total_blocks < journal_end && journal_blocks != 0
-            && total_blocks < journal_start && free_blocks < PFS2_MAX_INODES
-            && field(32) == PFS2_MAX_INODES && field(36) == PFS2_MAX_INODES
+        if total_blocks < journal_end
+            && journal_blocks != 0
+            && total_blocks < journal_start
+            && free_blocks < PFS2_MAX_INODES
+            && field(32) == PFS2_MAX_INODES
+            && field(36) == PFS2_MAX_INODES
         {
             (total_blocks, free_blocks) = (journal_end, total_blocks);
         }
 
-        if total_blocks <= PFS2_ROOT_DIR_BLOCK || free_blocks > total_blocks
+        if total_blocks <= PFS2_ROOT_DIR_BLOCK
+            || free_blocks > total_blocks
             || total_blocks as usize > PFS2_BLOCK_SIZE * 8
-            || (journal_blocks != 0 && (journal_start < PFS2_FIRST_DATA_BLOCK || journal_end > total_blocks))
+            || (journal_blocks != 0
+                && (journal_start < PFS2_FIRST_DATA_BLOCK || journal_end > total_blocks))
         {
             return Err("Invalid PurpleFS v2 block counts");
         }
-        let journal_start = if journal_blocks == 0 { total_blocks } else { journal_start };
+        let journal_start = if journal_blocks == 0 {
+            total_blocks
+        } else {
+            journal_start
+        };
         let volume_sectors = (total_blocks as u64)
             .checked_mul(PFS2_SECTORS_PER_BLOCK)
             .ok_or("PurpleFS v2 volume size overflow")?;
-        let volume_end = start_lba.checked_add(volume_sectors)
+        let volume_end = start_lba
+            .checked_add(volume_sectors)
             .ok_or("PurpleFS v2 volume range overflow")?;
-        let partition_end = start_lba.checked_add(partition_sector_count)
+        let partition_end = start_lba
+            .checked_add(partition_sector_count)
             .ok_or("PurpleFS v2 partition range overflow")?;
         if partition_end > dev.total_blocks()
             || volume_end > partition_end
@@ -118,15 +131,26 @@ impl<'a> PurpleFsV2<'a> {
     }
 
     /// Read an entire 4096-byte filesystem block (8 sectors of 512 bytes)
-    pub fn read_fs_block(&mut self, block_idx: u32, buf: &mut [u8; PFS2_BLOCK_SIZE]) -> Result<(), &'static str> {
+    pub fn read_fs_block(
+        &mut self,
+        block_idx: u32,
+        buf: &mut [u8; PFS2_BLOCK_SIZE],
+    ) -> Result<(), &'static str> {
         if block_idx >= self.total_blocks {
             return Err("Filesystem block index out of range");
         }
-        let sector_offset = (block_idx as u64).checked_mul(PFS2_SECTORS_PER_BLOCK)
+        let sector_offset = (block_idx as u64)
+            .checked_mul(PFS2_SECTORS_PER_BLOCK)
             .ok_or("Filesystem block LBA overflow")?;
-        let lba = self.start_lba.checked_add(sector_offset)
+        let lba = self
+            .start_lba
+            .checked_add(sector_offset)
             .ok_or("Filesystem block LBA overflow")?;
-        if self.dev.read_blocks(lba, PFS2_SECTORS_PER_BLOCK as u32, buf) == 0 {
+        if self
+            .dev
+            .read_blocks(lba, PFS2_SECTORS_PER_BLOCK as u32, buf)
+            == 0
+        {
             Ok(())
         } else {
             Err("Block device read failure")
@@ -134,18 +158,29 @@ impl<'a> PurpleFsV2<'a> {
     }
 
     /// Write an entire 4096-byte filesystem block (8 sectors of 512 bytes)
-    pub fn write_fs_block(&mut self, block_idx: u32, buf: &[u8; PFS2_BLOCK_SIZE]) -> Result<(), &'static str> {
+    pub fn write_fs_block(
+        &mut self,
+        block_idx: u32,
+        buf: &[u8; PFS2_BLOCK_SIZE],
+    ) -> Result<(), &'static str> {
         if self.read_only {
             return Err("Filesystem is mounted read-only");
         }
         if block_idx >= self.total_blocks {
             return Err("Filesystem block index out of range");
         }
-        let sector_offset = (block_idx as u64).checked_mul(PFS2_SECTORS_PER_BLOCK)
+        let sector_offset = (block_idx as u64)
+            .checked_mul(PFS2_SECTORS_PER_BLOCK)
             .ok_or("Filesystem block LBA overflow")?;
-        let lba = self.start_lba.checked_add(sector_offset)
+        let lba = self
+            .start_lba
+            .checked_add(sector_offset)
             .ok_or("Filesystem block LBA overflow")?;
-        if self.dev.write_blocks(lba, PFS2_SECTORS_PER_BLOCK as u32, buf) == 0 {
+        if self
+            .dev
+            .write_blocks(lba, PFS2_SECTORS_PER_BLOCK as u32, buf)
+            == 0
+        {
             Ok(())
         } else {
             Err("Block device write failure")
@@ -161,10 +196,15 @@ impl<'a> PurpleFsV2<'a> {
         let mut off = 0;
         while off + 32 <= PFS2_BLOCK_SIZE {
             let ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
-            let rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
+            let rec_len =
+                u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
             let name_len = dir_block[off + 6] as usize;
 
-            if rec_len == 0 || rec_len < 8 + name_len || rec_len % 4 != 0 || rec_len > PFS2_BLOCK_SIZE - off {
+            if rec_len == 0
+                || rec_len < 8 + name_len
+                || rec_len % 4 != 0
+                || rec_len > PFS2_BLOCK_SIZE - off
+            {
                 return None;
             }
             if ino != 0 && ino < PFS2_MAX_INODES && name_len > 0 && name_len <= rec_len - 8 {
@@ -190,9 +230,8 @@ impl<'a> PurpleFsV2<'a> {
         if self.read_fs_block(blk_idx, &mut inode_block).is_err() {
             return None;
         }
-        let size_bytes = u64::from_le_bytes(
-            inode_block[ino_off + 8..ino_off + 16].try_into().unwrap(),
-        ) as usize;
+        let size_bytes =
+            u64::from_le_bytes(inode_block[ino_off + 8..ino_off + 16].try_into().unwrap()) as usize;
         Some(size_bytes)
     }
 
@@ -209,9 +248,8 @@ impl<'a> PurpleFsV2<'a> {
             return 0;
         }
 
-        let size_bytes = u64::from_le_bytes(
-            inode_block[ino_off + 8..ino_off + 16].try_into().unwrap(),
-        ) as usize;
+        let size_bytes =
+            u64::from_le_bytes(inode_block[ino_off + 8..ino_off + 16].try_into().unwrap()) as usize;
 
         if offset >= size_bytes {
             return 0;
@@ -222,7 +260,11 @@ impl<'a> PurpleFsV2<'a> {
         let mut block_buf = [0u8; PFS2_BLOCK_SIZE];
         let mut indirect_buf = [0u8; PFS2_BLOCK_SIZE];
         let mut indirect_loaded = false;
-        let indirect_blk = u32::from_le_bytes(inode_block[ino_off + 0x5C..ino_off + 0x60].try_into().unwrap());
+        let indirect_blk = u32::from_le_bytes(
+            inode_block[ino_off + 0x5C..ino_off + 0x60]
+                .try_into()
+                .unwrap(),
+        );
 
         for i in 0..total_file_blocks.min(PFS2_DIRECT_BLOCKS + PFS2_INDIRECT_POINTERS) {
             if bytes_copied >= buf.len() {
@@ -258,7 +300,12 @@ impl<'a> PurpleFsV2<'a> {
                         }
                     }
                     let ind_idx = i - PFS2_DIRECT_BLOCKS;
-                    u32::from_le_bytes(indirect_buf[ind_idx * core::mem::size_of::<u32>()..(ind_idx + 1) * core::mem::size_of::<u32>()].try_into().unwrap())
+                    u32::from_le_bytes(
+                        indirect_buf[ind_idx * core::mem::size_of::<u32>()
+                            ..(ind_idx + 1) * core::mem::size_of::<u32>()]
+                            .try_into()
+                            .unwrap(),
+                    )
                 }
             };
             if data_blk == 0 {
@@ -269,9 +316,12 @@ impl<'a> PurpleFsV2<'a> {
                 let off_in_blk = current_pos - blk_start;
                 let avail_in_blk = PFS2_BLOCK_SIZE - off_in_blk;
                 let avail_in_file = size_bytes - current_pos;
-                let chunk_len = avail_in_blk.min(avail_in_file).min(buf.len() - bytes_copied);
+                let chunk_len = avail_in_blk
+                    .min(avail_in_file)
+                    .min(buf.len() - bytes_copied);
 
-                buf[bytes_copied..bytes_copied + chunk_len].copy_from_slice(&block_buf[off_in_blk..off_in_blk + chunk_len]);
+                buf[bytes_copied..bytes_copied + chunk_len]
+                    .copy_from_slice(&block_buf[off_in_blk..off_in_blk + chunk_len]);
                 bytes_copied += chunk_len;
             } else {
                 break;
@@ -294,15 +344,21 @@ impl<'a> PurpleFsV2<'a> {
         let mut off = 0;
         while off + 32 <= PFS2_BLOCK_SIZE {
             let ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
-            let rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
+            let rec_len =
+                u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
             let name_len = dir_block[off + 6] as usize;
             let ftype = dir_block[off + 7];
 
-            if rec_len == 0 || rec_len < 8 + name_len || rec_len % 4 != 0 || rec_len > PFS2_BLOCK_SIZE - off {
+            if rec_len == 0
+                || rec_len < 8 + name_len
+                || rec_len % 4 != 0
+                || rec_len > PFS2_BLOCK_SIZE - off
+            {
                 break;
             }
             if ino != 0 && ino < PFS2_MAX_INODES && name_len > 0 && name_len <= rec_len - 8 {
-                if let Ok(name_str) = core::str::from_utf8(&dir_block[off + 8..off + 8 + name_len]) {
+                if let Ok(name_str) = core::str::from_utf8(&dir_block[off + 8..off + 8 + name_len])
+                {
                     if name_str != "." && name_str != ".." {
                         // Lookup size from inode
                         let blk_idx = 2 + (ino / 32);
@@ -310,7 +366,9 @@ impl<'a> PurpleFsV2<'a> {
                         let mut inode_block = [0u8; PFS2_BLOCK_SIZE];
                         let mut fsize = 0u64;
                         if self.read_fs_block(blk_idx, &mut inode_block).is_ok() {
-                            fsize = u64::from_le_bytes(inode_block[ino_off + 8..ino_off + 16].try_into().unwrap());
+                            fsize = u64::from_le_bytes(
+                                inode_block[ino_off + 8..ino_off + 16].try_into().unwrap(),
+                            );
                         }
                         callback(ino, ftype, fsize, name_str);
                     }
@@ -369,7 +427,8 @@ impl<'a> PurpleFsV2<'a> {
 
         while off + (rec_len as usize) <= PFS2_BLOCK_SIZE {
             let ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
-            let cur_rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
+            let cur_rec_len =
+                u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
             if cur_rec_len == 0 || (ino == 0 && cur_rec_len == rec_len as usize) {
                 dir_block[off..off + 4].copy_from_slice(&new_ino.to_le_bytes());
                 dir_block[off + 4..off + 6].copy_from_slice(&rec_len.to_le_bytes());
@@ -430,7 +489,8 @@ impl<'a> PurpleFsV2<'a> {
         inode_block[target_ino_off + 2..target_ino_off + 4].copy_from_slice(&0u16.to_le_bytes()); // uid=0
         inode_block[target_ino_off + 4..target_ino_off + 6].copy_from_slice(&0u16.to_le_bytes()); // gid=0
         inode_block[target_ino_off + 6..target_ino_off + 8].copy_from_slice(&2u16.to_le_bytes()); // links=2
-        inode_block[target_ino_off + 8..target_ino_off + 16].copy_from_slice(&(PFS2_BLOCK_SIZE as u64).to_le_bytes()); // size=PFS2_BLOCK_SIZE
+        inode_block[target_ino_off + 8..target_ino_off + 16]
+            .copy_from_slice(&(PFS2_BLOCK_SIZE as u64).to_le_bytes()); // size=PFS2_BLOCK_SIZE
         self.write_fs_block(target_blk, &inode_block)?;
 
         // Add dirent into root dir block (block 10)
@@ -445,7 +505,8 @@ impl<'a> PurpleFsV2<'a> {
 
         while off + (rec_len as usize) <= PFS2_BLOCK_SIZE {
             let ino = u32::from_le_bytes(dir_block[off..off + 4].try_into().unwrap());
-            let cur_rec_len = u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
+            let cur_rec_len =
+                u16::from_le_bytes(dir_block[off + 4..off + 6].try_into().unwrap()) as usize;
             if cur_rec_len == 0 || (ino == 0 && cur_rec_len == rec_len as usize) {
                 dir_block[off..off + 4].copy_from_slice(&new_ino.to_le_bytes());
                 dir_block[off + 4..off + 6].copy_from_slice(&rec_len.to_le_bytes());
@@ -514,7 +575,12 @@ impl<'a> PurpleFsV2<'a> {
         self.write_file_at(filename, 0, content)
     }
 
-    pub fn write_file_at(&mut self, filename: &str, offset: usize, content: &[u8]) -> Result<usize, &'static str> {
+    pub fn write_file_at(
+        &mut self,
+        filename: &str,
+        offset: usize,
+        content: &[u8],
+    ) -> Result<usize, &'static str> {
         if self.read_only {
             return Err("Filesystem is mounted read-only");
         }
@@ -535,9 +601,8 @@ impl<'a> PurpleFsV2<'a> {
         let mut inode_block = [0u8; PFS2_BLOCK_SIZE];
         self.read_fs_block(blk_idx, &mut inode_block)?;
 
-        let current_size = u64::from_le_bytes(
-            inode_block[ino_off + 8..ino_off + 16].try_into().unwrap(),
-        ) as usize;
+        let current_size =
+            u64::from_le_bytes(inode_block[ino_off + 8..ino_off + 16].try_into().unwrap()) as usize;
 
         let mut bytes_written = 0usize;
         let mut bitmap = [0u8; PFS2_BLOCK_SIZE];
@@ -579,7 +644,8 @@ impl<'a> PurpleFsV2<'a> {
             if off_in_block > 0 || chunk_len < PFS2_BLOCK_SIZE {
                 let _ = self.read_fs_block(blk, &mut data_buf);
             }
-            data_buf[off_in_block..off_in_block + chunk_len].copy_from_slice(&content[bytes_written..bytes_written + chunk_len]);
+            data_buf[off_in_block..off_in_block + chunk_len]
+                .copy_from_slice(&content[bytes_written..bytes_written + chunk_len]);
             self.write_fs_block(blk, &data_buf)?;
             bytes_written += chunk_len;
         }
@@ -668,7 +734,10 @@ impl<'a> PurpleFsV2<'a> {
         let mut release = |blk: u32| -> Result<(), &'static str> {
             let blk = blk as usize;
             if blk != 0 {
-                if blk < PFS2_FIRST_DATA_BLOCK as usize || blk >= data_end || blk / 8 >= bitmap.len() {
+                if blk < PFS2_FIRST_DATA_BLOCK as usize
+                    || blk >= data_end
+                    || blk / 8 >= bitmap.len()
+                {
                     return Err("Invalid allocated file block");
                 }
                 let mask = 1 << (blk % 8);
@@ -685,7 +754,9 @@ impl<'a> PurpleFsV2<'a> {
             release(u32::from_le_bytes(ptr.try_into().unwrap()))?;
         }
         let indirect = u32::from_le_bytes(
-            inode_block[direct_end..direct_end + size_of::<u32>()].try_into().unwrap(),
+            inode_block[direct_end..direct_end + size_of::<u32>()]
+                .try_into()
+                .unwrap(),
         );
         if indirect != 0 {
             release(indirect)?;
@@ -709,11 +780,15 @@ impl<'a> PurpleFsV2<'a> {
         Ok(())
     }
 
-    fn find_dirent(block: &[u8; PFS2_BLOCK_SIZE], inode: u32) -> Result<(usize, usize), &'static str> {
+    fn find_dirent(
+        block: &[u8; PFS2_BLOCK_SIZE],
+        inode: u32,
+    ) -> Result<(usize, usize), &'static str> {
         let mut offset = 0;
         while offset + 8 <= block.len() {
             let entry_inode = u32::from_le_bytes(block[offset..offset + 4].try_into().unwrap());
-            let len = u16::from_le_bytes(block[offset + 4..offset + 6].try_into().unwrap()) as usize;
+            let len =
+                u16::from_le_bytes(block[offset + 4..offset + 6].try_into().unwrap()) as usize;
             if len == 0 {
                 break;
             }

@@ -94,7 +94,8 @@ pub struct Task {
     simd: SimdState,
 }
 
-const fn default_fd_table() -> [crate::kernel::posix::FileDescriptor; crate::kernel::posix::MAX_FD_PER_TASK] {
+const fn default_fd_table(
+) -> [crate::kernel::posix::FileDescriptor; crate::kernel::posix::MAX_FD_PER_TASK] {
     crate::kernel::posix::default_fd_table()
 }
 
@@ -120,7 +121,11 @@ impl Task {
             is_zombie: false,
             fd_table: default_fd_table(),
             vmas: [crate::kernel::posix::Vma::empty(); crate::kernel::posix::MAX_VMAS_PER_TASK],
-            cwd: [b'/', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            cwd: [
+                b'/', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
             cwd_len: 1,
             umask: 0o022,
             brk_start: 0x0000_0000_1000_0000,
@@ -145,14 +150,38 @@ pub struct SchedState {
 
 pub static SCHED: Spinlock<SchedState> = Spinlock::new(SchedState {
     tasks: [
-        Task::empty(), Task::empty(), Task::empty(), Task::empty(),
-        Task::empty(), Task::empty(), Task::empty(), Task::empty(),
-        Task::empty(), Task::empty(), Task::empty(), Task::empty(),
-        Task::empty(), Task::empty(), Task::empty(), Task::empty(),
-        Task::empty(), Task::empty(), Task::empty(), Task::empty(),
-        Task::empty(), Task::empty(), Task::empty(), Task::empty(),
-        Task::empty(), Task::empty(), Task::empty(), Task::empty(),
-        Task::empty(), Task::empty(), Task::empty(), Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
+        Task::empty(),
     ],
     current: [None; MAX_CPUS],
     next_id: 1,
@@ -160,7 +189,11 @@ pub static SCHED: Spinlock<SchedState> = Spinlock::new(SchedState {
 });
 
 extern "C" {
-    fn switch_context(old_rsp: *mut u64, new_rsp: u64, lock_to_release: *const core::sync::atomic::AtomicBool);
+    fn switch_context(
+        old_rsp: *mut u64,
+        new_rsp: u64,
+        lock_to_release: *const core::sync::atomic::AtomicBool,
+    );
     fn task_trampoline();
     fn user_task_trampoline();
     pub fn enter_user_mode(entry_rip: u64, user_rsp: u64) -> !;
@@ -202,7 +235,9 @@ pub fn init() {
     // Spawn idle task (ID 2) with proper stack
     spawn("idle", idle_task, core::ptr::null_mut(), TaskPriority::Idle);
 
-    crate::drivers::serial::println("Scheduler: AegisSched_64 / PurpleSched Pure Rust Scheduler Initialized");
+    crate::drivers::serial::println(
+        "Scheduler: AegisSched_64 / PurpleSched Pure Rust Scheduler Initialized",
+    );
 }
 
 extern "C" fn idle_task(_arg: *mut u8) {
@@ -261,11 +296,22 @@ pub(crate) fn alloc_task_slot(s: &mut SchedState) -> Option<usize> {
     None
 }
 
-pub fn spawn(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8, prio: TaskPriority) -> Option<u32> {
+pub fn spawn(
+    name_str: &str,
+    entry: extern "C" fn(*mut u8),
+    arg: *mut u8,
+    prio: TaskPriority,
+) -> Option<u32> {
     spawn_affined(name_str, entry, arg, prio, !0)
 }
 
-pub fn spawn_affined(name_str: &str, entry: extern "C" fn(*mut u8), arg: *mut u8, prio: TaskPriority, affinity: u64) -> Option<u32> {
+pub fn spawn_affined(
+    name_str: &str,
+    entry: extern "C" fn(*mut u8),
+    arg: *mut u8,
+    prio: TaskPriority,
+    affinity: u64,
+) -> Option<u32> {
     let stack_phys = alloc_frames(4)?;
     let stack_top = stack_phys + TASK_STACK_SIZE;
 
@@ -354,20 +400,13 @@ pub const USER_STACK_PAGES: usize = 4; // 16 KiB user stack
 ///   mov $24, %eax (SYS_SCHED_YIELD)
 ///   syscall
 ///   jmp .loop
-pub static DEFAULT_USER_WORKER_CODE: [u8; 9] = [
-    0xb8, 0x18, 0x00, 0x00, 0x00,
-    0x0f, 0x05,
-    0xeb, 0xf7,
-];
+pub static DEFAULT_USER_WORKER_CODE: [u8; 9] =
+    [0xb8, 0x18, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xeb, 0xf7];
 
 /// Spawns a true Ring 3 user process with an isolated PML4 page table,
 /// dedicated user code segment at canonical `USER_CODE_BASE`, and dedicated
 /// user stack at canonical `USER_STACK_TOP`.
-pub fn spawn_user_program(
-    name_str: &str,
-    code: &[u8],
-    prio: TaskPriority,
-) -> Option<u32> {
+pub fn spawn_user_program(name_str: &str, code: &[u8], prio: TaskPriority) -> Option<u32> {
     if code.is_empty() {
         return None;
     }
@@ -406,12 +445,9 @@ pub fn spawn_user_program(
             core::ptr::copy_nonoverlapping(code[offset..].as_ptr(), frame_ptr, chunk_len);
         }
         let vaddr = USER_CODE_BASE + (i * 4096) as u64;
-        if let Err(_) = crate::mm::vmm::map_page(
-            pml4,
-            vaddr,
-            code_frame as u64,
-            crate::mm::vmm::PAGE_USER,
-        ) {
+        if let Err(_) =
+            crate::mm::vmm::map_page(pml4, vaddr, code_frame as u64, crate::mm::vmm::PAGE_USER)
+        {
             let _ = free_frames(code_frame, 1);
             crate::mm::vmm::destroy_pml4(pml4);
             let _ = free_frames(kernel_stack_phys, 4);
@@ -437,7 +473,9 @@ pub fn spawn_user_program(
             pml4,
             vaddr,
             stack_frame as u64,
-            crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_WRITABLE | crate::mm::vmm::PAGE_NO_EXECUTE,
+            crate::mm::vmm::PAGE_USER
+                | crate::mm::vmm::PAGE_WRITABLE
+                | crate::mm::vmm::PAGE_NO_EXECUTE,
         ) {
             let _ = free_frames(stack_frame, 1);
             crate::mm::vmm::destroy_pml4(pml4);
@@ -446,8 +484,14 @@ pub fn spawn_user_program(
         }
     }
 
-    install_user_task(name_str, prio, pml4, kernel_stack_phys,
-        (USER_CODE_BASE, USER_STACK_TOP - 16), None)
+    install_user_task(
+        name_str,
+        prio,
+        pml4,
+        kernel_stack_phys,
+        (USER_CODE_BASE, USER_STACK_TOP - 16),
+        None,
+    )
 }
 
 pub(crate) fn install_user_task(
@@ -571,7 +615,8 @@ pub fn current_native() -> Option<(u32, NativeContext)> {
 
 pub fn native_alive(id: u32) -> bool {
     SCHED.lock().tasks.iter().any(|task| {
-        task.id == id && task.native.is_some()
+        task.id == id
+            && task.native.is_some()
             && !matches!(task.state, TaskState::Unused | TaskState::Terminated)
     })
 }
@@ -636,7 +681,10 @@ pub fn kill(task_id: u32) -> Result<(), &'static str> {
     }
     let mut s = SCHED.lock();
     for i in 0..MAX_TASKS {
-        if s.tasks[i].id == task_id && s.tasks[i].state != TaskState::Terminated && s.tasks[i].state != TaskState::Unused {
+        if s.tasks[i].id == task_id
+            && s.tasks[i].state != TaskState::Terminated
+            && s.tasks[i].state != TaskState::Unused
+        {
             s.tasks[i].state = TaskState::Terminated;
             drop(s);
             crate::kernel::smp::broadcast_resched();
@@ -657,7 +705,12 @@ fn pick_next(s: &mut SchedState, cpu_id: usize) -> Option<usize> {
     }
 
     // Pick highest priority ready task matching affinity
-    for prio in [TaskPriority::High, TaskPriority::Normal, TaskPriority::Low, TaskPriority::Idle] {
+    for prio in [
+        TaskPriority::High,
+        TaskPriority::Normal,
+        TaskPriority::Low,
+        TaskPriority::Idle,
+    ] {
         let start = s.current[cpu_id].map_or(0, |index| (index + 1) % MAX_TASKS);
         for offset in 0..MAX_TASKS {
             let i = (start + offset) % MAX_TASKS;

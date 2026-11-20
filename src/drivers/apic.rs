@@ -45,7 +45,11 @@ pub unsafe fn write_reg(reg: u32, val: u32) {
 
 pub fn init(base_phys: u64) -> Result<(), &'static str> {
     unsafe {
-        let base = if base_phys != 0 { base_phys } else { LAPIC_DEFAULT_PHYS };
+        let base = if base_phys != 0 {
+            base_phys
+        } else {
+            LAPIC_DEFAULT_PHYS
+        };
         LAPIC_BASE.store(base, Ordering::SeqCst);
 
         // Enable APIC via MSR (bit 11)
@@ -97,7 +101,11 @@ pub fn calibrate_timer() -> u32 {
         let curr = read_reg(LAPIC_TIMER_CURR);
         let ticks_10ms = 0xFFFFFFFFu32.saturating_sub(curr);
 
-        let ticks = if ticks_10ms > 1000 { ticks_10ms } else { 100000 };
+        let ticks = if ticks_10ms > 1000 {
+            ticks_10ms
+        } else {
+            100000
+        };
         APIC_TICKS_PER_10MS.store(ticks, Ordering::SeqCst);
 
         // Register IDT handler for vector 48

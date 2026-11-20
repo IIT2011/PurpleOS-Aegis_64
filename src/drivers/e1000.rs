@@ -5,64 +5,64 @@
 //!   - `drivers/net/ethernet/intel/e1000/e1000_hw.c`
 //!   - `drivers/net/ethernet/intel/e1000/e1000_main.c`
 
-use crate::drivers::pci::find_device;
 use crate::drivers::dma::alloc_coherent;
+use crate::drivers::pci::find_device;
 use crate::sync::Spinlock;
 
 pub const E1000_VENDOR_INTEL: u16 = 0x8086;
 pub const E1000_DEV_82540EM: u16 = 0x100E;
 pub const E1000_DEV_82545EM: u16 = 0x100F;
-pub const E1000_DEV_82574L: u16  = 0x10D3;
+pub const E1000_DEV_82574L: u16 = 0x10D3;
 
 /* Device Registers from Linux e1000_hw.h */
-pub const E1000_CTRL: usize     = 0x00000; /* Device Control - RW */
-pub const E1000_STATUS: usize   = 0x00008; /* Device Status - RO */
-pub const E1000_EECD: usize     = 0x00010; /* EEPROM/Flash Control - RW */
-pub const E1000_EERD: usize     = 0x00014; /* EEPROM Read - RW */
+pub const E1000_CTRL: usize = 0x00000; /* Device Control - RW */
+pub const E1000_STATUS: usize = 0x00008; /* Device Status - RO */
+pub const E1000_EECD: usize = 0x00010; /* EEPROM/Flash Control - RW */
+pub const E1000_EERD: usize = 0x00014; /* EEPROM Read - RW */
 pub const E1000_CTRL_EXT: usize = 0x00018; /* Extended Device Control - RW */
-pub const E1000_ICR: usize      = 0x000C0; /* Interrupt Cause Read - R/clr */
-pub const E1000_IMS: usize      = 0x000D0; /* Interrupt Mask Set - RW */
-pub const E1000_IMC: usize      = 0x000D8; /* Interrupt Mask Clear - WO */
-pub const E1000_RCTL: usize     = 0x00100; /* RX Control - RW */
-pub const E1000_TCTL: usize     = 0x00400; /* TX Control - RW */
-pub const E1000_TIPG: usize     = 0x00410; /* TX Inter-packet gap - RW */
-pub const E1000_RDBAL: usize    = 0x02800; /* RX Descriptor Base Address Low - RW */
-pub const E1000_RDBAH: usize    = 0x02804; /* RX Descriptor Base Address High - RW */
-pub const E1000_RDLEN: usize    = 0x02808; /* RX Descriptor Length - RW */
-pub const E1000_RDH: usize      = 0x02810; /* RX Descriptor Head - RW */
-pub const E1000_RDT: usize      = 0x02818; /* RX Descriptor Tail - RW */
-pub const E1000_TDBAL: usize    = 0x03800; /* TX Descriptor Base Address Low - RW */
-pub const E1000_TDBAH: usize    = 0x03804; /* TX Descriptor Base Address High - RW */
-pub const E1000_TDLEN: usize    = 0x03808; /* TX Descriptor Length - RW */
-pub const E1000_TDH: usize      = 0x03810; /* TX Descriptor Head - RW */
-pub const E1000_TDT: usize      = 0x03818; /* TX Descriptor Tail - RW */
-pub const E1000_MTA: usize      = 0x05200; /* Multicast Table Array - RW (128 entries) */
-pub const E1000_RAL: usize      = 0x05400; /* Receive Address Low - RW */
-pub const E1000_RAH: usize      = 0x05404; /* Receive Address High - RW */
+pub const E1000_ICR: usize = 0x000C0; /* Interrupt Cause Read - R/clr */
+pub const E1000_IMS: usize = 0x000D0; /* Interrupt Mask Set - RW */
+pub const E1000_IMC: usize = 0x000D8; /* Interrupt Mask Clear - WO */
+pub const E1000_RCTL: usize = 0x00100; /* RX Control - RW */
+pub const E1000_TCTL: usize = 0x00400; /* TX Control - RW */
+pub const E1000_TIPG: usize = 0x00410; /* TX Inter-packet gap - RW */
+pub const E1000_RDBAL: usize = 0x02800; /* RX Descriptor Base Address Low - RW */
+pub const E1000_RDBAH: usize = 0x02804; /* RX Descriptor Base Address High - RW */
+pub const E1000_RDLEN: usize = 0x02808; /* RX Descriptor Length - RW */
+pub const E1000_RDH: usize = 0x02810; /* RX Descriptor Head - RW */
+pub const E1000_RDT: usize = 0x02818; /* RX Descriptor Tail - RW */
+pub const E1000_TDBAL: usize = 0x03800; /* TX Descriptor Base Address Low - RW */
+pub const E1000_TDBAH: usize = 0x03804; /* TX Descriptor Base Address High - RW */
+pub const E1000_TDLEN: usize = 0x03808; /* TX Descriptor Length - RW */
+pub const E1000_TDH: usize = 0x03810; /* TX Descriptor Head - RW */
+pub const E1000_TDT: usize = 0x03818; /* TX Descriptor Tail - RW */
+pub const E1000_MTA: usize = 0x05200; /* Multicast Table Array - RW (128 entries) */
+pub const E1000_RAL: usize = 0x05400; /* Receive Address Low - RW */
+pub const E1000_RAH: usize = 0x05404; /* Receive Address High - RW */
 
 /* Control Register Bits */
-pub const E1000_CTRL_SLU: u32   = 0x00000040; /* Set Link Up */
-pub const E1000_CTRL_RST: u32   = 0x04000000; /* Global Reset */
+pub const E1000_CTRL_SLU: u32 = 0x00000040; /* Set Link Up */
+pub const E1000_CTRL_RST: u32 = 0x04000000; /* Global Reset */
 
 /* RCTL (Receive Control) Bits */
-pub const E1000_RCTL_EN: u32    = 0x00000002; /* Receiver Enable */
-pub const E1000_RCTL_SBP: u32   = 0x00000004; /* Store Bad Packets */
-pub const E1000_RCTL_UPE: u32   = 0x00000008; /* Unicast Promiscuous Enabled */
-pub const E1000_RCTL_MPE: u32   = 0x00000010; /* Multicast Promiscuous Enabled */
-pub const E1000_RCTL_LPE: u32   = 0x00000020; /* Long Packet Enable */
-pub const E1000_RCTL_BAM: u32   = 0x00008000; /* Broadcast Accept Mode */
+pub const E1000_RCTL_EN: u32 = 0x00000002; /* Receiver Enable */
+pub const E1000_RCTL_SBP: u32 = 0x00000004; /* Store Bad Packets */
+pub const E1000_RCTL_UPE: u32 = 0x00000008; /* Unicast Promiscuous Enabled */
+pub const E1000_RCTL_MPE: u32 = 0x00000010; /* Multicast Promiscuous Enabled */
+pub const E1000_RCTL_LPE: u32 = 0x00000020; /* Long Packet Enable */
+pub const E1000_RCTL_BAM: u32 = 0x00008000; /* Broadcast Accept Mode */
 pub const E1000_RCTL_BSIZE_2048: u32 = 0x00000000; /* Buffer Size 2048 bytes */
 pub const E1000_RCTL_SECRC: u32 = 0x04000000; /* Strip Ethernet CRC */
 
 /* TCTL (Transmit Control) Bits */
-pub const E1000_TCTL_EN: u32    = 0x00000002; /* Transmit Enable */
-pub const E1000_TCTL_PSP: u32   = 0x00000008; /* Pad Short Packets */
-pub const E1000_TCTL_CT_SHIFT: u32 = 4;       /* Collision Threshold */
-pub const E1000_TCTL_COLD_SHIFT: u32 = 12;    /* Collision Distance */
+pub const E1000_TCTL_EN: u32 = 0x00000002; /* Transmit Enable */
+pub const E1000_TCTL_PSP: u32 = 0x00000008; /* Pad Short Packets */
+pub const E1000_TCTL_CT_SHIFT: u32 = 4; /* Collision Threshold */
+pub const E1000_TCTL_COLD_SHIFT: u32 = 12; /* Collision Distance */
 
 /* EERD (EEPROM Read Register) */
 pub const E1000_EERD_START: u32 = 0x00000001; /* Start Read */
-pub const E1000_EERD_DONE: u32  = 0x00000010; /* Read Done */
+pub const E1000_EERD_DONE: u32 = 0x00000010; /* Read Done */
 pub const E1000_EERD_ADDR_SHIFT: u32 = 8;
 pub const E1000_EERD_DATA_SHIFT: u32 = 16;
 
@@ -145,7 +145,10 @@ impl E1000Device {
     /// Read 16-bit word from EEPROM using EERD register as defined in Linux e1000_hw.c
     fn read_eeprom(&self, addr: u8) -> u16 {
         unsafe {
-            self.write_reg(E1000_EERD, ((addr as u32) << E1000_EERD_ADDR_SHIFT) | E1000_EERD_START);
+            self.write_reg(
+                E1000_EERD,
+                ((addr as u32) << E1000_EERD_ADDR_SHIFT) | E1000_EERD_START,
+            );
             let mut timeout = 10000;
             while timeout > 0 {
                 let val = self.read_reg(E1000_EERD);
@@ -195,13 +198,15 @@ impl E1000Device {
 
         // 2. Allocate DMA memory for RX Ring
         let rx_ring_size = NUM_RX_DESCRIPTORS * core::mem::size_of::<E1000RxDesc>();
-        let (rx_ptr, rx_phys) = unsafe { alloc_coherent(rx_ring_size) }.ok_or("Failed to alloc RX Ring")?;
+        let (rx_ptr, rx_phys) =
+            unsafe { alloc_coherent(rx_ring_size) }.ok_or("Failed to alloc RX Ring")?;
         self.rx_descs = rx_ptr as *mut E1000RxDesc;
         self.rx_descs_phys = rx_phys;
 
         // Allocate RX Buffers
         for i in 0..NUM_RX_DESCRIPTORS {
-            let (buf_ptr, buf_phys) = unsafe { alloc_coherent(RX_BUFFER_SIZE) }.ok_or("Failed to alloc RX buf")?;
+            let (buf_ptr, buf_phys) =
+                unsafe { alloc_coherent(RX_BUFFER_SIZE) }.ok_or("Failed to alloc RX buf")?;
             self.rx_buffers[i] = buf_ptr;
             unsafe {
                 let desc = self.rx_descs.add(i);
@@ -212,13 +217,15 @@ impl E1000Device {
 
         // 3. Allocate DMA memory for TX Ring
         let tx_ring_size = NUM_TX_DESCRIPTORS * core::mem::size_of::<E1000TxDesc>();
-        let (tx_ptr, tx_phys) = unsafe { alloc_coherent(tx_ring_size) }.ok_or("Failed to alloc TX Ring")?;
+        let (tx_ptr, tx_phys) =
+            unsafe { alloc_coherent(tx_ring_size) }.ok_or("Failed to alloc TX Ring")?;
         self.tx_descs = tx_ptr as *mut E1000TxDesc;
         self.tx_descs_phys = tx_phys;
 
         // Allocate TX Buffers
         for i in 0..NUM_TX_DESCRIPTORS {
-            let (buf_ptr, buf_phys) = unsafe { alloc_coherent(RX_BUFFER_SIZE) }.ok_or("Failed to alloc TX buf")?;
+            let (buf_ptr, buf_phys) =
+                unsafe { alloc_coherent(RX_BUFFER_SIZE) }.ok_or("Failed to alloc TX buf")?;
             self.tx_buffers[i] = buf_ptr;
             unsafe {
                 let desc = self.tx_descs.add(i);
@@ -262,7 +269,10 @@ impl E1000Device {
             // Enable TX (EN | PSP | Collision settings)
             self.write_reg(
                 E1000_TCTL,
-                E1000_TCTL_EN | E1000_TCTL_PSP | (15 << E1000_TCTL_CT_SHIFT) | (64 << E1000_TCTL_COLD_SHIFT),
+                E1000_TCTL_EN
+                    | E1000_TCTL_PSP
+                    | (15 << E1000_TCTL_CT_SHIFT)
+                    | (64 << E1000_TCTL_COLD_SHIFT),
             );
 
             // 7. Enable Link (Set Link Up)
@@ -280,7 +290,9 @@ impl E1000Device {
 
     /// Transmit raw ethernet frame
     pub fn transmit(&mut self, packet: &[u8]) -> Result<(), &'static str> {
-        if !self.is_ready || !(crate::net::eth::ETH_HEADER_LEN..=RX_BUFFER_SIZE).contains(&packet.len()) {
+        if !self.is_ready
+            || !(crate::net::eth::ETH_HEADER_LEN..=RX_BUFFER_SIZE).contains(&packet.len())
+        {
             return Err("E1000 not ready or packet too large");
         }
 
@@ -333,8 +345,11 @@ impl E1000Device {
                 let len = usize::from(core::ptr::addr_of!((*desc).length).read_volatile());
                 let errors = core::ptr::addr_of!((*desc).errors).read_volatile();
                 let end = flags & 0x02 != 0;
-                let valid = end && !self.rx_discarding && errors == 0
-                    && (crate::net::eth::ETH_HEADER_LEN..=RX_BUFFER_SIZE.min(buf.len())).contains(&len);
+                let valid = end
+                    && !self.rx_discarding
+                    && errors == 0
+                    && (crate::net::eth::ETH_HEADER_LEN..=RX_BUFFER_SIZE.min(buf.len()))
+                        .contains(&len);
                 self.rx_discarding = !end;
                 if valid {
                     core::ptr::copy_nonoverlapping(self.rx_buffers[tail], buf.as_mut_ptr(), len);
@@ -346,7 +361,9 @@ impl E1000Device {
                 self.write_reg(E1000_RDT, tail as u32);
                 self.rx_tail = (tail + 1) % NUM_RX_DESCRIPTORS;
 
-                if valid { return len; }
+                if valid {
+                    return len;
+                }
             }
         }
         0
@@ -358,7 +375,10 @@ pub static E1000: Spinlock<E1000Device> = Spinlock::new(E1000Device::new());
 pub fn init() {
     if let Some(dev) = find_device(E1000_VENDOR_INTEL, E1000_DEV_82540EM) {
         let bar0 = (dev.bar0 & !0xF) as u64;
-        if dev.bar0 & 1 != 0 || bar0 == 0 || crate::mm::vmm::map_mmio_range(bar0, 128 * 1024).is_err() {
+        if dev.bar0 & 1 != 0
+            || bar0 == 0
+            || crate::mm::vmm::map_mmio_range(bar0, 128 * 1024).is_err()
+        {
             crate::drivers::serial::println("E1000: PCI MMIO aperture is unavailable");
             return;
         }

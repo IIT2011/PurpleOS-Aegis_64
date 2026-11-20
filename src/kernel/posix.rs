@@ -15,70 +15,70 @@ use crate::sync::Spinlock;
 // ============================================================================
 // 1. Standard POSIX Errno Definitions (IEEE Std 1003.1-2024)
 // ============================================================================
-pub const EPERM: i64        = 1;  // Operation not permitted
-pub const ENOENT: i64       = 2;  // No such file or directory
-pub const ESRCH: i64        = 3;  // No such process
-pub const EINTR: i64        = 4;  // Interrupted system call
-pub const EIO: i64          = 5;  // I/O error
-pub const ENXIO: i64        = 6;  // No such device or address
-pub const E2BIG: i64        = 7;  // Argument list too long
-pub const ENOEXEC: i64      = 8;  // Exec format error
-pub const EBADF: i64        = 9;  // Bad file descriptor
-pub const ECHILD: i64       = 10; // No child processes
-pub const EAGAIN: i64       = 11; // Resource temporarily unavailable
-pub const ENOMEM: i64       = 12; // Out of memory
-pub const EACCES: i64       = 13; // Permission denied
-pub const EFAULT: i64       = 14; // Bad address
-pub const EBUSY: i64        = 16; // Device or resource busy
-pub const EEXIST: i64       = 17; // File exists
-pub const EXDEV: i64        = 18; // Cross-device link
-pub const ENODEV: i64       = 19; // No such device
-pub const ENOTDIR: i64      = 20; // Not a directory
-pub const EISDIR: i64       = 21; // Is a directory
-pub const EINVAL: i64       = 22; // Invalid argument
-pub const ENFILE: i64       = 23; // File table overflow
-pub const EMFILE: i64       = 24; // Too many open files
-pub const ENOTTY: i64       = 25; // Not a typewriter
-pub const EFBIG: i64        = 27; // File too large
-pub const ENOSPC: i64       = 28; // No space left on device
-pub const ESPIPE: i64       = 29; // Illegal seek
-pub const EROFS: i64        = 30; // Read-only file system
-pub const EMLINK: i64       = 31; // Too many links
-pub const EPIPE: i64        = 32; // Broken pipe
-pub const EDOM: i64         = 33; // Numerical argument out of domain
-pub const ERANGE: i64       = 34; // Numerical result out of range
-pub const ENAMETOOLONG: i64  = 36; // File name too long
-pub const ENOSYS: i64       = 38; // Function not implemented
-pub const ENOTEMPTY: i64    = 39; // Directory not empty
-pub const ELOOP: i64        = 40; // Too many levels of symbolic links
-pub const EOVERFLOW: i64    = 75; // Value too large for defined data type
-pub const EOPNOTSUPP: i64   = 95; // Operation not supported on socket
-pub const ECONNREFUSED: i64  = 111; // Connection refused
+pub const EPERM: i64 = 1; // Operation not permitted
+pub const ENOENT: i64 = 2; // No such file or directory
+pub const ESRCH: i64 = 3; // No such process
+pub const EINTR: i64 = 4; // Interrupted system call
+pub const EIO: i64 = 5; // I/O error
+pub const ENXIO: i64 = 6; // No such device or address
+pub const E2BIG: i64 = 7; // Argument list too long
+pub const ENOEXEC: i64 = 8; // Exec format error
+pub const EBADF: i64 = 9; // Bad file descriptor
+pub const ECHILD: i64 = 10; // No child processes
+pub const EAGAIN: i64 = 11; // Resource temporarily unavailable
+pub const ENOMEM: i64 = 12; // Out of memory
+pub const EACCES: i64 = 13; // Permission denied
+pub const EFAULT: i64 = 14; // Bad address
+pub const EBUSY: i64 = 16; // Device or resource busy
+pub const EEXIST: i64 = 17; // File exists
+pub const EXDEV: i64 = 18; // Cross-device link
+pub const ENODEV: i64 = 19; // No such device
+pub const ENOTDIR: i64 = 20; // Not a directory
+pub const EISDIR: i64 = 21; // Is a directory
+pub const EINVAL: i64 = 22; // Invalid argument
+pub const ENFILE: i64 = 23; // File table overflow
+pub const EMFILE: i64 = 24; // Too many open files
+pub const ENOTTY: i64 = 25; // Not a typewriter
+pub const EFBIG: i64 = 27; // File too large
+pub const ENOSPC: i64 = 28; // No space left on device
+pub const ESPIPE: i64 = 29; // Illegal seek
+pub const EROFS: i64 = 30; // Read-only file system
+pub const EMLINK: i64 = 31; // Too many links
+pub const EPIPE: i64 = 32; // Broken pipe
+pub const EDOM: i64 = 33; // Numerical argument out of domain
+pub const ERANGE: i64 = 34; // Numerical result out of range
+pub const ENAMETOOLONG: i64 = 36; // File name too long
+pub const ENOSYS: i64 = 38; // Function not implemented
+pub const ENOTEMPTY: i64 = 39; // Directory not empty
+pub const ELOOP: i64 = 40; // Too many levels of symbolic links
+pub const EOVERFLOW: i64 = 75; // Value too large for defined data type
+pub const EOPNOTSUPP: i64 = 95; // Operation not supported on socket
+pub const ECONNREFUSED: i64 = 111; // Connection refused
 
 // ============================================================================
 // 2. POSIX Open Flags, File Modes & Seek Directives
 // ============================================================================
-pub const O_RDONLY: u32    = 0x0000;
-pub const O_WRONLY: u32    = 0x0001;
-pub const O_RDWR: u32      = 0x0002;
-pub const O_CREAT: u32     = 0x0040;
-pub const O_EXCL: u32      = 0x0080;
-pub const O_TRUNC: u32     = 0x0200;
-pub const O_APPEND: u32    = 0x0400;
-pub const O_NONBLOCK: u32  = 0x0800;
+pub const O_RDONLY: u32 = 0x0000;
+pub const O_WRONLY: u32 = 0x0001;
+pub const O_RDWR: u32 = 0x0002;
+pub const O_CREAT: u32 = 0x0040;
+pub const O_EXCL: u32 = 0x0080;
+pub const O_TRUNC: u32 = 0x0200;
+pub const O_APPEND: u32 = 0x0400;
+pub const O_NONBLOCK: u32 = 0x0800;
 pub const O_DIRECTORY: u32 = 0x10000;
-pub const O_CLOEXEC: u32   = 0x80000;
+pub const O_CLOEXEC: u32 = 0x80000;
 
-pub const FD_CLOEXEC: u32  = 1;
+pub const FD_CLOEXEC: u32 = 1;
 
-pub const S_IFMT: u32   = 0o170000;
+pub const S_IFMT: u32 = 0o170000;
 pub const S_IFSOCK: u32 = 0o140000;
-pub const S_IFLNK: u32  = 0o120000;
-pub const S_IFREG: u32  = 0o100000;
-pub const S_IFBLK: u32  = 0o060000;
-pub const S_IFDIR: u32  = 0o040000;
-pub const S_IFCHR: u32  = 0o020000;
-pub const S_IFIFO: u32  = 0o010000;
+pub const S_IFLNK: u32 = 0o120000;
+pub const S_IFREG: u32 = 0o100000;
+pub const S_IFBLK: u32 = 0o060000;
+pub const S_IFDIR: u32 = 0o040000;
+pub const S_IFCHR: u32 = 0o020000;
+pub const S_IFIFO: u32 = 0o010000;
 
 pub const SEEK_SET: i32 = 0;
 pub const SEEK_CUR: i32 = 1;
@@ -87,45 +87,45 @@ pub const SEEK_END: i32 = 2;
 // ============================================================================
 // 3. POSIX Signals (Signals 1..64)
 // ============================================================================
-pub const SIGHUP: u32    = 1;
-pub const SIGINT: u32    = 2;
-pub const SIGQUIT: u32   = 3;
-pub const SIGILL: u32    = 4;
-pub const SIGTRAP: u32   = 5;
-pub const SIGABRT: u32   = 6;
-pub const SIGBUS: u32    = 7;
-pub const SIGFPE: u32    = 8;
-pub const SIGKILL: u32   = 9;
-pub const SIGUSR1: u32   = 10;
-pub const SIGSEGV: u32   = 11;
-pub const SIGUSR2: u32   = 12;
-pub const SIGPIPE: u32   = 13;
-pub const SIGALRM: u32   = 14;
-pub const SIGTERM: u32   = 15;
-pub const SIGCHLD: u32   = 17;
-pub const SIGCONT: u32   = 18;
-pub const SIGSTOP: u32   = 19;
-pub const SIGTSTP: u32   = 20;
+pub const SIGHUP: u32 = 1;
+pub const SIGINT: u32 = 2;
+pub const SIGQUIT: u32 = 3;
+pub const SIGILL: u32 = 4;
+pub const SIGTRAP: u32 = 5;
+pub const SIGABRT: u32 = 6;
+pub const SIGBUS: u32 = 7;
+pub const SIGFPE: u32 = 8;
+pub const SIGKILL: u32 = 9;
+pub const SIGUSR1: u32 = 10;
+pub const SIGSEGV: u32 = 11;
+pub const SIGUSR2: u32 = 12;
+pub const SIGPIPE: u32 = 13;
+pub const SIGALRM: u32 = 14;
+pub const SIGTERM: u32 = 15;
+pub const SIGCHLD: u32 = 17;
+pub const SIGCONT: u32 = 18;
+pub const SIGSTOP: u32 = 19;
+pub const SIGTSTP: u32 = 20;
 
 // ============================================================================
 // 4. POSIX Clocks & Memory Constants
 // ============================================================================
-pub const CLOCK_REALTIME: i32           = 0;
-pub const CLOCK_MONOTONIC: i32          = 1;
+pub const CLOCK_REALTIME: i32 = 0;
+pub const CLOCK_MONOTONIC: i32 = 1;
 pub const CLOCK_PROCESS_CPUTIME_ID: i32 = 2;
-pub const CLOCK_THREAD_CPUTIME_ID: i32  = 3;
+pub const CLOCK_THREAD_CPUTIME_ID: i32 = 3;
 
-pub const PROT_NONE: i32  = 0x0;
-pub const PROT_READ: i32  = 0x1;
+pub const PROT_NONE: i32 = 0x0;
+pub const PROT_READ: i32 = 0x1;
 pub const PROT_WRITE: i32 = 0x2;
-pub const PROT_EXEC: i32  = 0x4;
+pub const PROT_EXEC: i32 = 0x4;
 
-pub const MAP_SHARED: i32    = 0x01;
-pub const MAP_PRIVATE: i32   = 0x02;
-pub const MAP_FIXED: i32     = 0x10;
+pub const MAP_SHARED: i32 = 0x01;
+pub const MAP_PRIVATE: i32 = 0x02;
+pub const MAP_FIXED: i32 = 0x10;
 pub const MAP_ANONYMOUS: i32 = 0x20;
 
-pub const WNOHANG: i32   = 1;
+pub const WNOHANG: i32 = 1;
 pub const WUNTRACED: i32 = 2;
 
 pub const MAX_FD_PER_TASK: usize = 32;
@@ -198,21 +198,66 @@ pub static OPEN_FILE_TABLE: Spinlock<[OpenFileDescription; MAX_OPEN_FILES]> = Sp
         ref_count: 1,
     },
     // The rest are unused
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
-    OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(), OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
+    OpenFileDescription::unused(),
     OpenFileDescription::unused(),
 ]);
 
@@ -234,9 +279,18 @@ impl FileDescriptor {
 
 pub const fn default_fd_table() -> [FileDescriptor; MAX_FD_PER_TASK] {
     let mut table = [FileDescriptor::unused(); MAX_FD_PER_TASK];
-    table[0] = FileDescriptor { desc_idx: Some(0), flags: 0 };
-    table[1] = FileDescriptor { desc_idx: Some(1), flags: 0 };
-    table[2] = FileDescriptor { desc_idx: Some(2), flags: 0 };
+    table[0] = FileDescriptor {
+        desc_idx: Some(0),
+        flags: 0,
+    };
+    table[1] = FileDescriptor {
+        desc_idx: Some(1),
+        flags: 0,
+    };
+    table[2] = FileDescriptor {
+        desc_idx: Some(2),
+        flags: 0,
+    };
     table
 }
 
@@ -462,7 +516,11 @@ pub fn posix_open(path: &str, flags: u32, _mode: u32) -> Result<usize, i64> {
 
     task.fd_table[fd] = FileDescriptor {
         desc_idx: Some(d_slot),
-        flags: if (flags & O_CLOEXEC) != 0 { FD_CLOEXEC } else { 0 },
+        flags: if (flags & O_CLOEXEC) != 0 {
+            FD_CLOEXEC
+        } else {
+            0
+        },
     };
 
     Ok(fd)
@@ -554,9 +612,7 @@ pub fn posix_read(fd: usize, buf: &mut [u8]) -> Result<usize, i64> {
                 Err(_) => Err(-ENOENT),
             }
         }
-        FdType::PipeRead(id) => {
-            crate::kernel::ipc::pipe_read(id, buf)
-        }
+        FdType::PipeRead(id) => crate::kernel::ipc::pipe_read(id, buf),
         _ => Err(-EBADF),
     }
 }
@@ -665,8 +721,11 @@ pub fn posix_lseek(fd: usize, offset: i64, whence: i32) -> Result<i64, i64> {
             desc.offset = target as usize;
             Ok(target)
         }
-        FdType::PipeRead(_) | FdType::PipeWrite(_) | FdType::ConsoleStdin |
-        FdType::ConsoleStdout | FdType::ConsoleStderr => Err(-ESPIPE),
+        FdType::PipeRead(_)
+        | FdType::PipeWrite(_)
+        | FdType::ConsoleStdin
+        | FdType::ConsoleStdout
+        | FdType::ConsoleStderr => Err(-ESPIPE),
         _ => Err(-EBADF),
     }
 }
@@ -711,7 +770,12 @@ pub fn posix_stat(path: &str, statbuf: &mut PosixStat) -> Result<(), i64> {
         return Ok(());
     }
 
-    if clean.starts_with("/ssd") || clean.starts_with("/hdd") || clean.starts_with("/usb") || clean.starts_with("/sdxc") || clean.starts_with("/sdhc") {
+    if clean.starts_with("/ssd")
+        || clean.starts_with("/hdd")
+        || clean.starts_with("/usb")
+        || clean.starts_with("/sdxc")
+        || clean.starts_with("/sdhc")
+    {
         statbuf.st_ino = fnv1a_64(clean.as_bytes());
         statbuf.st_mode = S_IFBLK | 0o660;
         if let Some(idx) = crate::drivers::block_dev::find_by_canonical_path(clean) {
@@ -966,11 +1030,11 @@ pub fn posix_fcntl(fd: usize, cmd: i32, arg: u64) -> Result<i64, i64> {
         return Err(-EBADF);
     }
 
-    const F_DUPFD: i32         = 0;
-    const F_GETFD: i32         = 1;
-    const F_SETFD: i32         = 2;
-    const F_GETFL: i32         = 3;
-    const F_SETFL: i32         = 4;
+    const F_DUPFD: i32 = 0;
+    const F_GETFD: i32 = 1;
+    const F_SETFD: i32 = 2;
+    const F_GETFL: i32 = 3;
+    const F_SETFL: i32 = 4;
     const F_DUPFD_CLOEXEC: i32 = 1030;
 
     let mut s = crate::kernel::task::SCHED.lock();
@@ -1002,13 +1066,15 @@ pub fn posix_fcntl(fd: usize, cmd: i32, arg: u64) -> Result<i64, i64> {
 
             task.fd_table[target] = FileDescriptor {
                 desc_idx: Some(desc_idx),
-                flags: if cmd == F_DUPFD_CLOEXEC { FD_CLOEXEC } else { 0 },
+                flags: if cmd == F_DUPFD_CLOEXEC {
+                    FD_CLOEXEC
+                } else {
+                    0
+                },
             };
             Ok(target as i64)
         }
-        F_GETFD => {
-            Ok((task.fd_table[fd].flags & FD_CLOEXEC) as i64)
-        }
+        F_GETFD => Ok((task.fd_table[fd].flags & FD_CLOEXEC) as i64),
         F_SETFD => {
             task.fd_table[fd].flags = (arg as u32) & FD_CLOEXEC;
             Ok(0)
@@ -1046,8 +1112,8 @@ pub fn posix_ioctl(fd: usize, req: u64, arg: u64) -> Result<i64, i64> {
 
     match oft[desc_idx].fd_type {
         FdType::ConsoleStdin | FdType::ConsoleStdout | FdType::ConsoleStderr => {
-            const TCGETS: u64     = 0x5401;
-            const TCSETS: u64     = 0x5402;
+            const TCGETS: u64 = 0x5401;
+            const TCSETS: u64 = 0x5402;
             const TIOCGWINSZ: u64 = 0x5413;
 
             match req {
@@ -1057,7 +1123,10 @@ pub fn posix_ioctl(fd: usize, req: u64, arg: u64) -> Result<i64, i64> {
                     term.c_lflag = 0o000010 | 0o000002; // ECHO | ICANON
                     drop(oft);
                     let slice = unsafe {
-                        core::slice::from_raw_parts(&term as *const Termios as *const u8, core::mem::size_of::<Termios>())
+                        core::slice::from_raw_parts(
+                            &term as *const Termios as *const u8,
+                            core::mem::size_of::<Termios>(),
+                        )
                     };
                     crate::kernel::uaccess::copy_to_user(slice, arg)?;
                     Ok(0)
@@ -1066,7 +1135,10 @@ pub fn posix_ioctl(fd: usize, req: u64, arg: u64) -> Result<i64, i64> {
                     let mut term = Termios::default();
                     drop(oft);
                     let slice = unsafe {
-                        core::slice::from_raw_parts_mut(&mut term as *mut Termios as *mut u8, core::mem::size_of::<Termios>())
+                        core::slice::from_raw_parts_mut(
+                            &mut term as *mut Termios as *mut u8,
+                            core::mem::size_of::<Termios>(),
+                        )
                     };
                     crate::kernel::uaccess::copy_from_user(arg, slice)?;
                     Ok(0)
@@ -1080,7 +1152,10 @@ pub fn posix_ioctl(fd: usize, req: u64, arg: u64) -> Result<i64, i64> {
                     };
                     drop(oft);
                     let slice = unsafe {
-                        core::slice::from_raw_parts(&ws as *const Winsize as *const u8, core::mem::size_of::<Winsize>())
+                        core::slice::from_raw_parts(
+                            &ws as *const Winsize as *const u8,
+                            core::mem::size_of::<Winsize>(),
+                        )
                     };
                     crate::kernel::uaccess::copy_to_user(slice, arg)?;
                     Ok(0)
@@ -1140,7 +1215,10 @@ pub fn posix_wait4(target_pid: i32, status_ptr: *mut i32, options: i32) -> Resul
                 if !status_ptr.is_null() {
                     let exit_status = (exit_code & 0xFF) << 8;
                     let slice = unsafe {
-                        core::slice::from_raw_parts(&exit_status as *const i32 as *const u8, core::mem::size_of::<i32>())
+                        core::slice::from_raw_parts(
+                            &exit_status as *const i32 as *const u8,
+                            core::mem::size_of::<i32>(),
+                        )
                     };
                     let _ = crate::kernel::uaccess::copy_to_user(slice, status_ptr as u64);
                 }
@@ -1184,7 +1262,11 @@ pub fn posix_kill(pid: i32, sig: i32) -> Result<(), i64> {
     Err(-ESRCH)
 }
 
-pub fn posix_rt_sigaction(signum: i32, act: Option<&SigAction>, oldact: Option<&mut SigAction>) -> Result<(), i64> {
+pub fn posix_rt_sigaction(
+    signum: i32,
+    act: Option<&SigAction>,
+    oldact: Option<&mut SigAction>,
+) -> Result<(), i64> {
     if signum < 1 || signum > 64 {
         return Err(-EINVAL);
     }
@@ -1213,8 +1295,12 @@ pub fn posix_rt_sigaction(signum: i32, act: Option<&SigAction>, oldact: Option<&
     Ok(())
 }
 
-pub fn posix_rt_sigprocmask(how: i32, set: Option<u64>, oldset: Option<&mut u64>) -> Result<(), i64> {
-    const SIG_BLOCK: i32   = 0;
+pub fn posix_rt_sigprocmask(
+    how: i32,
+    set: Option<u64>,
+    oldset: Option<&mut u64>,
+) -> Result<(), i64> {
+    const SIG_BLOCK: i32 = 0;
     const SIG_UNBLOCK: i32 = 1;
     const SIG_SETMASK: i32 = 2;
 
@@ -1283,7 +1369,10 @@ pub fn posix_brk(addr: u64) -> Result<u64, i64> {
                         pml4,
                         page_v,
                         page_p,
-                        crate::mm::vmm::PAGE_PRESENT | crate::mm::vmm::PAGE_WRITABLE | crate::mm::vmm::PAGE_USER | crate::mm::vmm::PAGE_NO_EXECUTE,
+                        crate::mm::vmm::PAGE_PRESENT
+                            | crate::mm::vmm::PAGE_WRITABLE
+                            | crate::mm::vmm::PAGE_USER
+                            | crate::mm::vmm::PAGE_NO_EXECUTE,
                     );
                 }
             } else {
@@ -1302,7 +1391,14 @@ pub fn posix_brk(addr: u64) -> Result<u64, i64> {
     }
 }
 
-pub fn posix_mmap(addr: u64, len: usize, prot: i32, flags: i32, fd: i32, offset: i64) -> Result<u64, i64> {
+pub fn posix_mmap(
+    addr: u64,
+    len: usize,
+    prot: i32,
+    flags: i32,
+    fd: i32,
+    offset: i64,
+) -> Result<u64, i64> {
     if len == 0 {
         return Err(-EINVAL);
     }
@@ -1317,7 +1413,9 @@ pub fn posix_mmap(addr: u64, len: usize, prot: i32, flags: i32, fd: i32, offset:
 
     let vaddr = if addr != 0 && (flags & MAP_FIXED) != 0 {
         let target = addr & !0xFFF;
-        if target < crate::kernel::uaccess::USER_SPACE_MIN || target.saturating_add(aligned_len as u64) > crate::kernel::uaccess::USER_SPACE_MAX {
+        if target < crate::kernel::uaccess::USER_SPACE_MIN
+            || target.saturating_add(aligned_len as u64) > crate::kernel::uaccess::USER_SPACE_MAX
+        {
             return Err(-EINVAL);
         }
         target
@@ -1523,10 +1621,18 @@ pub fn posix_getppid() -> i64 {
     s.tasks[cur_idx].ppid as i64
 }
 
-pub fn posix_getuid() -> i64 { 0 }
-pub fn posix_getgid() -> i64 { 0 }
-pub fn posix_geteuid() -> i64 { 0 }
-pub fn posix_getegid() -> i64 { 0 }
+pub fn posix_getuid() -> i64 {
+    0
+}
+pub fn posix_getgid() -> i64 {
+    0
+}
+pub fn posix_geteuid() -> i64 {
+    0
+}
+pub fn posix_getegid() -> i64 {
+    0
+}
 
 pub fn posix_getcwd(buf: &mut [u8]) -> Result<usize, i64> {
     let s = crate::kernel::task::SCHED.lock();
@@ -1746,7 +1852,9 @@ pub fn run_posix_self_test() {
     crate::drivers::serial::println("=======================================================");
 
     // Test 1: Standard Streams
-    crate::drivers::serial::print("[POSIX TEST 1/12] Standard Streams (stdin=0, stdout=1, stderr=2)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 1/12] Standard Streams (stdin=0, stdout=1, stderr=2)... ",
+    );
     let msg = b"[POSIX OK] stdout stream functional\n";
     match posix_write(1, msg) {
         Ok(written) if written == msg.len() => crate::drivers::serial::println("[PASSED]"),
@@ -1754,7 +1862,9 @@ pub fn run_posix_self_test() {
     }
 
     // Test 2: File I/O Lifecycle (open, write, lseek, read, close)
-    crate::drivers::serial::print("[POSIX TEST 2/12] File I/O Lifecycle (open, write, lseek, read, close)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 2/12] File I/O Lifecycle (open, write, lseek, read, close)... ",
+    );
     match posix_open("/tmp/posix_test.txt", O_RDWR | O_CREAT, 0o644) {
         Ok(fd) => {
             let sample_data = b"POSIX_CONFORMANCE_AEGIS64_OK";
@@ -1775,7 +1885,9 @@ pub fn run_posix_self_test() {
     }
 
     // Test 3: Shared Open-File Descriptions & Duplication (dup, dup2, shared offset)
-    crate::drivers::serial::print("[POSIX TEST 3/12] Shared Open-File Descriptions (dup / dup2 / shared offset)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 3/12] Shared Open-File Descriptions (dup / dup2 / shared offset)... ",
+    );
     match posix_open("/tmp/posix_dup.txt", O_RDWR | O_CREAT, 0o644) {
         Ok(fd1) => {
             let _ = posix_write(fd1, b"0123456789ABCDEF");
@@ -1800,7 +1912,9 @@ pub fn run_posix_self_test() {
     }
 
     // Test 4: POSIX Stat Subsystem
-    crate::drivers::serial::print("[POSIX TEST 4/12] Metadata & File Status (sys_stat / sys_fstat)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 4/12] Metadata & File Status (sys_stat / sys_fstat)... ",
+    );
     let mut st = PosixStat::default();
     if posix_stat("/tmp/posix_test.txt", &mut st).is_ok() {
         if (st.st_mode & S_IFREG) != 0 && st.st_blksize == 4096 {
@@ -1813,27 +1927,36 @@ pub fn run_posix_self_test() {
     }
 
     // Test 5: POSIX Virtual Memory Management (sys_mmap / sys_munmap / sys_mprotect)
-    crate::drivers::serial::print("[POSIX TEST 5/12] Virtual Memory Management (mmap / munmap / mprotect)... ");
-    match posix_mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0) {
-        Ok(vaddr) => {
-            unsafe {
-                let ptr = vaddr as *mut u64;
-                core::ptr::write_volatile(ptr, 0xAE64_BEEF_CAFE_0001);
-                let val = core::ptr::read_volatile(ptr);
-                if val == 0xAE64_BEEF_CAFE_0001 {
-                    let _ = posix_mprotect(vaddr, 4096, PROT_READ);
-                    let _ = posix_munmap(vaddr, 4096);
-                    crate::drivers::serial::println("[PASSED]");
-                } else {
-                    crate::drivers::serial::println("[FAILED: memory read error]");
-                }
+    crate::drivers::serial::print(
+        "[POSIX TEST 5/12] Virtual Memory Management (mmap / munmap / mprotect)... ",
+    );
+    match posix_mmap(
+        0,
+        4096,
+        PROT_READ | PROT_WRITE,
+        MAP_ANONYMOUS | MAP_PRIVATE,
+        -1,
+        0,
+    ) {
+        Ok(vaddr) => unsafe {
+            let ptr = vaddr as *mut u64;
+            core::ptr::write_volatile(ptr, 0xAE64_BEEF_CAFE_0001);
+            let val = core::ptr::read_volatile(ptr);
+            if val == 0xAE64_BEEF_CAFE_0001 {
+                let _ = posix_mprotect(vaddr, 4096, PROT_READ);
+                let _ = posix_munmap(vaddr, 4096);
+                crate::drivers::serial::println("[PASSED]");
+            } else {
+                crate::drivers::serial::println("[FAILED: memory read error]");
             }
-        }
+        },
         Err(_) => crate::drivers::serial::println("[FAILED: mmap error]"),
     }
 
     // Test 6: POSIX Dynamic Heap Expansion (sys_brk)
-    crate::drivers::serial::print("[POSIX TEST 6/12] Process Heap Expansion (sys_brk growth & contraction)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 6/12] Process Heap Expansion (sys_brk growth & contraction)... ",
+    );
     let cur_brk = posix_brk(0).unwrap_or(0);
     if cur_brk > 0 {
         match posix_brk(cur_brk + 4096) {
@@ -1848,7 +1971,9 @@ pub fn run_posix_self_test() {
     }
 
     // Test 7: POSIX Inter-Process Pipes (sys_pipe, EOF & broken pipe EPIPE)
-    crate::drivers::serial::print("[POSIX TEST 7/12] Streaming Byte IPC (pipe / EOF / EPIPE detection)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 7/12] Streaming Byte IPC (pipe / EOF / EPIPE detection)... ",
+    );
     let mut fds = [0i32; 2];
     if posix_pipe(&mut fds).is_ok() {
         let token = b"PIPE_TOKEN_1234\n";
@@ -1872,7 +1997,9 @@ pub fn run_posix_self_test() {
     }
 
     // Test 8: POSIX Real-Time & Monotonic Clocks (sys_clock_gettime)
-    crate::drivers::serial::print("[POSIX TEST 8/12] Real-Time & Monotonic Clocks (sys_clock_gettime)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 8/12] Real-Time & Monotonic Clocks (sys_clock_gettime)... ",
+    );
     let mut ts_real = Timespec::default();
     let mut ts_mono = Timespec::default();
     if posix_clock_gettime(CLOCK_REALTIME, &mut ts_real).is_ok()
@@ -1890,7 +2017,9 @@ pub fn run_posix_self_test() {
     }
 
     // Test 9: POSIX Process Identification & Probing (getpid, getppid, kill)
-    crate::drivers::serial::print("[POSIX TEST 9/12] Process Context & Signal Probing (getpid / kill)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 9/12] Process Context & Signal Probing (getpid / kill)... ",
+    );
     let pid = posix_getpid();
     if pid >= 0 && posix_kill(pid as i32, 0).is_ok() {
         crate::drivers::serial::println("[PASSED]");
@@ -1899,7 +2028,9 @@ pub fn run_posix_self_test() {
     }
 
     // Test 10: POSIX Signal Management (rt_sigaction / rt_sigprocmask)
-    crate::drivers::serial::print("[POSIX TEST 10/12] Signal Management (rt_sigaction / rt_sigprocmask)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 10/12] Signal Management (rt_sigaction / rt_sigprocmask)... ",
+    );
     let mut old_act = SigAction::default();
     let new_act = SigAction {
         sa_handler: 0x0040_1000,
@@ -1920,7 +2051,9 @@ pub fn run_posix_self_test() {
     }
 
     // Test 11: Directory & Path Operations (getcwd / chdir / mkdir / access / unlink)
-    crate::drivers::serial::print("[POSIX TEST 11/12] Directory & Path Operations (getcwd / chdir / access)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 11/12] Directory & Path Operations (getcwd / chdir / access)... ",
+    );
     let mut cwd_buf = [0u8; 32];
     if posix_getcwd(&mut cwd_buf).is_ok() && posix_access("/tmp/posix_test.txt", 0).is_ok() {
         let _ = posix_unlink("/tmp/posix_test.txt");
@@ -1930,10 +2063,13 @@ pub fn run_posix_self_test() {
     }
 
     // Test 12: User Memory Safety & Pointer Boundary Validation (rejection of null/kernel/unmapped)
-    crate::drivers::serial::print("[POSIX TEST 12/12] User Memory Safety (rejection of null/kernel/unmapped)... ");
+    crate::drivers::serial::print(
+        "[POSIX TEST 12/12] User Memory Safety (rejection of null/kernel/unmapped)... ",
+    );
     let null_res = crate::kernel::uaccess::validate_user_range(0, 16, false);
     let kernel_res = crate::kernel::uaccess::validate_user_range(0xFFFF_8000_0000_0000, 16, false);
-    let unmapped_res = crate::kernel::uaccess::validate_user_range(0x0000_7000_0000_0000, 4096, false);
+    let unmapped_res =
+        crate::kernel::uaccess::validate_user_range(0x0000_7000_0000_0000, 4096, false);
     if null_res == Err(-EFAULT) && kernel_res == Err(-EFAULT) && unmapped_res == Err(-EFAULT) {
         crate::drivers::serial::println("[PASSED]");
     } else {

@@ -66,8 +66,10 @@ impl<'a> Image<'a> {
             return Err(Error::Unsupported);
         }
         let count = u16::from_le_bytes([header[36], header[37]]) as usize;
-        if word(header, 8) as usize != HEADER_SIZE || wide(header, 28) != bytes.len() as u64
-            || !(1..=16).contains(&count) || header[38..40] != [0; 2]
+        if word(header, 8) as usize != HEADER_SIZE
+            || wide(header, 28) != bytes.len() as u64
+            || !(1..=16).contains(&count)
+            || header[38..40] != [0; 2]
             || header[48..64] != [0; 16]
         {
             return Err(Error::Format);
@@ -107,9 +109,13 @@ impl<'a> Image<'a> {
             let size = usize::try_from(wide(raw, 16)).map_err(|_| Error::Layout)?;
             let address = wide(raw, 24);
             let memory_size = wide(raw, 32);
-            if memory_size == 0 || memory_size > MAX_IMAGE || size as u64 > memory_size
-                || address < USER_MIN || !address.is_multiple_of(PAGE_SIZE)
-                || address.checked_add(memory_size.div_ceil(PAGE_SIZE) * PAGE_SIZE)
+            if memory_size == 0
+                || memory_size > MAX_IMAGE
+                || size as u64 > memory_size
+                || address < USER_MIN
+                || !address.is_multiple_of(PAGE_SIZE)
+                || address
+                    .checked_add(memory_size.div_ceil(PAGE_SIZE) * PAGE_SIZE)
                     .map_or(true, |end| end > image_limit)
             {
                 return Err(Error::Layout);
@@ -126,7 +132,12 @@ impl<'a> Image<'a> {
                 payload_cursor = offset.checked_add(size).ok_or(Error::Layout)?;
                 bytes.get(offset..payload_cursor).ok_or(Error::Layout)?
             };
-            let segment = Segment { address, memory_size, flags, data };
+            let segment = Segment {
+                address,
+                memory_size,
+                flags,
+                data,
+            };
             let range = segment.page_range();
             if segments.iter().flatten().any(|other| {
                 let other = other.page_range();
@@ -148,7 +159,11 @@ impl<'a> Image<'a> {
         if crc32(&bytes[table_end..]) != word(header, 44) {
             return Err(Error::Checksum);
         }
-        Ok(Self { entry, stack_size, segments })
+        Ok(Self {
+            entry,
+            stack_size,
+            segments,
+        })
     }
 }
 
@@ -165,8 +180,12 @@ impl AddressSpace {
         let space = Self(create_pml4()?);
         for segment in image.segments.iter().flatten() {
             let mut flags = 0;
-            if segment.flags & 2 != 0 { flags |= PAGE_WRITABLE; }
-            if segment.flags & 4 == 0 { flags |= PAGE_NO_EXECUTE; }
+            if segment.flags & 2 != 0 {
+                flags |= PAGE_WRITABLE;
+            }
+            if segment.flags & 4 == 0 {
+                flags |= PAGE_NO_EXECUTE;
+            }
             space.map_data(segment.address, segment.memory_size, segment.data, flags)?;
         }
         Some(space)
@@ -177,7 +196,10 @@ impl AddressSpace {
     }
 
     pub fn install(
-        self, name: &str, priority: crate::kernel::task::TaskPriority, point: (u64, u64),
+        self,
+        name: &str,
+        priority: crate::kernel::task::TaskPriority,
+        point: (u64, u64),
         context: crate::kernel::task::NativeContext,
     ) -> Option<u32> {
         let stack = crate::mm::pmm::alloc_frames(4)?;
@@ -188,7 +210,11 @@ impl AddressSpace {
 }
 
 pub(crate) fn map_private(
-    pml4: *mut crate::mm::vmm::PageTable, address: u64, length: u64, bytes: &[u8], flags: u64,
+    pml4: *mut crate::mm::vmm::PageTable,
+    address: u64,
+    length: u64,
+    bytes: &[u8],
+    flags: u64,
 ) -> Option<()> {
     use crate::mm::{pmm, vmm};
     for offset in (0..length).step_by(PAGE_SIZE as usize) {

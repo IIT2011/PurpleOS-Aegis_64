@@ -1,4 +1,6 @@
-use crate::drivers::storage::ata_pio::{AtaDevice, ATA_PRIMARY_CTRL, ATA_PRIMARY_IO, ATA_SECONDARY_CTRL, ATA_SECONDARY_IO};
+use crate::drivers::storage::ata_pio::{
+    AtaDevice, ATA_PRIMARY_CTRL, ATA_PRIMARY_IO, ATA_SECONDARY_CTRL, ATA_SECONDARY_IO,
+};
 use crate::fs::purplefs_v2::PurpleFsV2;
 use crate::sync::Spinlock;
 
@@ -8,7 +10,6 @@ static mut ATA_DEVICES: [AtaDevice; 4] = [
     AtaDevice::new(b"ata2\0", ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, false),
     AtaDevice::new(b"ata3\0", ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, true),
 ];
-
 
 pub struct StorageState {
     pub fs_mounted: bool,
@@ -33,7 +34,9 @@ pub static STORAGE: Spinlock<StorageState> = Spinlock::new(StorageState {
 });
 
 pub fn init() {
-    crate::drivers::serial::println("Storage: Scanning legacy ATA channels (Primary & Secondary)...");
+    crate::drivers::serial::println(
+        "Storage: Scanning legacy ATA channels (Primary & Secondary)...",
+    );
 
     unsafe {
         let ata_base = core::ptr::addr_of_mut!(ATA_DEVICES) as *mut AtaDevice;
@@ -41,19 +44,28 @@ pub fn init() {
             let dev = &mut *ata_base.add(i);
             if dev.identify().is_ok() {
                 crate::drivers::serial::print("Drive detected: Model=");
-                let model_str = core::str::from_utf8(&dev.model).unwrap_or("ATA Disk").trim();
+                let model_str = core::str::from_utf8(&dev.model)
+                    .unwrap_or("ATA Disk")
+                    .trim();
                 crate::drivers::serial::print(model_str);
                 crate::drivers::serial::println("");
                 crate::drivers::block_dev::register(dev);
             }
         }
-
-        // AHCI, NVMe, USB MSC, and SD block-device discovery are not yet
-        // implemented with verified capacity and command completion handling.
-        // Keep them out of the registry until they can guarantee real media I/O.
-        crate::drivers::serial::println("Storage: AHCI, NVMe, USB MSC, and SD I/O unavailable; placeholders skipped");
-
     }
+
+    crate::drivers::pci::for_each_device(|device| {
+        use crate::drivers::storage::{ahci, nvme};
+        let result = match (device.class_id, device.subclass_id, device.prog_if) {
+            (1, 6, 1) => ahci::probe(device),
+            (1, 8, 2) => nvme::probe(device),
+            _ => return,
+        };
+        if let Err(error) = result {
+            crate::drivers::serial::println(error);
+        }
+    });
+    crate::drivers::serial::println("Storage: USB mass storage and SD block I/O unavailable");
 
     // Dynamic GPT Scan & PurpleFS Auto-Mount across registered block devices
     let dev_count = crate::drivers::block_dev::count();
@@ -72,20 +84,31 @@ pub fn init() {
                     crate::drivers::serial::println("");
 
                     let part = &info.partitions[p_idx];
-                    let partition_sectors = match part.end_lba.checked_sub(part.start_lba)
-                        .and_then(|length| length.checked_add(1)) {
+                    let partition_sectors = match part
+                        .end_lba
+                        .checked_sub(part.start_lba)
+                        .and_then(|length| length.checked_add(1))
+                    {
                         Some(length) => length,
                         None => return None,
                     };
                     if let Ok(fs) = PurpleFsV2::mount(dev, part.start_lba, partition_sectors) {
-                        return Some((fs.volume_label, fs.total_blocks, fs.free_blocks, part.start_lba, partition_sectors));
+                        return Some((
+                            fs.volume_label,
+                            fs.total_blocks,
+                            fs.free_blocks,
+                            part.start_lba,
+                            partition_sectors,
+                        ));
                     }
                 }
             }
             None
         });
 
-        if let Some(Some((vol_label, tot_blocks, free_blks, start_lba, partition_sectors))) = mount_res {
+        if let Some(Some((vol_label, tot_blocks, free_blks, start_lba, partition_sectors))) =
+            mount_res
+        {
             let mut st = STORAGE.lock();
             st.fs_mounted = true;
             st.read_write = false;
@@ -97,7 +120,10 @@ pub fn init() {
             st.dev_index = d;
             mounted = true;
 
-            let name_len = vol_label.iter().position(|&c| c == 0).unwrap_or(vol_label.len());
+            let name_len = vol_label
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(vol_label.len());
             let name_str = core::str::from_utf8(&vol_label[..name_len]).unwrap_or("PurpleSystem");
             crate::drivers::serial::print("PurpleFS: Mounted volume '");
             crate::drivers::serial::print(name_str);
@@ -110,7 +136,9 @@ pub fn init() {
         let mut st = STORAGE.lock();
         st.fs_mounted = false;
         st.read_write = false;
-        crate::drivers::serial::println("Storage: No PurpleFS volume found on attached block devices.");
+        crate::drivers::serial::println(
+            "Storage: No PurpleFS volume found on attached block devices.",
+        );
     }
 }
 
@@ -150,7 +178,8 @@ where
         } else {
             None
         }
-    }).flatten();
+    })
+    .flatten();
     drop(st);
     res
 }

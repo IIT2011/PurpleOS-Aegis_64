@@ -5,12 +5,12 @@
 //! before copying data between kernel buffers and userspace virtual addresses.
 //! Zero unchecked raw user pointer dereferencing.
 
+use crate::arch::x86_64::cpu::read_cr3;
 use crate::kernel::posix::{EFAULT, ENAMETOOLONG};
 use crate::mm::vmm::{self, PageTable, PAGE_PRESENT, PAGE_USER, PAGE_WRITABLE};
-use crate::arch::x86_64::cpu::read_cr3;
 
-pub const USER_SPACE_MIN: u64 = 0x0001_0000;            // Prevent null page and low 64 KiB attacks
-pub const USER_SPACE_MAX: u64 = 0x0000_7FFF_FFFF_F000;   // Canonical x86_64 user virtual address upper limit
+pub const USER_SPACE_MIN: u64 = 0x0001_0000; // Prevent null page and low 64 KiB attacks
+pub const USER_SPACE_MAX: u64 = 0x0000_7FFF_FFFF_F000; // Canonical x86_64 user virtual address upper limit
 
 /// Returns the currently active PML4 from CR3, or falls back to kernel PML4 if uninitialized.
 #[inline]
@@ -82,7 +82,11 @@ pub fn copy_from_user(user_src: u64, kernel_dst: &mut [u8]) -> Result<(), i64> {
     }
     validate_user_range(user_src, kernel_dst.len(), false)?;
     unsafe {
-        core::ptr::copy_nonoverlapping(user_src as *const u8, kernel_dst.as_mut_ptr(), kernel_dst.len());
+        core::ptr::copy_nonoverlapping(
+            user_src as *const u8,
+            kernel_dst.as_mut_ptr(),
+            kernel_dst.len(),
+        );
     }
     Ok(())
 }

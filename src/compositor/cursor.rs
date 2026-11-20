@@ -105,8 +105,8 @@ impl Cursor {
             for x in x1..x2 {
                 let pixel = unsafe { *dst.pixels.add(y * dst.stride + x) };
                 self.saved_bg[(y - y1) * SIZE + x - x1] = pixel;
-                let index = ((y as i32 - bounds.y) as usize * SIZE
-                    + (x as i32 - bounds.x) as usize) * 4;
+                let index =
+                    ((y as i32 - bounds.y) as usize * SIZE + (x as i32 - bounds.x) as usize) * 4;
                 let [r, g, b, a] = sprite[index..index + 4].try_into().unwrap();
                 if a != 0 {
                     let color = u32::from_be_bytes([a, r, g, b]);

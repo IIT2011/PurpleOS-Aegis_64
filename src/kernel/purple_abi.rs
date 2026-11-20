@@ -17,131 +17,132 @@
 //!   - Strictly Native PurpleOS ABI: Range 0x1000..0x10AF (Zero POSIX/Linux overlaps).
 //!   - Safe memory validation: Strict separation of user and kernel virtual address spaces.
 
-use crate::drivers::pit::{self, get_ticks, play_tone};
-use crate::drivers::rtc::{self, get_time, WallTime};
-use crate::drivers::video;
 use crate::drivers::audio;
-use crate::drivers::purple_detect;
 use crate::drivers::block_dev;
 use crate::drivers::keyboard;
 use crate::drivers::mouse;
 use crate::drivers::pci;
+use crate::drivers::pit::{self, get_ticks, play_tone};
+use crate::drivers::purple_detect;
+use crate::drivers::rtc::{self, get_time, WallTime};
 use crate::drivers::serial;
+use crate::drivers::video;
 use crate::kernel::posix::{
-    self, E2BIG, EAGAIN, EBADF, EBUSY, EFAULT, EINVAL, EIO, ENODEV, ENOMEM, ENOSYS, EOPNOTSUPP, EOVERFLOW, EPERM, ESRCH,
+    self, E2BIG, EAGAIN, EBADF, EBUSY, EFAULT, EINVAL, EIO, ENODEV, ENOMEM, ENOSYS, EOPNOTSUPP,
+    EOVERFLOW, EPERM, ESRCH,
 };
 use crate::kernel::smp;
-use crate::kernel::task::{self, SCHED, TaskPriority, TaskState, MAX_TASKS};
+use crate::kernel::task::{self, TaskPriority, TaskState, MAX_TASKS, SCHED};
 use crate::kernel::uaccess;
-use crate::mm::pmm::{self, PAGE_SIZE};
 use crate::mm::heap;
+use crate::mm::pmm::{self, PAGE_SIZE};
 use crate::sync::Spinlock;
 
 /* =========================================================================
  * 1. NATIVE SYSTEM CALL NUMBERS (PurpleOS Custom Native ABI: 0x1000 - 0x10AF)
  * ========================================================================= */
 pub const SYS_PURPLE_BASE: u64 = 0x1000;
-pub const SYS_PURPLE_MAX: u64  = 0x10AF;
+pub const SYS_PURPLE_MAX: u64 = 0x10AF;
 
 // Category 1: Linear Framebuffer & 2D/3D GPU Acceleration (0x1000..0x101F)
-pub const SYS_PURPLE_FB_GET_INFO: u64       = 0x1000;
-pub const SYS_PURPLE_FB_ACQUIRE: u64        = 0x1001;
-pub const SYS_PURPLE_FB_RELEASE: u64        = 0x1002;
-pub const SYS_PURPLE_FB_FLIP: u64           = 0x1003;
-pub const SYS_PURPLE_GPU_CLEAR: u64         = 0x1004;
-pub const SYS_PURPLE_GPU_RECT_FILL: u64     = 0x1005;
-pub const SYS_PURPLE_GPU_BLIT: u64          = 0x1006;
-pub const SYS_PURPLE_GPU_DRAW_LINE: u64     = 0x1007;
-pub const SYS_PURPLE_GPU_SUBMIT_3D: u64     = 0x1008;
-pub const SYS_PURPLE_GPU_GET_CAPS: u64      = 0x1009;
+pub const SYS_PURPLE_FB_GET_INFO: u64 = 0x1000;
+pub const SYS_PURPLE_FB_ACQUIRE: u64 = 0x1001;
+pub const SYS_PURPLE_FB_RELEASE: u64 = 0x1002;
+pub const SYS_PURPLE_FB_FLIP: u64 = 0x1003;
+pub const SYS_PURPLE_GPU_CLEAR: u64 = 0x1004;
+pub const SYS_PURPLE_GPU_RECT_FILL: u64 = 0x1005;
+pub const SYS_PURPLE_GPU_BLIT: u64 = 0x1006;
+pub const SYS_PURPLE_GPU_DRAW_LINE: u64 = 0x1007;
+pub const SYS_PURPLE_GPU_SUBMIT_3D: u64 = 0x1008;
+pub const SYS_PURPLE_GPU_GET_CAPS: u64 = 0x1009;
 
 // Category 2: Digital Audio Processing & Hardware DSP (0x1020..0x102F)
-pub const SYS_PURPLE_AUDIO_GET_CAPS: u64    = 0x1020;
+pub const SYS_PURPLE_AUDIO_GET_CAPS: u64 = 0x1020;
 pub const SYS_PURPLE_AUDIO_STREAM_START: u64 = 0x1021;
 pub const SYS_PURPLE_AUDIO_STREAM_STOP: u64 = 0x1022;
-pub const SYS_PURPLE_AUDIO_SUBMIT_PCM: u64  = 0x1023;
-pub const SYS_PURPLE_AUDIO_SET_VOLUME: u64  = 0x1024;
-pub const SYS_PURPLE_AUDIO_GET_VOLUME: u64  = 0x1025;
+pub const SYS_PURPLE_AUDIO_SUBMIT_PCM: u64 = 0x1023;
+pub const SYS_PURPLE_AUDIO_SET_VOLUME: u64 = 0x1024;
+pub const SYS_PURPLE_AUDIO_GET_VOLUME: u64 = 0x1025;
 pub const SYS_PURPLE_AUDIO_PLAY_SYNTH_TONE: u64 = 0x1026;
 pub const SYS_PURPLE_AUDIO_GET_POSITION: u64 = 0x1027;
 
 // Category 3: Low-Latency Zero-Copy IPC & Native Ring Channels (0x1030..0x103F)
-pub const SYS_PURPLE_CHAN_CREATE: u64       = 0x1030;
-pub const SYS_PURPLE_CHAN_SEND: u64         = 0x1031;
-pub const SYS_PURPLE_CHAN_RECV: u64         = 0x1032;
-pub const SYS_PURPLE_CHAN_CLOSE: u64        = 0x1033;
-pub const SYS_PURPLE_CHAN_STAT: u64         = 0x1034;
-pub const SYS_PURPLE_SHM_CREATE: u64        = 0x1035;
-pub const SYS_PURPLE_SHM_MAP: u64           = 0x1036;
-pub const SYS_PURPLE_SHM_UNMAP: u64         = 0x1037;
+pub const SYS_PURPLE_CHAN_CREATE: u64 = 0x1030;
+pub const SYS_PURPLE_CHAN_SEND: u64 = 0x1031;
+pub const SYS_PURPLE_CHAN_RECV: u64 = 0x1032;
+pub const SYS_PURPLE_CHAN_CLOSE: u64 = 0x1033;
+pub const SYS_PURPLE_CHAN_STAT: u64 = 0x1034;
+pub const SYS_PURPLE_SHM_CREATE: u64 = 0x1035;
+pub const SYS_PURPLE_SHM_MAP: u64 = 0x1036;
+pub const SYS_PURPLE_SHM_UNMAP: u64 = 0x1037;
 
 // Category 4: Multi-Core SMP Parallelism, Affinity & Execution Control (0x1040..0x104F)
-pub const SYS_PURPLE_CPU_COUNT: u64         = 0x1040;
-pub const SYS_PURPLE_CPU_GET_CURRENT: u64   = 0x1041;
-pub const SYS_PURPLE_CPU_SET_AFFINITY: u64  = 0x1042;
-pub const SYS_PURPLE_CPU_GET_AFFINITY: u64  = 0x1043;
+pub const SYS_PURPLE_CPU_COUNT: u64 = 0x1040;
+pub const SYS_PURPLE_CPU_GET_CURRENT: u64 = 0x1041;
+pub const SYS_PURPLE_CPU_SET_AFFINITY: u64 = 0x1042;
+pub const SYS_PURPLE_CPU_GET_AFFINITY: u64 = 0x1043;
 pub const SYS_PURPLE_TASK_SET_PRIORITY: u64 = 0x1044;
 pub const SYS_PURPLE_TASK_GET_PRIORITY: u64 = 0x1045;
-pub const SYS_PURPLE_TASK_SET_SLICE: u64    = 0x1046;
-pub const SYS_PURPLE_CORE_YIELD_TO: u64     = 0x1047;
-pub const SYS_PURPLE_SPIN_PAUSE: u64        = 0x1048;
+pub const SYS_PURPLE_TASK_SET_SLICE: u64 = 0x1046;
+pub const SYS_PURPLE_CORE_YIELD_TO: u64 = 0x1047;
+pub const SYS_PURPLE_SPIN_PAUSE: u64 = 0x1048;
 
 // Category 5: High-Precision Timers, Clocks & Monotonic Performance Counters (0x1050..0x105F)
-pub const SYS_PURPLE_CLOCK_WALL: u64        = 0x1050;
-pub const SYS_PURPLE_CLOCK_TICKS: u64       = 0x1051;
-pub const SYS_PURPLE_CLOCK_NANOS: u64       = 0x1052;
-pub const SYS_PURPLE_CLOCK_CYCLES: u64      = 0x1053;
-pub const SYS_PURPLE_TIMER_CREATE: u64      = 0x1054;
-pub const SYS_PURPLE_TIMER_CANCEL: u64      = 0x1055;
-pub const SYS_PURPLE_MICRO_SLEEP: u64       = 0x1056;
+pub const SYS_PURPLE_CLOCK_WALL: u64 = 0x1050;
+pub const SYS_PURPLE_CLOCK_TICKS: u64 = 0x1051;
+pub const SYS_PURPLE_CLOCK_NANOS: u64 = 0x1052;
+pub const SYS_PURPLE_CLOCK_CYCLES: u64 = 0x1053;
+pub const SYS_PURPLE_TIMER_CREATE: u64 = 0x1054;
+pub const SYS_PURPLE_TIMER_CANCEL: u64 = 0x1055;
+pub const SYS_PURPLE_MICRO_SLEEP: u64 = 0x1056;
 
 // Category 6: Raw Networking, Layer-2 Direct DMA & Packet Filtering (0x1060..0x106F)
-pub const SYS_PURPLE_NET_GET_DEV_INFO: u64  = 0x1060;
-pub const SYS_PURPLE_NET_SEND_RAW: u64      = 0x1061;
-pub const SYS_PURPLE_NET_RECV_RAW: u64      = 0x1062;
-pub const SYS_PURPLE_NET_GET_STATS: u64     = 0x1063;
-pub const SYS_PURPLE_NET_PING: u64          = 0x1064;
-pub const SYS_PURPLE_NET_SET_CONFIG: u64    = 0x1065;
+pub const SYS_PURPLE_NET_GET_DEV_INFO: u64 = 0x1060;
+pub const SYS_PURPLE_NET_SEND_RAW: u64 = 0x1061;
+pub const SYS_PURPLE_NET_RECV_RAW: u64 = 0x1062;
+pub const SYS_PURPLE_NET_GET_STATS: u64 = 0x1063;
+pub const SYS_PURPLE_NET_PING: u64 = 0x1064;
+pub const SYS_PURPLE_NET_SET_CONFIG: u64 = 0x1065;
 
 // Category 7: Hardware Introspection, PurpleDetect & Device Telemetry (0x1070..0x107F)
-pub const SYS_PURPLE_DEVICE_COUNT: u64      = 0x1070;
-pub const SYS_PURPLE_DEVICE_GET_INFO: u64   = 0x1071;
-pub const SYS_PURPLE_MEM_METRICS: u64       = 0x1072;
-pub const SYS_PURPLE_SYS_TELEMETRY: u64     = 0x1073;
+pub const SYS_PURPLE_DEVICE_COUNT: u64 = 0x1070;
+pub const SYS_PURPLE_DEVICE_GET_INFO: u64 = 0x1071;
+pub const SYS_PURPLE_MEM_METRICS: u64 = 0x1072;
+pub const SYS_PURPLE_SYS_TELEMETRY: u64 = 0x1073;
 pub const SYS_PURPLE_SEC_INTEGRITY_CHECK: u64 = 0x1074;
-pub const SYS_PURPLE_PCI_QUERY: u64         = 0x1075;
+pub const SYS_PURPLE_PCI_QUERY: u64 = 0x1075;
 
 // Category 8: Advanced Raw Block I/O & Storage Telemetry (0x1080..0x108F)
-pub const SYS_PURPLE_STORAGE_COUNT: u64     = 0x1080;
-pub const SYS_PURPLE_STORAGE_INFO: u64      = 0x1081;
+pub const SYS_PURPLE_STORAGE_COUNT: u64 = 0x1080;
+pub const SYS_PURPLE_STORAGE_INFO: u64 = 0x1081;
 pub const SYS_PURPLE_STORAGE_READ_BLOCKS: u64 = 0x1082;
 pub const SYS_PURPLE_STORAGE_WRITE_BLOCKS: u64 = 0x1083;
-pub const SYS_PURPLE_STORAGE_FLUSH: u64     = 0x1084;
+pub const SYS_PURPLE_STORAGE_FLUSH: u64 = 0x1084;
 
 // Category 9: Real-Time Input Subsystem & Raw Event Streaming (0x1090..0x109F)
 pub const SYS_PURPLE_INPUT_MOUSE_STATE: u64 = 0x1090;
-pub const SYS_PURPLE_INPUT_KEY_EVENT: u64   = 0x1091;
+pub const SYS_PURPLE_INPUT_KEY_EVENT: u64 = 0x1091;
 pub const SYS_PURPLE_INPUT_POLL_EVENTS: u64 = 0x1092;
 
 // Category 10: Process Management & Native Sandbox Security (0x10A0..0x10AF)
-pub const SYS_PURPLE_TASK_SPAWN: u64        = 0x10A0;
-pub const SYS_PURPLE_TASK_KILL: u64         = 0x10A1;
-pub const SYS_PURPLE_TASK_GET_INFO: u64     = 0x10A2;
-pub const SYS_PURPLE_TASK_LIST: u64         = 0x10A3;
-pub const SYS_PURPLE_SEC_CAP_DROP: u64      = 0x10A4;
-pub const SYS_PURPLE_SEC_CAP_GET: u64       = 0x10A5;
+pub const SYS_PURPLE_TASK_SPAWN: u64 = 0x10A0;
+pub const SYS_PURPLE_TASK_KILL: u64 = 0x10A1;
+pub const SYS_PURPLE_TASK_GET_INFO: u64 = 0x10A2;
+pub const SYS_PURPLE_TASK_LIST: u64 = 0x10A3;
+pub const SYS_PURPLE_SEC_CAP_DROP: u64 = 0x10A4;
+pub const SYS_PURPLE_SEC_CAP_GET: u64 = 0x10A5;
 
 /* =========================================================================
  * 2. NATIVE SANDBOX CAPABILITIES
  * ========================================================================= */
-pub const PURPLE_CAP_RAW_IO: u64      = 1 << 0;
-pub const PURPLE_CAP_RAW_NET: u64     = 1 << 1;
+pub const PURPLE_CAP_RAW_IO: u64 = 1 << 0;
+pub const PURPLE_CAP_RAW_NET: u64 = 1 << 1;
 pub const PURPLE_CAP_RAW_STORAGE: u64 = 1 << 2;
-pub const PURPLE_CAP_DIRECT_GPU: u64  = 1 << 3;
+pub const PURPLE_CAP_DIRECT_GPU: u64 = 1 << 3;
 pub const PURPLE_CAP_DIRECT_AUDIO: u64 = 1 << 4;
-pub const PURPLE_CAP_MULTI_CORE: u64  = 1 << 5;
-pub const PURPLE_CAP_SYS_ADMIN: u64   = 1 << 6;
-pub const PURPLE_CAP_ALL: u64         = !0;
+pub const PURPLE_CAP_MULTI_CORE: u64 = 1 << 5;
+pub const PURPLE_CAP_SYS_ADMIN: u64 = 1 << 6;
+pub const PURPLE_CAP_ALL: u64 = !0;
 const MAX_STORAGE_BLOCKS_PER_SYSCALL: u64 = 32;
 const MAX_FRAMEBUFFER_RETRACE_POLLS: u32 = 100_000;
 const MAX_TASK_SLICE_TICKS: u64 = 1_000;
@@ -444,14 +445,38 @@ impl PurpleChannel {
 }
 
 static CHANNELS: Spinlock<[PurpleChannel; PURPLE_MAX_CHANNELS]> = Spinlock::new([
-    PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
-    PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
-    PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
-    PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
-    PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
-    PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
-    PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
-    PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(), PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
+    PurpleChannel::empty(),
 ]);
 
 // Network Telemetry
@@ -505,7 +530,11 @@ pub fn safe_copy_to_user(kernel_src: &[u8], user_dst: u64) -> Result<(), i64> {
         uaccess::copy_to_user(kernel_src, user_dst)
     } else {
         unsafe {
-            core::ptr::copy_nonoverlapping(kernel_src.as_ptr(), user_dst as *mut u8, kernel_src.len());
+            core::ptr::copy_nonoverlapping(
+                kernel_src.as_ptr(),
+                user_dst as *mut u8,
+                kernel_src.len(),
+            );
         }
         Ok(())
     }
@@ -522,7 +551,11 @@ pub fn safe_copy_from_user(user_src: u64, kernel_dst: &mut [u8]) -> Result<(), i
         uaccess::copy_from_user(user_src, kernel_dst)
     } else {
         unsafe {
-            core::ptr::copy_nonoverlapping(user_src as *const u8, kernel_dst.as_mut_ptr(), kernel_dst.len());
+            core::ptr::copy_nonoverlapping(
+                user_src as *const u8,
+                kernel_dst.as_mut_ptr(),
+                kernel_dst.len(),
+            );
         }
         Ok(())
     }
@@ -569,7 +602,10 @@ pub fn dispatch_native_syscall(
                     _reserved: [0; 2],
                 };
                 let slice = unsafe {
-                    core::slice::from_raw_parts(&info as *const PurpleFbInfo as *const u8, core::mem::size_of::<PurpleFbInfo>())
+                    core::slice::from_raw_parts(
+                        &info as *const PurpleFbInfo as *const u8,
+                        core::mem::size_of::<PurpleFbInfo>(),
+                    )
                 };
                 match safe_copy_to_user(slice, a1) {
                     Ok(()) => 0,
@@ -651,12 +687,21 @@ pub fn dispatch_native_syscall(
             }
             let mut rect = PurpleGpuRect::default();
             let slice = unsafe {
-                core::slice::from_raw_parts_mut(&mut rect as *mut PurpleGpuRect as *mut u8, core::mem::size_of::<PurpleGpuRect>())
+                core::slice::from_raw_parts_mut(
+                    &mut rect as *mut PurpleGpuRect as *mut u8,
+                    core::mem::size_of::<PurpleGpuRect>(),
+                )
             };
             if let Err(e) = safe_copy_from_user(a1, slice) {
                 return e;
             }
-            video::draw_rect(rect.x as usize, rect.y as usize, rect.width as usize, rect.height as usize, rect.color);
+            video::draw_rect(
+                rect.x as usize,
+                rect.y as usize,
+                rect.width as usize,
+                rect.height as usize,
+                rect.color,
+            );
             0
         }
 
@@ -669,7 +714,10 @@ pub fn dispatch_native_syscall(
             }
             let mut blit = PurpleGpuBlit::default();
             let slice = unsafe {
-                core::slice::from_raw_parts_mut(&mut blit as *mut PurpleGpuBlit as *mut u8, core::mem::size_of::<PurpleGpuBlit>())
+                core::slice::from_raw_parts_mut(
+                    &mut blit as *mut PurpleGpuBlit as *mut u8,
+                    core::mem::size_of::<PurpleGpuBlit>(),
+                )
             };
             if let Err(e) = safe_copy_from_user(a1, slice) {
                 return e;
@@ -684,7 +732,10 @@ pub fn dispatch_native_syscall(
             if width == 0 || height == 0 || pitch < row_bytes {
                 return -EINVAL;
             }
-            let source_span = match (height - 1).checked_mul(pitch).and_then(|offset| offset.checked_add(row_bytes)) {
+            let source_span = match (height - 1)
+                .checked_mul(pitch)
+                .and_then(|offset| offset.checked_add(row_bytes))
+            {
                 Some(bytes) => bytes,
                 None => return -EOVERFLOW,
             };
@@ -710,14 +761,18 @@ pub fn dispatch_native_syscall(
                         None => return -EOVERFLOW,
                     };
                     let bytes = unsafe {
-                        core::slice::from_raw_parts_mut(row_buffer.as_mut_ptr() as *mut u8, byte_count)
+                        core::slice::from_raw_parts_mut(
+                            row_buffer.as_mut_ptr() as *mut u8,
+                            byte_count,
+                        )
                     };
                     if let Err(e) = safe_copy_from_user(source, bytes) {
                         return e;
                     }
                     let draw_x = (blit.dst_x as usize).saturating_add(column);
                     let draw_y = (blit.dst_y as usize).saturating_add(row);
-                    let drawn = video::blit_rect(&row_buffer[..count], draw_x, draw_y, count, 1, count);
+                    let drawn =
+                        video::blit_rect(&row_buffer[..count], draw_x, draw_y, count, 1, count);
                     copied = copied.saturating_add(drawn);
                     column += count;
                 }
@@ -736,8 +791,10 @@ pub fn dispatch_native_syscall(
             let y0 = a2 as usize;
             let x1 = a3 as usize;
             let y1 = a4 as usize;
-            if x0 >= video::get_width() || x1 >= video::get_width()
-                || y0 >= video::get_height() || y1 >= video::get_height()
+            if x0 >= video::get_width()
+                || x1 >= video::get_width()
+                || y0 >= video::get_height()
+                || y1 >= video::get_height()
             {
                 return -EINVAL;
             }
@@ -763,7 +820,10 @@ pub fn dispatch_native_syscall(
             let dev_name = b"PurpleOS framebuffer";
             caps.name[..dev_name.len()].copy_from_slice(dev_name);
             let slice = unsafe {
-                core::slice::from_raw_parts(&caps as *const PurpleGpuCaps as *const u8, core::mem::size_of::<PurpleGpuCaps>())
+                core::slice::from_raw_parts(
+                    &caps as *const PurpleGpuCaps as *const u8,
+                    core::mem::size_of::<PurpleGpuCaps>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -791,7 +851,10 @@ pub fn dispatch_native_syscall(
                 _reserved: 0,
             };
             let slice = unsafe {
-                core::slice::from_raw_parts(&caps as *const PurpleAudioCaps as *const u8, core::mem::size_of::<PurpleAudioCaps>())
+                core::slice::from_raw_parts(
+                    &caps as *const PurpleAudioCaps as *const u8,
+                    core::mem::size_of::<PurpleAudioCaps>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -812,24 +875,23 @@ pub fn dispatch_native_syscall(
             0
         }
 
-        SYS_PURPLE_AUDIO_GET_VOLUME => {
-            audio::get_volume() as i64
-        }
+        SYS_PURPLE_AUDIO_GET_VOLUME => audio::get_volume() as i64,
 
         SYS_PURPLE_AUDIO_PLAY_SYNTH_TONE => {
             if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
                 return -EPERM;
             }
-            if a1 == 0 || a1 > crate::drivers::pit::PIT_MAX_TONE_FREQUENCY_HZ as u64 || a2 > MAX_TONE_DURATION_MS {
+            if a1 == 0
+                || a1 > crate::drivers::pit::PIT_MAX_TONE_FREQUENCY_HZ as u64
+                || a2 > MAX_TONE_DURATION_MS
+            {
                 return -EINVAL;
             }
             play_tone(a1 as u32, a2 as u32);
             0
         }
 
-        SYS_PURPLE_AUDIO_GET_POSITION => {
-            audio::get_stream_position() as i64
-        }
+        SYS_PURPLE_AUDIO_GET_POSITION => audio::get_stream_position() as i64,
 
         /* =====================================================================
          * Category 3: Low-Latency Zero-Copy IPC & Native Ring Channels
@@ -958,7 +1020,10 @@ pub fn dispatch_native_syscall(
             drop(channels);
 
             let slice = unsafe {
-                core::slice::from_raw_parts(&stat as *const PurpleChanStat as *const u8, core::mem::size_of::<PurpleChanStat>())
+                core::slice::from_raw_parts(
+                    &stat as *const PurpleChanStat as *const u8,
+                    core::mem::size_of::<PurpleChanStat>(),
+                )
             };
             match safe_copy_to_user(slice, a2) {
                 Ok(()) => 0,
@@ -971,13 +1036,9 @@ pub fn dispatch_native_syscall(
         /* =====================================================================
          * Category 4: Multi-Core SMP Parallelism, Affinity & Execution Control
          * ===================================================================== */
-        SYS_PURPLE_CPU_COUNT => {
-            smp::get_online_count() as i64
-        }
+        SYS_PURPLE_CPU_COUNT => smp::get_online_count() as i64,
 
-        SYS_PURPLE_CPU_GET_CURRENT => {
-            smp::get_cpu_id() as i64
-        }
+        SYS_PURPLE_CPU_GET_CURRENT => smp::get_cpu_id() as i64,
 
         SYS_PURPLE_CPU_SET_AFFINITY => {
             if !current_task_has_cap(PURPLE_CAP_MULTI_CORE) {
@@ -989,7 +1050,11 @@ pub fn dispatch_native_syscall(
             let target_tid = a1 as u32;
             let mask = a2;
             let online = smp::get_online_count() as usize;
-            let online_mask = if online >= u64::BITS as usize { u64::MAX } else { (1u64 << online) - 1 };
+            let online_mask = if online >= u64::BITS as usize {
+                u64::MAX
+            } else {
+                (1u64 << online) - 1
+            };
             if mask == 0 || mask & !online_mask != 0 {
                 return -EINVAL;
             }
@@ -1015,7 +1080,9 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_CPU_GET_AFFINITY => {
-            if a1 > u32::MAX as u64 { return -EINVAL; }
+            if a1 > u32::MAX as u64 {
+                return -EINVAL;
+            }
             let target_tid = a1 as u32;
             let s = SCHED.lock();
             let cpu_id = task::get_current_cpu();
@@ -1031,7 +1098,9 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_TASK_SET_PRIORITY => {
-            if a1 > u32::MAX as u64 || a2 > 3 { return -EINVAL; }
+            if a1 > u32::MAX as u64 || a2 > 3 {
+                return -EINVAL;
+            }
             let target_tid = a1 as u32;
             let prio_val = a2 as u32;
             let prio = TaskPriority::from_u32(prio_val);
@@ -1056,7 +1125,9 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_TASK_GET_PRIORITY => {
-            if a1 > u32::MAX as u64 { return -EINVAL; }
+            if a1 > u32::MAX as u64 {
+                return -EINVAL;
+            }
             let target_tid = a1 as u32;
             let s = SCHED.lock();
             let cpu_id = task::get_current_cpu();
@@ -1075,7 +1146,9 @@ pub fn dispatch_native_syscall(
             if !current_task_has_cap(PURPLE_CAP_SYS_ADMIN) {
                 return -EPERM;
             }
-            if a1 > u32::MAX as u64 || a2 == 0 || a2 > MAX_TASK_SLICE_TICKS { return -EINVAL; }
+            if a1 > u32::MAX as u64 || a2 == 0 || a2 > MAX_TASK_SLICE_TICKS {
+                return -EINVAL;
+            }
             let target_tid = a1 as u32;
             let slice_ticks = a2 as u32;
             let mut s = SCHED.lock();
@@ -1119,7 +1192,10 @@ pub fn dispatch_native_syscall(
                 epoch_seconds: epoch_sec,
             };
             let slice = unsafe {
-                core::slice::from_raw_parts(&wc as *const PurpleWallClock as *const u8, core::mem::size_of::<PurpleWallClock>())
+                core::slice::from_raw_parts(
+                    &wc as *const PurpleWallClock as *const u8,
+                    core::mem::size_of::<PurpleWallClock>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -1127,9 +1203,7 @@ pub fn dispatch_native_syscall(
             }
         }
 
-        SYS_PURPLE_CLOCK_TICKS => {
-            pit::get_ticks() as i64
-        }
+        SYS_PURPLE_CLOCK_TICKS => pit::get_ticks() as i64,
 
         SYS_PURPLE_CLOCK_NANOS => {
             let ticks = pit::get_ticks();
@@ -1174,7 +1248,10 @@ pub fn dispatch_native_syscall(
             };
 
             let slice = unsafe {
-                core::slice::from_raw_parts(&dev_info as *const PurpleNetDevInfo as *const u8, core::mem::size_of::<PurpleNetDevInfo>())
+                core::slice::from_raw_parts(
+                    &dev_info as *const PurpleNetDevInfo as *const u8,
+                    core::mem::size_of::<PurpleNetDevInfo>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -1244,7 +1321,10 @@ pub fn dispatch_native_syscall(
         SYS_PURPLE_NET_GET_STATS => {
             let stats = *NET_STATS.lock();
             let slice = unsafe {
-                core::slice::from_raw_parts(&stats as *const PurpleNetStats as *const u8, core::mem::size_of::<PurpleNetStats>())
+                core::slice::from_raw_parts(
+                    &stats as *const PurpleNetStats as *const u8,
+                    core::mem::size_of::<PurpleNetStats>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -1276,18 +1356,35 @@ pub fn dispatch_native_syscall(
             let ip_u32 = a1 as u32;
             let gw_u32 = a2 as u32;
             let sub_u32 = a3 as u32;
-            let ip = [(ip_u32 >> 24) as u8, (ip_u32 >> 16) as u8, (ip_u32 >> 8) as u8, ip_u32 as u8];
-            let gw = [(gw_u32 >> 24) as u8, (gw_u32 >> 16) as u8, (gw_u32 >> 8) as u8, gw_u32 as u8];
-            let sub = [(sub_u32 >> 24) as u8, (sub_u32 >> 16) as u8, (sub_u32 >> 8) as u8, sub_u32 as u8];
-            if crate::net::set_config(ip, gw, sub).is_ok() { 0 } else { -EINVAL }
+            let ip = [
+                (ip_u32 >> 24) as u8,
+                (ip_u32 >> 16) as u8,
+                (ip_u32 >> 8) as u8,
+                ip_u32 as u8,
+            ];
+            let gw = [
+                (gw_u32 >> 24) as u8,
+                (gw_u32 >> 16) as u8,
+                (gw_u32 >> 8) as u8,
+                gw_u32 as u8,
+            ];
+            let sub = [
+                (sub_u32 >> 24) as u8,
+                (sub_u32 >> 16) as u8,
+                (sub_u32 >> 8) as u8,
+                sub_u32 as u8,
+            ];
+            if crate::net::set_config(ip, gw, sub).is_ok() {
+                0
+            } else {
+                -EINVAL
+            }
         }
 
         /* =====================================================================
          * Category 7: Hardware Introspection, PurpleDetect & Device Telemetry
          * ===================================================================== */
-        SYS_PURPLE_DEVICE_COUNT => {
-            purple_detect::get_device_count() as i64
-        }
+        SYS_PURPLE_DEVICE_COUNT => purple_detect::get_device_count() as i64,
 
         SYS_PURPLE_DEVICE_GET_INFO => {
             let idx = a1 as usize;
@@ -1304,7 +1401,10 @@ pub fn dispatch_native_syscall(
                     address: dev.address,
                 };
                 let slice = unsafe {
-                    core::slice::from_raw_parts(&desc as *const PurpleDeviceDesc as *const u8, core::mem::size_of::<PurpleDeviceDesc>())
+                    core::slice::from_raw_parts(
+                        &desc as *const PurpleDeviceDesc as *const u8,
+                        core::mem::size_of::<PurpleDeviceDesc>(),
+                    )
                 };
                 match safe_copy_to_user(slice, a2) {
                     Ok(()) => 0,
@@ -1328,7 +1428,10 @@ pub fn dispatch_native_syscall(
                 _reserved: 0,
             };
             let slice = unsafe {
-                core::slice::from_raw_parts(&metrics as *const PurpleMemMetrics as *const u8, core::mem::size_of::<PurpleMemMetrics>())
+                core::slice::from_raw_parts(
+                    &metrics as *const PurpleMemMetrics as *const u8,
+                    core::mem::size_of::<PurpleMemMetrics>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -1357,7 +1460,10 @@ pub fn dispatch_native_syscall(
             drop(s);
 
             let slice = unsafe {
-                core::slice::from_raw_parts(&telem as *const PurpleSysTelemetry as *const u8, core::mem::size_of::<PurpleSysTelemetry>())
+                core::slice::from_raw_parts(
+                    &telem as *const PurpleSysTelemetry as *const u8,
+                    core::mem::size_of::<PurpleSysTelemetry>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -1366,17 +1472,25 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_SEC_INTEGRITY_CHECK => {
-            let (verified, total, unverified, missing) = crate::security::aegis_detect::verify_storage();
+            let (verified, total, unverified, missing) =
+                crate::security::aegis_detect::verify_storage();
             let wt = rtc::get_time();
             let rep = PurpleIntegrityReport {
                 verified_components: verified as u32,
                 total_components: total as u32,
                 tampered_components: unverified as u32,
-                is_trusted: if total > 0 && verified == total && unverified == 0 && missing == 0 { 1 } else { 0 },
+                is_trusted: if total > 0 && verified == total && unverified == 0 && missing == 0 {
+                    1
+                } else {
+                    0
+                },
                 timestamp_epoch: posix::rtc_to_unix_epoch(&wt) as u64,
             };
             let slice = unsafe {
-                core::slice::from_raw_parts(&rep as *const PurpleIntegrityReport as *const u8, core::mem::size_of::<PurpleIntegrityReport>())
+                core::slice::from_raw_parts(
+                    &rep as *const PurpleIntegrityReport as *const u8,
+                    core::mem::size_of::<PurpleIntegrityReport>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -1415,7 +1529,10 @@ pub fn dispatch_native_syscall(
                     bar5: dev.bar5,
                 };
                 let slice = unsafe {
-                    core::slice::from_raw_parts(&info as *const PurplePciDeviceInfo as *const u8, core::mem::size_of::<PurplePciDeviceInfo>())
+                    core::slice::from_raw_parts(
+                        &info as *const PurplePciDeviceInfo as *const u8,
+                        core::mem::size_of::<PurplePciDeviceInfo>(),
+                    )
                 };
                 match safe_copy_to_user(slice, a2) {
                     Ok(()) => 0,
@@ -1429,9 +1546,7 @@ pub fn dispatch_native_syscall(
         /* =====================================================================
          * Category 8: Advanced Raw Block I/O & Storage Telemetry
          * ===================================================================== */
-        SYS_PURPLE_STORAGE_COUNT => {
-            block_dev::count() as i64
-        }
+        SYS_PURPLE_STORAGE_COUNT => block_dev::count() as i64,
 
         SYS_PURPLE_STORAGE_INFO => {
             let dev_idx = a1 as usize;
@@ -1449,7 +1564,10 @@ pub fn dispatch_native_syscall(
 
             if exists.is_some() {
                 let slice = unsafe {
-                    core::slice::from_raw_parts(&info as *const PurpleStorageDevInfo as *const u8, core::mem::size_of::<PurpleStorageDevInfo>())
+                    core::slice::from_raw_parts(
+                        &info as *const PurpleStorageDevInfo as *const u8,
+                        core::mem::size_of::<PurpleStorageDevInfo>(),
+                    )
                 };
                 match safe_copy_to_user(slice, a2) {
                     Ok(()) => 0,
@@ -1548,9 +1666,7 @@ pub fn dispatch_native_syscall(
                 return -EPERM;
             }
             let dev_idx = a1 as usize;
-            let res = block_dev::with_dev(dev_idx, |dev| {
-                dev.flush()
-            });
+            let res = block_dev::with_dev(dev_idx, |dev| dev.flush());
             match res {
                 Some(block_dev::BLOCK_DEV_OK) => 0,
                 Some(_) => -EIO,
@@ -1572,7 +1688,10 @@ pub fn dispatch_native_syscall(
             drop(m);
 
             let slice = unsafe {
-                core::slice::from_raw_parts(&state as *const PurpleMouseState as *const u8, core::mem::size_of::<PurpleMouseState>())
+                core::slice::from_raw_parts(
+                    &state as *const PurpleMouseState as *const u8,
+                    core::mem::size_of::<PurpleMouseState>(),
+                )
             };
             match safe_copy_to_user(slice, a1) {
                 Ok(()) => 0,
@@ -1593,7 +1712,10 @@ pub fn dispatch_native_syscall(
                     timestamp_ticks: pit::get_ticks(),
                 };
                 let slice = unsafe {
-                    core::slice::from_raw_parts(&ev as *const PurpleInputEvent as *const u8, core::mem::size_of::<PurpleInputEvent>())
+                    core::slice::from_raw_parts(
+                        &ev as *const PurpleInputEvent as *const u8,
+                        core::mem::size_of::<PurpleInputEvent>(),
+                    )
                 };
                 match safe_copy_to_user(slice, a1) {
                     Ok(()) => 1,
@@ -1629,9 +1751,8 @@ pub fn dispatch_native_syscall(
 
             if ev_count > 0 {
                 let byte_len = ev_count * core::mem::size_of::<PurpleInputEvent>();
-                let slice = unsafe {
-                    core::slice::from_raw_parts(events.as_ptr() as *const u8, byte_len)
-                };
+                let slice =
+                    unsafe { core::slice::from_raw_parts(events.as_ptr() as *const u8, byte_len) };
                 if let Err(e) = safe_copy_to_user(slice, a1) {
                     return e;
                 }
@@ -1648,7 +1769,9 @@ pub fn dispatch_native_syscall(
             if !current_task_has_cap(PURPLE_CAP_SYS_ADMIN) {
                 return -EPERM;
             }
-            if a1 > u32::MAX as u64 { return -EINVAL; }
+            if a1 > u32::MAX as u64 {
+                return -EINVAL;
+            }
             let tid = a1 as u32;
             match task::kill(tid) {
                 Ok(()) => 0,
@@ -1657,7 +1780,9 @@ pub fn dispatch_native_syscall(
         }
 
         SYS_PURPLE_TASK_GET_INFO => {
-            if a1 > u32::MAX as u64 { return -EINVAL; }
+            if a1 > u32::MAX as u64 {
+                return -EINVAL;
+            }
             let tid = a1 as u32;
             let s = SCHED.lock();
             for t in s.tasks.iter() {
@@ -1676,7 +1801,10 @@ pub fn dispatch_native_syscall(
                     };
                     drop(s);
                     let slice = unsafe {
-                        core::slice::from_raw_parts(&info as *const PurpleTaskInfo as *const u8, core::mem::size_of::<PurpleTaskInfo>())
+                        core::slice::from_raw_parts(
+                            &info as *const PurpleTaskInfo as *const u8,
+                            core::mem::size_of::<PurpleTaskInfo>(),
+                        )
                     };
                     return match safe_copy_to_user(slice, a2) {
                         Ok(()) => 0,
@@ -1701,9 +1829,8 @@ pub fn dispatch_native_syscall(
             drop(s);
 
             let byte_len = count * 4;
-            let slice = unsafe {
-                core::slice::from_raw_parts(list.as_ptr() as *const u8, byte_len)
-            };
+            let slice =
+                unsafe { core::slice::from_raw_parts(list.as_ptr() as *const u8, byte_len) };
             if let Err(e) = safe_copy_to_user(slice, a1) {
                 return e;
             }
@@ -1753,7 +1880,15 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     total += 1;
     serial::print("[NATIVE TEST 1/10] Linear Framebuffer & 2D/3D GPU Info... ");
     let mut fb_info = PurpleFbInfo::default();
-    let res = dispatch_native_syscall(SYS_PURPLE_FB_GET_INFO, &raw mut fb_info as u64, 0, 0, 0, 0, 0);
+    let res = dispatch_native_syscall(
+        SYS_PURPLE_FB_GET_INFO,
+        &raw mut fb_info as u64,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
     if res == 0 && fb_info.width > 0 && fb_info.height > 0 {
         serial::print("[PASSED] (");
         serial::print_u64(fb_info.width as u64);
@@ -1769,7 +1904,15 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     total += 1;
     serial::print("[NATIVE TEST 2/10] Audio capability query and volume state... ");
     let mut audio_caps = PurpleAudioCaps::default();
-    let res = dispatch_native_syscall(SYS_PURPLE_AUDIO_GET_CAPS, &raw mut audio_caps as u64, 0, 0, 0, 0, 0);
+    let res = dispatch_native_syscall(
+        SYS_PURPLE_AUDIO_GET_CAPS,
+        &raw mut audio_caps as u64,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
     let _ = dispatch_native_syscall(SYS_PURPLE_AUDIO_SET_VOLUME, 75, 0, 0, 0, 0, 0);
     let cur_vol = dispatch_native_syscall(SYS_PURPLE_AUDIO_GET_VOLUME, 0, 0, 0, 0, 0, 0);
     if res == 0 && cur_vol == 75 {
@@ -1781,13 +1924,31 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
 
     // Test 3: Category 3 - Low-Latency Channel IPC Ring Buffers
     total += 1;
-    serial::print("[NATIVE TEST 3/10] Native Zero-Copy Channel IPC (Create, Send, Recv, Close)... ");
+    serial::print(
+        "[NATIVE TEST 3/10] Native Zero-Copy Channel IPC (Create, Send, Recv, Close)... ",
+    );
     let chan = dispatch_native_syscall(SYS_PURPLE_CHAN_CREATE, 0, 0, 0, 0, 0, 0);
     if chan > 0 {
         let msg = b"PURPLE_OS_HIGH_SPEED_IPC_TEST";
-        let sent = dispatch_native_syscall(SYS_PURPLE_CHAN_SEND, chan as u64, msg.as_ptr() as u64, msg.len() as u64, 0, 0, 0);
+        let sent = dispatch_native_syscall(
+            SYS_PURPLE_CHAN_SEND,
+            chan as u64,
+            msg.as_ptr() as u64,
+            msg.len() as u64,
+            0,
+            0,
+            0,
+        );
         let mut recv_buf = [0u8; 64];
-        let recv = dispatch_native_syscall(SYS_PURPLE_CHAN_RECV, chan as u64, recv_buf.as_mut_ptr() as u64, recv_buf.len() as u64, 0, 0, 0);
+        let recv = dispatch_native_syscall(
+            SYS_PURPLE_CHAN_RECV,
+            chan as u64,
+            recv_buf.as_mut_ptr() as u64,
+            recv_buf.len() as u64,
+            0,
+            0,
+            0,
+        );
         let _ = dispatch_native_syscall(SYS_PURPLE_CHAN_CLOSE, chan as u64, 0, 0, 0, 0, 0);
         if sent == msg.len() as i64 && recv == msg.len() as i64 && &recv_buf[..msg.len()] == msg {
             serial::println("[PASSED] (Zero-copy payload matched)");
@@ -1837,9 +1998,25 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     total += 1;
     serial::print("[NATIVE TEST 6/10] Raw Layer-2 Network Device Telemetry & Stats... ");
     let mut net_info = PurpleNetDevInfo::default();
-    let res = dispatch_native_syscall(SYS_PURPLE_NET_GET_DEV_INFO, &raw mut net_info as u64, 0, 0, 0, 0, 0);
+    let res = dispatch_native_syscall(
+        SYS_PURPLE_NET_GET_DEV_INFO,
+        &raw mut net_info as u64,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
     let mut stats = PurpleNetStats::default();
-    let _ = dispatch_native_syscall(SYS_PURPLE_NET_GET_STATS, &raw mut stats as u64, 0, 0, 0, 0, 0);
+    let _ = dispatch_native_syscall(
+        SYS_PURPLE_NET_GET_STATS,
+        &raw mut stats as u64,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
     if res == 0 && net_info.driver_type != 0 {
         serial::print("[PASSED] (IP: ");
         serial::print_u64(net_info.ip[0] as u64);
@@ -1860,7 +2037,15 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     serial::print("[NATIVE TEST 7/10] Hardware Device Introspection & PMM Memory Metrics... ");
     let dev_count = dispatch_native_syscall(SYS_PURPLE_DEVICE_COUNT, 0, 0, 0, 0, 0, 0);
     let mut mem_met = PurpleMemMetrics::default();
-    let res = dispatch_native_syscall(SYS_PURPLE_MEM_METRICS, &raw mut mem_met as u64, 0, 0, 0, 0, 0);
+    let res = dispatch_native_syscall(
+        SYS_PURPLE_MEM_METRICS,
+        &raw mut mem_met as u64,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
     if dev_count >= 1 && res == 0 && mem_met.free_frames > 0 {
         serial::print("[PASSED] (Devices: ");
         serial::print_u64(dev_count as u64);
@@ -1878,7 +2063,15 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     let stor_count = dispatch_native_syscall(SYS_PURPLE_STORAGE_COUNT, 0, 0, 0, 0, 0, 0);
     if stor_count >= 1 {
         let mut stor_info = PurpleStorageDevInfo::default();
-        let res = dispatch_native_syscall(SYS_PURPLE_STORAGE_INFO, 0, &raw mut stor_info as u64, 0, 0, 0, 0);
+        let res = dispatch_native_syscall(
+            SYS_PURPLE_STORAGE_INFO,
+            0,
+            &raw mut stor_info as u64,
+            0,
+            0,
+            0,
+            0,
+        );
         if res == 0 && stor_info.block_size == 512 {
             serial::print("[PASSED] (Disks: ");
             serial::print_u64(stor_count as u64);
@@ -1898,7 +2091,15 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     total += 1;
     serial::print("[NATIVE TEST 9/10] Real-Time Input Subsystem (Mouse Coordinates & Keys)... ");
     let mut m_state = PurpleMouseState::default();
-    let res = dispatch_native_syscall(SYS_PURPLE_INPUT_MOUSE_STATE, &raw mut m_state as u64, 0, 0, 0, 0, 0);
+    let res = dispatch_native_syscall(
+        SYS_PURPLE_INPUT_MOUSE_STATE,
+        &raw mut m_state as u64,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
     if res == 0 {
         serial::println("[PASSED] (Mouse state query returned)");
         passed += 1;
@@ -1910,7 +2111,15 @@ pub fn run_native_syscall_self_test() -> (usize, usize) {
     total += 1;
     serial::print("[NATIVE TEST 10/10] Native Process Capabilities & Security Sandbox... ");
     let caps = dispatch_native_syscall(SYS_PURPLE_SEC_CAP_GET, 0, 0, 0, 0, 0, 0);
-    let _ = dispatch_native_syscall(SYS_PURPLE_SEC_CAP_DROP, PURPLE_CAP_RAW_STORAGE, 0, 0, 0, 0, 0);
+    let _ = dispatch_native_syscall(
+        SYS_PURPLE_SEC_CAP_DROP,
+        PURPLE_CAP_RAW_STORAGE,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
     let dropped_caps = dispatch_native_syscall(SYS_PURPLE_SEC_CAP_GET, 0, 0, 0, 0, 0, 0);
     // Restore capability
     let cpu_id = task::get_current_cpu();

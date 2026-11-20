@@ -11,54 +11,54 @@ const EFER_SCE: u64 = 0x00000001;
 const KERNEL_FLAG_MASK: u64 = (1 << 8) | (1 << 9) | (1 << 10) | (1 << 18);
 
 // Standard Linux / POSIX.1-2024 x86_64 Syscall Numbers
-pub const SYS_READ: u64            = 0;
-pub const SYS_WRITE: u64           = 1;
-pub const SYS_OPEN: u64            = 2;
-pub const SYS_CLOSE: u64           = 3;
-pub const SYS_STAT: u64            = 4;
-pub const SYS_FSTAT: u64           = 5;
-pub const SYS_LSEEK: u64           = 8;
-pub const SYS_MMAP: u64            = 9;
-pub const SYS_MPROTECT: u64        = 10;
-pub const SYS_MUNMAP: u64          = 11;
-pub const SYS_BRK: u64             = 12;
-pub const SYS_RT_SIGACTION: u64    = 13;
-pub const SYS_RT_SIGPROCMASK: u64  = 14;
-pub const SYS_IOCTL: u64           = 16;
-pub const SYS_ACCESS: u64          = 21;
-pub const SYS_PIPE: u64            = 22;
-pub const SYS_SCHED_YIELD: u64     = 24;
-pub const SYS_DUP: u64             = 32;
-pub const SYS_DUP2: u64            = 33;
-pub const SYS_PAUSE: u64           = 34;
-pub const SYS_NANOSLEEP: u64       = 35;
-pub const SYS_GETPID: u64          = 39;
-pub const SYS_FORK: u64            = 57;
-pub const SYS_EXECVE: u64          = 59;
-pub const SYS_EXIT: u64            = 60;
-pub const SYS_WAIT4: u64           = 61;
-pub const SYS_KILL: u64            = 62;
-pub const SYS_FCNTL: u64           = 72;
-pub const SYS_GETCWD: u64          = 79;
-pub const SYS_CHDIR: u64           = 80;
-pub const SYS_MKDIR: u64           = 83;
-pub const SYS_RMDIR: u64           = 84;
-pub const SYS_UNLINK: u64          = 87;
-pub const SYS_UMASK: u64           = 95;
-pub const SYS_GETUID: u64          = 102;
-pub const SYS_GETGID: u64          = 104;
-pub const SYS_GETEUID: u64         = 107;
-pub const SYS_GETEGID: u64         = 108;
-pub const SYS_GETPPID: u64         = 110;
-pub const SYS_GETDENTS64: u64      = 217;
-pub const SYS_CLOCK_GETTIME: u64   = 228;
+pub const SYS_READ: u64 = 0;
+pub const SYS_WRITE: u64 = 1;
+pub const SYS_OPEN: u64 = 2;
+pub const SYS_CLOSE: u64 = 3;
+pub const SYS_STAT: u64 = 4;
+pub const SYS_FSTAT: u64 = 5;
+pub const SYS_LSEEK: u64 = 8;
+pub const SYS_MMAP: u64 = 9;
+pub const SYS_MPROTECT: u64 = 10;
+pub const SYS_MUNMAP: u64 = 11;
+pub const SYS_BRK: u64 = 12;
+pub const SYS_RT_SIGACTION: u64 = 13;
+pub const SYS_RT_SIGPROCMASK: u64 = 14;
+pub const SYS_IOCTL: u64 = 16;
+pub const SYS_ACCESS: u64 = 21;
+pub const SYS_PIPE: u64 = 22;
+pub const SYS_SCHED_YIELD: u64 = 24;
+pub const SYS_DUP: u64 = 32;
+pub const SYS_DUP2: u64 = 33;
+pub const SYS_PAUSE: u64 = 34;
+pub const SYS_NANOSLEEP: u64 = 35;
+pub const SYS_GETPID: u64 = 39;
+pub const SYS_FORK: u64 = 57;
+pub const SYS_EXECVE: u64 = 59;
+pub const SYS_EXIT: u64 = 60;
+pub const SYS_WAIT4: u64 = 61;
+pub const SYS_KILL: u64 = 62;
+pub const SYS_FCNTL: u64 = 72;
+pub const SYS_GETCWD: u64 = 79;
+pub const SYS_CHDIR: u64 = 80;
+pub const SYS_MKDIR: u64 = 83;
+pub const SYS_RMDIR: u64 = 84;
+pub const SYS_UNLINK: u64 = 87;
+pub const SYS_UMASK: u64 = 95;
+pub const SYS_GETUID: u64 = 102;
+pub const SYS_GETGID: u64 = 104;
+pub const SYS_GETEUID: u64 = 107;
+pub const SYS_GETEGID: u64 = 108;
+pub const SYS_GETPPID: u64 = 110;
+pub const SYS_GETDENTS64: u64 = 217;
+pub const SYS_CLOCK_GETTIME: u64 = 228;
 pub const SYS_CLOCK_NANOSLEEP: u64 = 230;
-pub const SYS_EXIT_GROUP: u64      = 231;
+pub const SYS_EXIT_GROUP: u64 = 231;
 
 // Internal backward-compatible syscall aliases
-pub const SYS_LEGACY_EXIT: u64     = 60;
-pub const SYS_LEGACY_YIELD: u64    = 24;
-pub const SYS_PRINT: u64           = 20;
+pub const SYS_LEGACY_EXIT: u64 = 60;
+pub const SYS_LEGACY_YIELD: u64 = 24;
+pub const SYS_PRINT: u64 = 20;
 
 #[repr(C)]
 pub struct PerCpuSyscall {
@@ -67,14 +67,38 @@ pub struct PerCpuSyscall {
 }
 
 static mut PER_CPU_SYSCALL: [PerCpuSyscall; 8] = [
-    PerCpuSyscall { kernel_rsp: 0, user_rsp: 0 },
-    PerCpuSyscall { kernel_rsp: 0, user_rsp: 0 },
-    PerCpuSyscall { kernel_rsp: 0, user_rsp: 0 },
-    PerCpuSyscall { kernel_rsp: 0, user_rsp: 0 },
-    PerCpuSyscall { kernel_rsp: 0, user_rsp: 0 },
-    PerCpuSyscall { kernel_rsp: 0, user_rsp: 0 },
-    PerCpuSyscall { kernel_rsp: 0, user_rsp: 0 },
-    PerCpuSyscall { kernel_rsp: 0, user_rsp: 0 },
+    PerCpuSyscall {
+        kernel_rsp: 0,
+        user_rsp: 0,
+    },
+    PerCpuSyscall {
+        kernel_rsp: 0,
+        user_rsp: 0,
+    },
+    PerCpuSyscall {
+        kernel_rsp: 0,
+        user_rsp: 0,
+    },
+    PerCpuSyscall {
+        kernel_rsp: 0,
+        user_rsp: 0,
+    },
+    PerCpuSyscall {
+        kernel_rsp: 0,
+        user_rsp: 0,
+    },
+    PerCpuSyscall {
+        kernel_rsp: 0,
+        user_rsp: 0,
+    },
+    PerCpuSyscall {
+        kernel_rsp: 0,
+        user_rsp: 0,
+    },
+    PerCpuSyscall {
+        kernel_rsp: 0,
+        user_rsp: 0,
+    },
 ];
 
 extern "C" {
@@ -102,7 +126,9 @@ pub fn init() {
         wrmsr(MSR_KERNEL_GS_BASE, &raw const PER_CPU_SYSCALL[0] as u64);
     }
 
-    crate::drivers::serial::println("Syscall: Hardware SYSCALL/SYSRET MSRs initialized with secure stack switching");
+    crate::drivers::serial::println(
+        "Syscall: Hardware SYSCALL/SYSRET MSRs initialized with secure stack switching",
+    );
 }
 
 pub fn init_ap(cpu_id: usize) {
@@ -162,7 +188,9 @@ pub extern "C" fn syscall_dispatch(
         return crate::kernel::app_runtime::dispatch(id, native, sys_no, a1, a2, a3);
     }
     // PurpleOS Native First-Class System Calls (Strictly non-POSIX, native ABI)
-    if sys_no >= crate::kernel::purple_abi::SYS_PURPLE_BASE && sys_no <= crate::kernel::purple_abi::SYS_PURPLE_MAX {
+    if sys_no >= crate::kernel::purple_abi::SYS_PURPLE_BASE
+        && sys_no <= crate::kernel::purple_abi::SYS_PURPLE_MAX
+    {
         return crate::kernel::purple_abi::dispatch_native_syscall(sys_no, a1, a2, a3, a4, a5, a6);
     }
 
@@ -234,12 +262,10 @@ pub extern "C" fn syscall_dispatch(
         }
 
         // POSIX 3: sys_close(fd)
-        SYS_CLOSE => {
-            match posix::posix_close(a1 as usize) {
-                Ok(()) => 0,
-                Err(e) => e,
-            }
-        }
+        SYS_CLOSE => match posix::posix_close(a1 as usize) {
+            Ok(()) => 0,
+            Err(e) => e,
+        },
 
         // POSIX 4: sys_stat(path, statbuf)
         SYS_STAT => {
@@ -253,7 +279,10 @@ pub extern "C" fn syscall_dispatch(
                         match posix::posix_stat(path, &mut statbuf) {
                             Ok(()) => {
                                 let slice = unsafe {
-                                    core::slice::from_raw_parts(&statbuf as *const PosixStat as *const u8, core::mem::size_of::<PosixStat>())
+                                    core::slice::from_raw_parts(
+                                        &statbuf as *const PosixStat as *const u8,
+                                        core::mem::size_of::<PosixStat>(),
+                                    )
                                 };
                                 match uaccess::copy_to_user(slice, stat_ptr) {
                                     Ok(()) => 0,
@@ -278,7 +307,10 @@ pub extern "C" fn syscall_dispatch(
             match posix::posix_fstat(fd, &mut statbuf) {
                 Ok(()) => {
                     let slice = unsafe {
-                        core::slice::from_raw_parts(&statbuf as *const PosixStat as *const u8, core::mem::size_of::<PosixStat>())
+                        core::slice::from_raw_parts(
+                            &statbuf as *const PosixStat as *const u8,
+                            core::mem::size_of::<PosixStat>(),
+                        )
                     };
                     match uaccess::copy_to_user(slice, stat_ptr) {
                         Ok(()) => 0,
@@ -309,28 +341,22 @@ pub extern "C" fn syscall_dispatch(
         }
 
         // POSIX 10: sys_mprotect(addr, len, prot)
-        SYS_MPROTECT => {
-            match posix::posix_mprotect(a1, a2 as usize, a3 as i32) {
-                Ok(()) => 0,
-                Err(e) => e,
-            }
-        }
+        SYS_MPROTECT => match posix::posix_mprotect(a1, a2 as usize, a3 as i32) {
+            Ok(()) => 0,
+            Err(e) => e,
+        },
 
         // POSIX 11: sys_munmap(addr, len)
-        SYS_MUNMAP => {
-            match posix::posix_munmap(a1, a2 as usize) {
-                Ok(()) => 0,
-                Err(e) => e,
-            }
-        }
+        SYS_MUNMAP => match posix::posix_munmap(a1, a2 as usize) {
+            Ok(()) => 0,
+            Err(e) => e,
+        },
 
         // POSIX 12: sys_brk(addr)
-        SYS_BRK => {
-            match posix::posix_brk(a1) {
-                Ok(cur) => cur as i64,
-                Err(e) => e,
-            }
-        }
+        SYS_BRK => match posix::posix_brk(a1) {
+            Ok(cur) => cur as i64,
+            Err(e) => e,
+        },
 
         // POSIX 13: sys_rt_sigaction(signum, act, oldact, sigsetsize)
         SYS_RT_SIGACTION => {
@@ -341,7 +367,10 @@ pub extern "C" fn syscall_dispatch(
             let mut act_val = SigAction::default();
             let act = if act_ptr != 0 {
                 let slice = unsafe {
-                    core::slice::from_raw_parts_mut(&mut act_val as *mut SigAction as *mut u8, core::mem::size_of::<SigAction>())
+                    core::slice::from_raw_parts_mut(
+                        &mut act_val as *mut SigAction as *mut u8,
+                        core::mem::size_of::<SigAction>(),
+                    )
                 };
                 if let Err(e) = uaccess::copy_from_user(act_ptr, slice) {
                     return e;
@@ -362,7 +391,10 @@ pub extern "C" fn syscall_dispatch(
                 Ok(()) => {
                     if oldact_ptr != 0 {
                         let slice = unsafe {
-                            core::slice::from_raw_parts(&oldact_val as *const SigAction as *const u8, core::mem::size_of::<SigAction>())
+                            core::slice::from_raw_parts(
+                                &oldact_val as *const SigAction as *const u8,
+                                core::mem::size_of::<SigAction>(),
+                            )
                         };
                         if let Err(e) = uaccess::copy_to_user(slice, oldact_ptr) {
                             return e;
@@ -472,20 +504,16 @@ pub extern "C" fn syscall_dispatch(
         }
 
         // POSIX 32: sys_dup(oldfd)
-        SYS_DUP => {
-            match posix::posix_dup(a1 as usize) {
-                Ok(newfd) => newfd as i64,
-                Err(e) => e,
-            }
-        }
+        SYS_DUP => match posix::posix_dup(a1 as usize) {
+            Ok(newfd) => newfd as i64,
+            Err(e) => e,
+        },
 
         // POSIX 33: sys_dup2(oldfd, newfd)
-        SYS_DUP2 => {
-            match posix::posix_dup2(a1 as usize, a2 as usize) {
-                Ok(newfd) => newfd as i64,
-                Err(e) => e,
-            }
-        }
+        SYS_DUP2 => match posix::posix_dup2(a1 as usize, a2 as usize) {
+            Ok(newfd) => newfd as i64,
+            Err(e) => e,
+        },
 
         // POSIX 34: sys_pause
         SYS_PAUSE => {
@@ -498,7 +526,10 @@ pub extern "C" fn syscall_dispatch(
             let req_ptr = a1;
             let mut req = Timespec::default();
             let slice = unsafe {
-                core::slice::from_raw_parts_mut(&mut req as *mut Timespec as *mut u8, core::mem::size_of::<Timespec>())
+                core::slice::from_raw_parts_mut(
+                    &mut req as *mut Timespec as *mut u8,
+                    core::mem::size_of::<Timespec>(),
+                )
             };
             if let Err(e) = uaccess::copy_from_user(req_ptr, slice) {
                 return e;
@@ -513,12 +544,10 @@ pub extern "C" fn syscall_dispatch(
         SYS_GETPID => posix::posix_getpid(),
 
         // POSIX 57: sys_fork
-        SYS_FORK => {
-            match posix::posix_fork() {
-                Ok(child_pid) => child_pid as i64,
-                Err(e) => e,
-            }
-        }
+        SYS_FORK => match posix::posix_fork() {
+            Ok(child_pid) => child_pid as i64,
+            Err(e) => e,
+        },
 
         // POSIX 59: sys_execve(filename, argv, envp)
         SYS_EXECVE => {
@@ -676,9 +705,7 @@ pub extern "C" fn syscall_dispatch(
         }
 
         // POSIX 95: sys_umask(mask)
-        SYS_UMASK => {
-            posix::posix_umask(a1 as u32) as i64
-        }
+        SYS_UMASK => posix::posix_umask(a1 as u32) as i64,
 
         // POSIX 102, 104, 107, 108: User & Group IDs
         SYS_GETUID => posix::posix_getuid(),
@@ -706,7 +733,10 @@ pub extern "C" fn syscall_dispatch(
             match posix::posix_clock_gettime(clock_id, &mut tp) {
                 Ok(()) => {
                     let slice = unsafe {
-                        core::slice::from_raw_parts(&tp as *const Timespec as *const u8, core::mem::size_of::<Timespec>())
+                        core::slice::from_raw_parts(
+                            &tp as *const Timespec as *const u8,
+                            core::mem::size_of::<Timespec>(),
+                        )
                     };
                     match uaccess::copy_to_user(slice, tp_ptr) {
                         Ok(()) => 0,
@@ -722,7 +752,10 @@ pub extern "C" fn syscall_dispatch(
             let req_ptr = a3;
             let mut req = Timespec::default();
             let slice = unsafe {
-                core::slice::from_raw_parts_mut(&mut req as *mut Timespec as *mut u8, core::mem::size_of::<Timespec>())
+                core::slice::from_raw_parts_mut(
+                    &mut req as *mut Timespec as *mut u8,
+                    core::mem::size_of::<Timespec>(),
+                )
             };
             if let Err(e) = uaccess::copy_from_user(req_ptr, slice) {
                 return e;

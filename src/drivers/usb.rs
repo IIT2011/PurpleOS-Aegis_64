@@ -11,55 +11,55 @@ use crate::drivers::dma::alloc_coherent;
 use crate::sync::Spinlock;
 
 /* Capability Register Offsets */
-pub const XHCI_CAP_CAPLENGTH: usize   = 0x00; /* Capability Register Length (8-bit) */
-pub const XHCI_CAP_HCIVERSION: usize  = 0x02; /* Interface Version Number (16-bit) */
-pub const XHCI_CAP_HCSPARAMS1: usize  = 0x04; /* Structural Parameters 1 (32-bit) */
-pub const XHCI_CAP_HCSPARAMS2: usize  = 0x08; /* Structural Parameters 2 (32-bit) */
-pub const XHCI_CAP_HCSPARAMS3: usize  = 0x0C; /* Structural Parameters 3 (32-bit) */
-pub const XHCI_CAP_HCCPARAMS1: usize  = 0x10; /* Capability Parameters 1 (32-bit) */
-pub const XHCI_CAP_DBOFF: usize       = 0x14; /* Doorbell Offset (32-bit) */
-pub const XHCI_CAP_RTSOFF: usize      = 0x18; /* Runtime Register Space Offset (32-bit) */
+pub const XHCI_CAP_CAPLENGTH: usize = 0x00; /* Capability Register Length (8-bit) */
+pub const XHCI_CAP_HCIVERSION: usize = 0x02; /* Interface Version Number (16-bit) */
+pub const XHCI_CAP_HCSPARAMS1: usize = 0x04; /* Structural Parameters 1 (32-bit) */
+pub const XHCI_CAP_HCSPARAMS2: usize = 0x08; /* Structural Parameters 2 (32-bit) */
+pub const XHCI_CAP_HCSPARAMS3: usize = 0x0C; /* Structural Parameters 3 (32-bit) */
+pub const XHCI_CAP_HCCPARAMS1: usize = 0x10; /* Capability Parameters 1 (32-bit) */
+pub const XHCI_CAP_DBOFF: usize = 0x14; /* Doorbell Offset (32-bit) */
+pub const XHCI_CAP_RTSOFF: usize = 0x18; /* Runtime Register Space Offset (32-bit) */
 
 /* Operational Register Offsets (relative to op_base) */
-pub const XHCI_OP_USBCMD: usize       = 0x00; /* USB Command (32-bit) */
-pub const XHCI_OP_USBSTS: usize       = 0x04; /* USB Status (32-bit) */
-pub const XHCI_OP_PAGESIZE: usize     = 0x08; /* Page Size (32-bit) */
-pub const XHCI_OP_DNCTRL: usize       = 0x14; /* Device Notification Control (32-bit) */
-pub const XHCI_OP_CRCR: usize         = 0x18; /* Command Ring Control (64-bit) */
-pub const XHCI_OP_DCBAAP: usize       = 0x30; /* Device Context Base Address Array Pointer (64-bit) */
-pub const XHCI_OP_CONFIG: usize       = 0x38; /* Configure (32-bit) */
-pub const XHCI_OP_PORTS_BASE: usize   = 0x400; /* Port Register Sets Base */
+pub const XHCI_OP_USBCMD: usize = 0x00; /* USB Command (32-bit) */
+pub const XHCI_OP_USBSTS: usize = 0x04; /* USB Status (32-bit) */
+pub const XHCI_OP_PAGESIZE: usize = 0x08; /* Page Size (32-bit) */
+pub const XHCI_OP_DNCTRL: usize = 0x14; /* Device Notification Control (32-bit) */
+pub const XHCI_OP_CRCR: usize = 0x18; /* Command Ring Control (64-bit) */
+pub const XHCI_OP_DCBAAP: usize = 0x30; /* Device Context Base Address Array Pointer (64-bit) */
+pub const XHCI_OP_CONFIG: usize = 0x38; /* Configure (32-bit) */
+pub const XHCI_OP_PORTS_BASE: usize = 0x400; /* Port Register Sets Base */
 
 /* USBCMD Register Bits */
-pub const XHCI_CMD_RS: u32    = 0x00000001; /* Run/Stop: 1=Run, 0=Stop */
+pub const XHCI_CMD_RS: u32 = 0x00000001; /* Run/Stop: 1=Run, 0=Stop */
 pub const XHCI_CMD_HCRST: u32 = 0x00000002; /* Host Controller Reset */
-pub const XHCI_CMD_INTE: u32  = 0x00000004; /* Interrupter Enable */
+pub const XHCI_CMD_INTE: u32 = 0x00000004; /* Interrupter Enable */
 
 /* USBSTS Register Bits */
-pub const XHCI_STS_HCH: u32   = 0x00000001; /* HC Halted: 1=Halted, 0=Running */
-pub const XHCI_STS_HSE: u32   = 0x00000004; /* Host System Error */
-pub const XHCI_STS_EINT: u32  = 0x00000008; /* Event Interrupt */
-pub const XHCI_STS_PCD: u32   = 0x00000010; /* Port Change Detect */
-pub const XHCI_STS_CNR: u32   = 0x00000800; /* Controller Not Ready: 1=Not Ready, 0=Ready */
+pub const XHCI_STS_HCH: u32 = 0x00000001; /* HC Halted: 1=Halted, 0=Running */
+pub const XHCI_STS_HSE: u32 = 0x00000004; /* Host System Error */
+pub const XHCI_STS_EINT: u32 = 0x00000008; /* Event Interrupt */
+pub const XHCI_STS_PCD: u32 = 0x00000010; /* Port Change Detect */
+pub const XHCI_STS_CNR: u32 = 0x00000800; /* Controller Not Ready: 1=Not Ready, 0=Ready */
 
 /* PORTSC Register Bits */
-pub const XHCI_PORT_CCS: u32  = 0x00000001; /* Current Connect Status: 1=Connected */
-pub const XHCI_PORT_PED: u32  = 0x00000002; /* Port Enabled/Disabled */
-pub const XHCI_PORT_PR: u32   = 0x00000010; /* Port Reset */
+pub const XHCI_PORT_CCS: u32 = 0x00000001; /* Current Connect Status: 1=Connected */
+pub const XHCI_PORT_PED: u32 = 0x00000002; /* Port Enabled/Disabled */
+pub const XHCI_PORT_PR: u32 = 0x00000010; /* Port Reset */
 pub const XHCI_PORT_PLS_MASK: u32 = 0x000001E0; /* Port Link State */
-pub const XHCI_PORT_PP: u32   = 0x00000200; /* Port Power */
+pub const XHCI_PORT_PP: u32 = 0x00000200; /* Port Power */
 pub const XHCI_PORT_SPEED_MASK: u32 = 0x00003C00; /* Port Speed */
 
 /* TRB (Transfer Request Block) Types */
-pub const TRB_TYPE_NORMAL: u32        = 1;
-pub const TRB_TYPE_SETUP_STAGE: u32   = 2;
-pub const TRB_TYPE_DATA_STAGE: u32    = 3;
-pub const TRB_TYPE_STATUS_STAGE: u32  = 4;
-pub const TRB_TYPE_LINK: u32          = 6;
-pub const TRB_TYPE_ENABLE_SLOT: u32   = 9;
-pub const TRB_TYPE_DISABLE_SLOT: u32  = 10;
-pub const TRB_TYPE_ADDRESS_DEV: u32   = 11;
-pub const TRB_TYPE_CONFIG_EP: u32     = 12;
+pub const TRB_TYPE_NORMAL: u32 = 1;
+pub const TRB_TYPE_SETUP_STAGE: u32 = 2;
+pub const TRB_TYPE_DATA_STAGE: u32 = 3;
+pub const TRB_TYPE_STATUS_STAGE: u32 = 4;
+pub const TRB_TYPE_LINK: u32 = 6;
+pub const TRB_TYPE_ENABLE_SLOT: u32 = 9;
+pub const TRB_TYPE_DISABLE_SLOT: u32 = 10;
+pub const TRB_TYPE_ADDRESS_DEV: u32 = 11;
+pub const TRB_TYPE_CONFIG_EP: u32 = 12;
 
 pub const COMMAND_RING_TRBS: usize = 64;
 
@@ -136,14 +136,17 @@ impl XhciController {
             let cap_len = core::ptr::read_volatile(self.cap_base as *const u8) as usize;
             self.op_base = self.cap_base + cap_len;
 
-            let dboff = core::ptr::read_volatile((self.cap_base + XHCI_CAP_DBOFF) as *const u32) as usize;
+            let dboff =
+                core::ptr::read_volatile((self.cap_base + XHCI_CAP_DBOFF) as *const u32) as usize;
             self.db_base = self.cap_base + dboff;
 
-            let rtsoff = core::ptr::read_volatile((self.cap_base + XHCI_CAP_RTSOFF) as *const u32) as usize;
+            let rtsoff =
+                core::ptr::read_volatile((self.cap_base + XHCI_CAP_RTSOFF) as *const u32) as usize;
             self.rt_base = self.cap_base + rtsoff;
 
             // Read structural parameters
-            let hcsparams1 = core::ptr::read_volatile((self.cap_base + XHCI_CAP_HCSPARAMS1) as *const u32);
+            let hcsparams1 =
+                core::ptr::read_volatile((self.cap_base + XHCI_CAP_HCSPARAMS1) as *const u32);
             self.max_slots = (hcsparams1 & 0xFF) as u8;
             self.max_ports = ((hcsparams1 >> 24) & 0xFF) as u8;
 
@@ -166,8 +169,10 @@ impl XhciController {
             // 3. Reset the controller (HCRST = 1)
             self.write_op32(XHCI_OP_USBCMD, XHCI_CMD_HCRST);
             timeout = 50000;
-            while ((self.read_op32(XHCI_OP_USBCMD) & XHCI_CMD_HCRST) != 0 ||
-                   (self.read_op32(XHCI_OP_USBSTS) & XHCI_STS_CNR) != 0) && timeout > 0 {
+            while ((self.read_op32(XHCI_OP_USBCMD) & XHCI_CMD_HCRST) != 0
+                || (self.read_op32(XHCI_OP_USBSTS) & XHCI_STS_CNR) != 0)
+                && timeout > 0
+            {
                 core::hint::spin_loop();
                 timeout -= 1;
             }
@@ -177,7 +182,8 @@ impl XhciController {
 
             // 5. Allocate DCBAA (Device Context Base Address Array, (max_slots + 1) * 8 bytes)
             let dcbaa_size = ((self.max_slots as usize + 1) * 8 + 4095) & !4095;
-            let (dcbaa_ptr, dcbaa_phys) = alloc_coherent(dcbaa_size).ok_or("Failed to alloc DCBAA")?;
+            let (dcbaa_ptr, dcbaa_phys) =
+                alloc_coherent(dcbaa_size).ok_or("Failed to alloc DCBAA")?;
             self.dcbaa = dcbaa_ptr as *mut u64;
             self.dcbaa_phys = dcbaa_phys;
             core::ptr::write_bytes(dcbaa_ptr, 0, dcbaa_size);
@@ -226,7 +232,12 @@ impl XhciController {
     }
 
     /// Enqueue a command TRB and ring doorbell 0
-    pub fn send_command(&mut self, param: u64, status: u32, control: u32) -> Result<(), &'static str> {
+    pub fn send_command(
+        &mut self,
+        param: u64,
+        status: u32,
+        control: u32,
+    ) -> Result<(), &'static str> {
         if !self.is_ready || self.cmd_ring.is_null() {
             return Err("xHCI not ready");
         }
@@ -281,7 +292,9 @@ pub fn init() {
             crate::drivers::serial::println(", Command Ring Online)");
         }
     } else {
-        crate::drivers::serial::println("USB: Host Controller Subsystem initialized (UHCI/EHCI legacy fallback)");
+        crate::drivers::serial::println(
+            "USB: Host Controller Subsystem initialized (UHCI/EHCI legacy fallback)",
+        );
     }
 }
 

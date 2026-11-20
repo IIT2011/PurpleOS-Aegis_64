@@ -41,7 +41,8 @@ impl Ipv4Header {
         let ttl = data[8];
         let protocol = data[9];
         let checksum = u16::from_be_bytes([data[10], data[11]]);
-        if (total_len as usize) < ihl || total_len as usize > data.len()
+        if (total_len as usize) < ihl
+            || total_len as usize > data.len()
             || flags_frag & IPV4_FRAGMENT_MASK != 0
             || flags_frag & 0x8000 != 0
             || compute_checksum(&data[..ihl]) != 0
@@ -105,7 +106,12 @@ pub fn compute_checksum(data: &[u8]) -> u16 {
 
 /// IPv4 TCP/UDP checksum including the pseudo-header. A packet that already
 /// carries a correct checksum yields zero.
-pub fn transport_checksum(source: [u8; 4], destination: [u8; 4], protocol: u8, segment: &[u8]) -> Option<u16> {
+pub fn transport_checksum(
+    source: [u8; 4],
+    destination: [u8; 4],
+    protocol: u8,
+    segment: &[u8],
+) -> Option<u16> {
     let length = u16::try_from(segment.len()).ok()?;
     let mut sum = u32::from(length) + u32::from(protocol);
     for address in [source, destination] {

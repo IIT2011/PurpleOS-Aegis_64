@@ -1,5 +1,8 @@
-use crate::arch::x86_64::cpu::{read_cr3, sti, hlt};
-use crate::drivers::apic::{send_ipi, ICR_DELIV_FIXED, ICR_DELIV_INIT, ICR_DELIV_STARTUP, ICR_DEST_ALL_EXC_SELF, ICR_DEST_PHYSICAL, ICR_LEVEL_ASSERT, ICR_TRIGGER_EDGE};
+use crate::arch::x86_64::cpu::{hlt, read_cr3, sti};
+use crate::drivers::apic::{
+    send_ipi, ICR_DELIV_FIXED, ICR_DELIV_INIT, ICR_DELIV_STARTUP, ICR_DEST_ALL_EXC_SELF,
+    ICR_DEST_PHYSICAL, ICR_LEVEL_ASSERT, ICR_TRIGGER_EDGE,
+};
 use crate::kernel::acpi::get_madt_info;
 use crate::mm::pmm::alloc_frames;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -87,7 +90,12 @@ pub extern "C" fn smp_ap_entry() -> ! {
     crate::drivers::apic::init_ap();
     crate::kernel::task::init_ap(cpu_id);
 
-    print_core_msg("SMP: AP core #", cpu_id as u32, apic_id, "started and operational");
+    print_core_msg(
+        "SMP: AP core #",
+        cpu_id as u32,
+        apic_id,
+        "started and operational",
+    );
 
     let _ = ONLINE_CPUS.fetch_add(1, Ordering::SeqCst);
 
@@ -149,15 +157,28 @@ pub fn init() {
             (*data).bsp_ack = 0;
 
             // Send INIT IPI
-            send_ipi(apic_id, ICR_DELIV_INIT | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_PHYSICAL);
+            send_ipi(
+                apic_id,
+                ICR_DELIV_INIT | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_PHYSICAL,
+            );
             crate::drivers::pit::delay_ms(10);
 
             // Send Startup IPI (vector 0x08 for 0x8000)
-            send_ipi(apic_id, ICR_DELIV_STARTUP | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_PHYSICAL | 0x08);
+            send_ipi(
+                apic_id,
+                ICR_DELIV_STARTUP | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_PHYSICAL | 0x08,
+            );
             crate::drivers::pit::delay_ms(1);
 
             if (*data).ready == 0 {
-                send_ipi(apic_id, ICR_DELIV_STARTUP | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_PHYSICAL | 0x08);
+                send_ipi(
+                    apic_id,
+                    ICR_DELIV_STARTUP
+                        | ICR_TRIGGER_EDGE
+                        | ICR_LEVEL_ASSERT
+                        | ICR_DEST_PHYSICAL
+                        | 0x08,
+                );
                 crate::drivers::pit::delay_ms(1);
             }
 
@@ -178,7 +199,12 @@ pub fn init() {
                     ap_wait -= 1;
                 }
 
-                print_core_msg("SMP: AP core #", i as u32, apic_id as u32, "successfully brought online");
+                print_core_msg(
+                    "SMP: AP core #",
+                    i as u32,
+                    apic_id as u32,
+                    "successfully brought online",
+                );
             } else {
                 crate::drivers::serial::print("SMP: AP core #");
                 crate::drivers::serial::print_u64(i as u64);
@@ -233,12 +259,26 @@ fn on_halt_ipi(_frame: &mut crate::arch::x86_64::idt::InterruptFrame) {
 
 pub fn broadcast_resched() {
     if get_online_count() > 1 {
-        send_ipi(0, ICR_DELIV_FIXED | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_ALL_EXC_SELF | (LAPIC_IPI_RESCHED as u32));
+        send_ipi(
+            0,
+            ICR_DELIV_FIXED
+                | ICR_TRIGGER_EDGE
+                | ICR_LEVEL_ASSERT
+                | ICR_DEST_ALL_EXC_SELF
+                | (LAPIC_IPI_RESCHED as u32),
+        );
     }
 }
 
 pub fn broadcast_halt() {
     if get_online_count() > 1 {
-        send_ipi(0, ICR_DELIV_FIXED | ICR_TRIGGER_EDGE | ICR_LEVEL_ASSERT | ICR_DEST_ALL_EXC_SELF | (LAPIC_IPI_HALT as u32));
+        send_ipi(
+            0,
+            ICR_DELIV_FIXED
+                | ICR_TRIGGER_EDGE
+                | ICR_LEVEL_ASSERT
+                | ICR_DEST_ALL_EXC_SELF
+                | (LAPIC_IPI_HALT as u32),
+        );
     }
 }

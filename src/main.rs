@@ -8,21 +8,24 @@ use core::panic::PanicInfo;
 
 // Link early boot & low-level assembly stubs directly into the binary
 global_asm!(include_str!("boot.s"), options(att_syntax));
-global_asm!(include_str!("arch/x86_64/interrupts.s"), options(att_syntax));
+global_asm!(
+    include_str!("arch/x86_64/interrupts.s"),
+    options(att_syntax)
+);
 global_asm!(include_str!("kernel/switch.s"), options(att_syntax));
 global_asm!(include_str!("kernel/syscall_entry.s"), options(att_syntax));
 global_asm!(include_str!("kernel/smp_trampoline.s"), options(att_syntax));
 
-pub mod sync;
 pub mod arch;
-pub mod mm;
+pub mod compositor;
+pub mod crypto;
 pub mod drivers;
 pub mod fs;
-pub mod crypto;
-pub mod security;
 pub mod kernel;
+pub mod mm;
 pub mod net;
-pub mod compositor;
+pub mod security;
+pub mod sync;
 
 extern "C" {
     static _kernel_start: u8;
@@ -67,16 +70,24 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     drivers::serial::println("");
 
     use arch::x86_64::boot::{AEGIS_UEFI_BOOT_MAGIC, MULTIBOOT_BOOTLOADER_MAGIC};
-    let mbi = if matches!(magic, MULTIBOOT_BOOTLOADER_MAGIC | AEGIS_UEFI_BOOT_MAGIC) && mbi_addr != 0 {
-        drivers::serial::println(if magic == AEGIS_UEFI_BOOT_MAGIC {
-            "AegisX64 native UEFI bootloader detected"
+    let mbi =
+        if matches!(magic, MULTIBOOT_BOOTLOADER_MAGIC | AEGIS_UEFI_BOOT_MAGIC) && mbi_addr != 0 {
+            drivers::serial::println(if magic == AEGIS_UEFI_BOOT_MAGIC {
+                "AegisX64 native UEFI bootloader detected"
+            } else {
+                "Multiboot 1 bootloader detected"
+            });
+            Some(unsafe { &*(mbi_addr as *const arch::x86_64::boot::MultibootInfo) })
         } else {
-            "Multiboot 1 bootloader detected"
-        });
-        Some(unsafe { &*(mbi_addr as *const arch::x86_64::boot::MultibootInfo) })
-    } else {
-        None
-    };
+            None
+        };
+
+    #[cfg(feature = "signed-components")]
+    if magic != AEGIS_UEFI_BOOT_MAGIC
+        || !mbi.is_some_and(|info| info.flags & arch::x86_64::boot::AEGIS_UEFI_SECURE_BOOT != 0)
+    {
+        security::aegis_detect::halt_boot("protected kernel requires a Secure Boot UEFI handoff");
+    }
 
     // 2. Discover CPU features via CPUID
     arch::x86_64::cpu::init_bsp();
@@ -146,7 +157,11 @@ pub extern "C" fn _start_rust(mbi_addr: u32, magic: u32) -> ! {
     kernel::apexec::init();
 
     // 16. Linear Framebuffer Driver Initialization
+    drivers::font::init_desktop();
     drivers::video::init(mbi);
+
+    // Leave the firmware logo in the upper framebuffer and show Purple OS below.
+    drivers::boot_splash::show();
 
     // 16b. Direct Boot to Native Compositor (No CUI on display)
     compositor::init();

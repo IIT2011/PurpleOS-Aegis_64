@@ -7,16 +7,46 @@ pub struct Symbol {
 }
 
 static SYMBOLS: Spinlock<[Symbol; 10]> = Spinlock::new([
-    Symbol { name: "kprintf", addr: 0 },
-    Symbol { name: "serial_write", addr: 0 },
-    Symbol { name: "pmm_alloc_frame", addr: 0 },
-    Symbol { name: "pmm_free_frame", addr: 0 },
-    Symbol { name: "vmm_map_page", addr: 0 },
-    Symbol { name: "task_create", addr: 0 },
-    Symbol { name: "task_yield", addr: 0 },
-    Symbol { name: "pit_get_ticks", addr: 0 },
-    Symbol { name: "pci_enable_bus_mastering", addr: 0 },
-    Symbol { name: "purplefs_sync", addr: 0 },
+    Symbol {
+        name: "kprintf",
+        addr: 0,
+    },
+    Symbol {
+        name: "serial_write",
+        addr: 0,
+    },
+    Symbol {
+        name: "pmm_alloc_frame",
+        addr: 0,
+    },
+    Symbol {
+        name: "pmm_free_frame",
+        addr: 0,
+    },
+    Symbol {
+        name: "vmm_map_page",
+        addr: 0,
+    },
+    Symbol {
+        name: "task_create",
+        addr: 0,
+    },
+    Symbol {
+        name: "task_yield",
+        addr: 0,
+    },
+    Symbol {
+        name: "pit_get_ticks",
+        addr: 0,
+    },
+    Symbol {
+        name: "pci_enable_bus_mastering",
+        addr: 0,
+    },
+    Symbol {
+        name: "purplefs_sync",
+        addr: 0,
+    },
 ]);
 
 pub fn init() {

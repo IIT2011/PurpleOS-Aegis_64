@@ -6,6 +6,9 @@
 #define PURPLE_GUI_ABI_VERSION 1
 #define PURPLE_GUI_CONSOLE 0x01
 #define PURPLE_GUI_WINDOWS 0x02
+#define PURPLE_GUI_SHELL 0x04
+#define PURPLE_GUI_SHELL_OUTPUT_SIZE 4096
+#define PURPLE_GUI_SHELL_PROMPT_SIZE 96
 
 enum purple_gui_call {
     PURPLE_GUI_VERSION = 0x1100,
@@ -17,7 +20,10 @@ enum purple_gui_call {
     PURPLE_GUI_SIZE = 0x1106,
     PURPLE_GUI_LOG = 0x1107,
     PURPLE_GUI_MAP = 0x1108,
-    PURPLE_GUI_UNMAP = 0x1109
+    PURPLE_GUI_UNMAP = 0x1109,
+    PURPLE_GUI_SHELL_COMMAND = 0x110a,
+    PURPLE_GUI_SHELL_PROMPT = 0x110b,
+    PURPLE_GUI_WINDOW_GLASS = 0x110c
 };
 
 enum purple_gui_event_kind {
@@ -70,6 +76,13 @@ static inline int64_t purple_gui_create(const char *title, uint64_t width, uint6
 static inline int64_t purple_gui_present(uint64_t window, const uint32_t *pixels, size_t bytes)
 {
     return purple_gui_syscall(PURPLE_GUI_PRESENT, window, (uintptr_t)pixels, bytes);
+}
+
+/* Enable live blurred acrylic and ARGB8888 presentation for an owned window.
+ * Call before presenting; alpha zero shows the compositor backdrop. */
+static inline int64_t purple_gui_set_glass(uint64_t window, int enabled)
+{
+    return purple_gui_syscall(PURPLE_GUI_WINDOW_GLASS, window, (uint64_t)!!enabled, 0);
 }
 
 static inline int64_t purple_gui_poll(uint64_t window, struct purple_gui_event *event)

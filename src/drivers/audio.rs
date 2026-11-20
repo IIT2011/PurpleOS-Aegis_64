@@ -5,58 +5,58 @@
 //!   - `sound/pci/hda/hda_codec.h`
 //!   - Intel High Definition Audio Specification Rev 1.0a
 
-use crate::drivers::pci::find_device;
 use crate::drivers::dma::alloc_coherent;
+use crate::drivers::pci::find_device;
 use crate::sync::Spinlock;
 
 pub const HDA_VENDOR_INTEL: u16 = 0x8086;
-pub const HDA_DEV_ICH6: u16      = 0x2668;
-pub const HDA_DEV_ICH7: u16      = 0x27D8;
-pub const HDA_DEV_ICH8: u16      = 0x284B;
-pub const HDA_DEV_ICH9: u16      = 0x293E;
-pub const HDA_DEV_QEMU: u16      = 0x2668;
+pub const HDA_DEV_ICH6: u16 = 0x2668;
+pub const HDA_DEV_ICH7: u16 = 0x27D8;
+pub const HDA_DEV_ICH8: u16 = 0x284B;
+pub const HDA_DEV_ICH9: u16 = 0x293E;
+pub const HDA_DEV_QEMU: u16 = 0x2668;
 
 /* Register Offsets (HDA Spec Table 1) */
-pub const HDA_REG_GCAP: usize     = 0x00; /* Global Capabilities (16-bit) */
-pub const HDA_REG_VMIN: usize     = 0x02; /* Minor Version (8-bit) */
-pub const HDA_REG_VMAJ: usize     = 0x03; /* Major Version (8-bit) */
-pub const HDA_REG_OUTPAY: usize   = 0x04; /* Output Payload (16-bit) */
-pub const HDA_REG_INPAY: usize    = 0x06; /* Input Payload (16-bit) */
-pub const HDA_REG_GCTL: usize     = 0x08; /* Global Control (32-bit) */
-pub const HDA_REG_WAKEEN: usize   = 0x0C; /* Wake Enable (16-bit) */
+pub const HDA_REG_GCAP: usize = 0x00; /* Global Capabilities (16-bit) */
+pub const HDA_REG_VMIN: usize = 0x02; /* Minor Version (8-bit) */
+pub const HDA_REG_VMAJ: usize = 0x03; /* Major Version (8-bit) */
+pub const HDA_REG_OUTPAY: usize = 0x04; /* Output Payload (16-bit) */
+pub const HDA_REG_INPAY: usize = 0x06; /* Input Payload (16-bit) */
+pub const HDA_REG_GCTL: usize = 0x08; /* Global Control (32-bit) */
+pub const HDA_REG_WAKEEN: usize = 0x0C; /* Wake Enable (16-bit) */
 pub const HDA_REG_STATESTS: usize = 0x0E; /* State Change Status (16-bit) */
-pub const HDA_REG_INTCTL: usize   = 0x20; /* Interrupt Control (32-bit) */
-pub const HDA_REG_INTSTS: usize   = 0x24; /* Interrupt Status (32-bit) */
+pub const HDA_REG_INTCTL: usize = 0x20; /* Interrupt Control (32-bit) */
+pub const HDA_REG_INTSTS: usize = 0x24; /* Interrupt Status (32-bit) */
 
 /* CORB (Command Outbound Ring Buffer) Registers */
 pub const HDA_REG_CORBLBASE: usize = 0x40; /* Lower Base Address (32-bit) */
 pub const HDA_REG_CORBUBASE: usize = 0x44; /* Upper Base Address (32-bit) */
-pub const HDA_REG_CORBWP: usize    = 0x48; /* Write Pointer (16-bit) */
-pub const HDA_REG_CORBRP: usize    = 0x4A; /* Read Pointer (16-bit) */
-pub const HDA_REG_CORBCTL: usize   = 0x4C; /* Control (8-bit) */
-pub const HDA_REG_CORBSTS: usize   = 0x4D; /* Status (8-bit) */
-pub const HDA_REG_CORBSIZE: usize  = 0x4E; /* Size (8-bit) */
+pub const HDA_REG_CORBWP: usize = 0x48; /* Write Pointer (16-bit) */
+pub const HDA_REG_CORBRP: usize = 0x4A; /* Read Pointer (16-bit) */
+pub const HDA_REG_CORBCTL: usize = 0x4C; /* Control (8-bit) */
+pub const HDA_REG_CORBSTS: usize = 0x4D; /* Status (8-bit) */
+pub const HDA_REG_CORBSIZE: usize = 0x4E; /* Size (8-bit) */
 
 /* RIRB (Response Inbound Ring Buffer) Registers */
 pub const HDA_REG_RIRBLBASE: usize = 0x50; /* Lower Base Address (32-bit) */
 pub const HDA_REG_RIRBUBASE: usize = 0x54; /* Upper Base Address (32-bit) */
-pub const HDA_REG_RIRBWP: usize    = 0x58; /* Write Pointer (16-bit) */
-pub const HDA_REG_RINTCNT: usize   = 0x5A; /* Response Interrupt Count (16-bit) */
-pub const HDA_REG_RIRBCTL: usize   = 0x5C; /* Control (8-bit) */
-pub const HDA_REG_RIRBSTS: usize   = 0x5D; /* Status (8-bit) */
-pub const HDA_REG_RIRBSIZE: usize  = 0x5E; /* Size (8-bit) */
+pub const HDA_REG_RIRBWP: usize = 0x58; /* Write Pointer (16-bit) */
+pub const HDA_REG_RINTCNT: usize = 0x5A; /* Response Interrupt Count (16-bit) */
+pub const HDA_REG_RIRBCTL: usize = 0x5C; /* Control (8-bit) */
+pub const HDA_REG_RIRBSTS: usize = 0x5D; /* Status (8-bit) */
+pub const HDA_REG_RIRBSIZE: usize = 0x5E; /* Size (8-bit) */
 
 /* Stream Descriptor Registers (Stream 0 Output, offset 0x80 + 0 * 0x20) */
-pub const HDA_SD0_OFFSET: usize   = 0x80;
-pub const HDA_SD_CTL: usize       = 0x00; /* Stream Control (24-bit) */
-pub const HDA_SD_STS: usize       = 0x03; /* Stream Status (8-bit) */
-pub const HDA_SD_LPIB: usize      = 0x04; /* Link Position (32-bit) */
-pub const HDA_SD_CBL: usize       = 0x08; /* Cyclic Buffer Length (32-bit) */
-pub const HDA_SD_LVI: usize       = 0x0C; /* Last Valid Index (16-bit) */
-pub const HDA_SD_FIFOD: usize     = 0x10; /* FIFO Size (16-bit) */
-pub const HDA_SD_FMT: usize       = 0x12; /* Stream Format (16-bit) */
-pub const HDA_SD_BDPL: usize      = 0x18; /* BDL Base Lower (32-bit) */
-pub const HDA_SD_BDPU: usize      = 0x1C; /* BDL Base Upper (32-bit) */
+pub const HDA_SD0_OFFSET: usize = 0x80;
+pub const HDA_SD_CTL: usize = 0x00; /* Stream Control (24-bit) */
+pub const HDA_SD_STS: usize = 0x03; /* Stream Status (8-bit) */
+pub const HDA_SD_LPIB: usize = 0x04; /* Link Position (32-bit) */
+pub const HDA_SD_CBL: usize = 0x08; /* Cyclic Buffer Length (32-bit) */
+pub const HDA_SD_LVI: usize = 0x0C; /* Last Valid Index (16-bit) */
+pub const HDA_SD_FIFOD: usize = 0x10; /* FIFO Size (16-bit) */
+pub const HDA_SD_FMT: usize = 0x12; /* Stream Format (16-bit) */
+pub const HDA_SD_BDPL: usize = 0x18; /* BDL Base Lower (32-bit) */
+pub const HDA_SD_BDPU: usize = 0x1C; /* BDL Base Upper (32-bit) */
 
 /* Global Control Register Bits */
 pub const HDA_GCTL_CRST: u32 = 0x00000001; /* Controller Reset */
@@ -253,7 +253,8 @@ impl HdaController {
             self.bdl = bdl_ptr as *mut HdaBdlEntry;
             self.bdl_phys = bdl_phys;
 
-            let (buf_ptr, buf_phys) = alloc_coherent(HDA_DMA_BUFFER_SIZE).ok_or("Failed to alloc Audio DMA Buf")?;
+            let (buf_ptr, buf_phys) =
+                alloc_coherent(HDA_DMA_BUFFER_SIZE).ok_or("Failed to alloc Audio DMA Buf")?;
             self.audio_buf = buf_ptr;
             self.audio_buf_phys = buf_phys;
 
@@ -312,7 +313,8 @@ impl HdaController {
             return 0;
         }
 
-        let cmd = ((codec as u32) << 28) | ((nid as u32) << 20) | ((verb as u32) << 8) | (payload as u32);
+        let cmd =
+            ((codec as u32) << 28) | ((nid as u32) << 20) | ((verb as u32) << 8) | (payload as u32);
 
         unsafe {
             // Next write pointer
@@ -350,28 +352,31 @@ pub static HDA: Spinlock<HdaController> = Spinlock::new(HdaController::new());
 
 pub fn init() {
     // Scan PCI for Intel HDA Controller (8086:2668 or Audio Multimedia Class 04:03)
-    let dev = find_device(HDA_VENDOR_INTEL, HDA_DEV_ICH6)
-        .or_else(|| {
-            let mut match_dev = None;
-            crate::drivers::pci::for_each_device(|pci_dev| {
-                if pci_dev.class_id == 0x04 && pci_dev.subclass_id == 0x03 {
-                    match_dev = Some(*pci_dev);
-                }
-            });
-            match_dev
+    let dev = find_device(HDA_VENDOR_INTEL, HDA_DEV_ICH6).or_else(|| {
+        let mut match_dev = None;
+        crate::drivers::pci::for_each_device(|pci_dev| {
+            if pci_dev.class_id == 0x04 && pci_dev.subclass_id == 0x03 {
+                match_dev = Some(*pci_dev);
+            }
         });
+        match_dev
+    });
 
     if let Some(pci_dev) = dev {
         let bar0 = (pci_dev.bar0 & !0xF) as u64;
         let _ = crate::mm::vmm::map_mmio_range(bar0, 16384);
         let mut hda = HDA.lock();
         if hda.init_hw(bar0).is_ok() {
-            crate::drivers::serial::print("Audio: Intel High Definition Audio initialized (Codecs: ");
+            crate::drivers::serial::print(
+                "Audio: Intel High Definition Audio initialized (Codecs: ",
+            );
             crate::drivers::serial::print_u64(hda.num_codecs as u64);
             crate::drivers::serial::println(", CORB/RIRB DMA Rings Online, 44.1kHz 16-bit Stereo)");
         }
     } else {
-        crate::drivers::serial::println("Audio: Intel HDA Controller not detected on PCI bus (fallback AC97 ready)");
+        crate::drivers::serial::println(
+            "Audio: Intel HDA Controller not detected on PCI bus (fallback AC97 ready)",
+        );
     }
 }
 
