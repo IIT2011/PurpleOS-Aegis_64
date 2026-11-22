@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Authentic VideoLAN VLC Media Player - Pure Rust Application for PurpleOS.
+//! Authentic VideoLAN VLC Media Player - Pure Rust Application for PurpleOS with Hardware Acceleration.
 
 mod ui;
 
@@ -8,11 +8,12 @@ use vlccore::aout::AudioOutput;
 use vlccore::block::Block;
 use vlccore::es::AudioFormat;
 use vlccore::fourcc::VLC_CODEC_S16L;
+use vlccore::hw_accel::{HardwareAccelerator, HwAccelType};
 use vlccore::player::VlcPlayer;
 use vlccore::tick::VlcTick;
 use vlc_codec::PcmDecoder;
 use vlc_demux::RawAudDemuxer;
-use vlc_platform_purple::{PurpleAudioOutput, PurpleVideoOutput, PurpleWindow};
+use vlc_platform_purple::{PurpleAudioOutput, PurpleHardwareAccelerator, PurpleVideoOutput, PurpleWindow};
 
 fn generate_synthetic_audio(samples: usize, phase: &mut f32) -> (Vec<u8>, Vec<i16>) {
     let mut raw = Vec::with_capacity(samples * 4);
@@ -57,6 +58,17 @@ fn main() {
     let vout = PurpleVideoOutput::new(window.clone());
     let ui = VlcUi::new(width, height);
 
+    // Hardware acceleration discovery & probe
+    let hw_accel = PurpleHardwareAccelerator::probe();
+    let mut hw_enabled = hw_accel.accel_type().is_hardware();
+    let hw_desc = match hw_accel.accel_type() {
+        HwAccelType::IntelIgd => "INTEL IGD",
+        HwAccelType::AmdRadeon => "AMD RADEON",
+        HwAccelType::NvidiaNvgd => "NVIDIA 3D",
+        HwAccelType::Purple2DBlit => "GPU 2D BLIT",
+        HwAccelType::None => "OFF",
+    };
+
     let mut player = VlcPlayer::new(Box::new(aout), Box::new(vout));
     player.set_length(VlcTick::from_sec(214)); // 3:34 length track
     let _ = player.play();
@@ -78,6 +90,13 @@ fn main() {
                     let py = evt.p2;
                     let bar_y = height - 60;
 
+                    // Toggle HW Acceleration badge click
+                    let badge_w = 175u32;
+                    let badge_x = width.saturating_sub(badge_w + 12);
+                    if px >= badge_x && px <= badge_x + badge_w && py >= 9 && py <= 27 {
+                        hw_enabled = !hw_enabled;
+                    }
+
                     // Play/Pause button
                     if px >= 30 && px <= 58 && py >= bar_y + 24 && py <= bar_y + 52 {
                         let _ = player.toggle_pause();
@@ -94,6 +113,12 @@ fn main() {
                     if py >= bar_y + 30 && py <= bar_y + 46 && px >= vol_x && px <= vol_x + 100 {
                         let v = ((px - vol_x) as f32 / 100.0) * 2.0;
                         let _ = player.set_volume(v);
+                    }
+                }
+                3 => {
+                    // Key press: 'H' or 'h' toggles hardware acceleration
+                    if evt.p1 == b'h' as u32 || evt.p1 == b'H' as u32 {
+                        hw_enabled = !hw_enabled;
                     }
                 }
                 _ => {}
@@ -120,7 +145,7 @@ fn main() {
             }
         }
 
-        // Render UI frame
+        // Render UI frame with hardware acceleration info
         window.with_buffer_mut(|buf| {
             ui.render_frame(
                 buf,
@@ -129,6 +154,8 @@ fn main() {
                 player.volume(),
                 player.time().to_ms(),
                 &pcm_vis,
+                hw_enabled,
+                hw_desc,
             );
         });
 

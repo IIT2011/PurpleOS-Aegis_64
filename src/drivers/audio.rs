@@ -76,9 +76,12 @@ pub struct HdaBdlEntry {
 
 pub struct HdaController {
     pub mmio_base: usize,
+    pub stream_base: usize,
     pub is_ready: bool,
+    pub is_streaming: bool,
     pub num_codecs: u8,
     pub volume: u8,
+    pub write_pos: usize,
     corb: *mut u32,
     corb_phys: u64,
     corb_wp: u16,
@@ -98,9 +101,12 @@ impl HdaController {
     pub const fn new() -> Self {
         Self {
             mmio_base: 0,
+            stream_base: 0,
             is_ready: false,
+            is_streaming: false,
             num_codecs: 0,
             volume: 80,
+            write_pos: 0,
             corb: core::ptr::null_mut(),
             corb_phys: 0,
             corb_wp: 0,
@@ -242,8 +248,11 @@ impl HdaController {
             // Reset RIRB read pointer
             self.rirb_rp = 0;
 
-            // Set Interrupt Count (1 response per interrupt)
-            self.write16(HDA_REG_RINTCNT, 1);
+            // Set Interrupt Count to maximum (255) so QEMU does not stall CORB processing
+            self.write16(HDA_REG_RINTCNT, 255);
+
+            // Clear RIRB status
+            self.write8(HDA_REG_RIRBSTS, 0x05);
 
             // Start RIRB DMA engine (RIRBDMAEN = bit 1)
             self.write8(HDA_REG_RIRBCTL, 0x02);
@@ -269,8 +278,12 @@ impl HdaController {
             (*e1).length = 32768;
             (*e1).ioc = 1;
 
-            // Configure Stream 0
-            let stream_base = self.mmio_base + HDA_SD0_OFFSET;
+            // Determine output stream offset from GCAP (skip input streams)
+            let gcap = self.read16(HDA_REG_GCAP);
+            let num_iss = ((gcap >> 8) & 0x0F) as usize;
+            let stream_base = self.mmio_base + HDA_SD0_OFFSET + (num_iss * 0x20);
+            self.stream_base = stream_base;
+
             let ctl_ptr = (stream_base + HDA_SD_CTL) as *mut u32;
             let cbl_ptr = (stream_base + HDA_SD_CBL) as *mut u32;
             let lvi_ptr = (stream_base + HDA_SD_LVI) as *mut u16;
@@ -301,22 +314,47 @@ impl HdaController {
             // Set format: 44.1 kHz, 16-bit, 2 channels (Stereo)
             // Bit 14: base rate (0 = 48kHz, 1 = 44.1kHz), bits 6:4: bits (001 = 16-bit), bits 3:0: channels (1 = 2 channels)
             core::ptr::write_volatile(fmt_ptr, (1 << 14) | (1 << 4) | 1);
+
+            // Zero out DMA buffer
+            core::ptr::write_bytes(self.audio_buf, 0, HDA_DMA_BUFFER_SIZE);
         }
 
         self.is_ready = true;
+
+        // Configure Codec 0 Nodes:
+        let gain = (self.volume as u16 * 127) / 100;
+        // 1. Node 1: Audio Function Group (AFG) - Power State D0 (active)
+        self.send_verb(0, 1, 0x705, 0x00);
+
+        // 2. Node 2: Audio Output Converter (DAC) - Power State D0
+        self.send_verb(0, 2, 0x705, 0x00);
+        // Set Converter Format: 44.1kHz, 16-bit, Stereo
+        self.send_verb16(0, 2, 0x2, (1 << 14) | (1 << 4) | 1);
+        // Set Converter Stream/Channel: Stream Tag 1, Channel 0
+        self.send_verb(0, 2, 0x706, 0x10);
+        // Set Amp Gain: Unmute, Max Gain (127) on Left + Right (0x3B0)
+        self.send_verb(0, 2, 0x3B0, gain as u8);
+
+        // 3. Node 3: Audio Output Pin Complex - Power State D0
+        self.send_verb(0, 3, 0x705, 0x00);
+        // Set Pin Widget Control: Output Enable (0x40) + Headphone Amp Enable (0x80)
+        self.send_verb(0, 3, 0x707, 0xC0);
+        // Set Amp Gain: Unmute, Max Gain (127) on Left + Right (0x3B0)
+        self.send_verb(0, 3, 0x3B0, gain as u8);
+
         Ok(())
     }
 
-    /// Send a 32-bit verb to codec and wait for 64-bit response
-    pub fn send_verb(&mut self, codec: u8, nid: u8, verb: u16, payload: u8) -> u64 {
-        if !self.is_ready || self.corb.is_null() || self.rirb.is_null() {
+    /// Send a 32-bit raw verb and wait for 64-bit response
+    pub fn send_verb_raw(&mut self, cmd: u32) -> u64 {
+        if self.corb.is_null() || self.rirb.is_null() {
             return 0;
         }
 
-        let cmd =
-            ((codec as u32) << 28) | ((nid as u32) << 20) | ((verb as u32) << 8) | (payload as u32);
-
         unsafe {
+            // Clear any pending RIRB status flags before sending
+            self.write8(HDA_REG_RIRBSTS, 0x05);
+
             // Next write pointer
             let wp = (self.corb_wp + 1) % (CORB_ENTRIES as u16);
             *self.corb.add(wp as usize) = cmd;
@@ -324,12 +362,15 @@ impl HdaController {
             self.corb_wp = wp;
 
             // Wait for response in RIRB
-            let mut timeout = 10000;
+            let mut timeout = 20000;
             while timeout > 0 {
                 let rirb_wp = self.read16(HDA_REG_RIRBWP) & 0x00FF;
                 if rirb_wp != self.rirb_rp {
                     self.rirb_rp = (self.rirb_rp + 1) % (RIRB_ENTRIES as u16);
                     let resp = *self.rirb.add(self.rirb_rp as usize);
+                    // Clear RIRB status (RINTFL / RIRBOIS) and refresh RINTCNT so hardware accepts next response
+                    self.write8(HDA_REG_RIRBSTS, 0x05);
+                    self.write16(HDA_REG_RINTCNT, 255);
                     return resp;
                 }
                 timeout -= 1;
@@ -339,12 +380,86 @@ impl HdaController {
         0
     }
 
+    /// Send a 12-bit verb with 8-bit payload
+    pub fn send_verb(&mut self, codec: u8, nid: u8, verb: u16, payload: u8) -> u64 {
+        let cmd =
+            ((codec as u32) << 28) | ((nid as u32) << 20) | ((verb as u32) << 8) | (payload as u32);
+        self.send_verb_raw(cmd)
+    }
+
+    /// Send a 4-bit verb with 16-bit payload (e.g. Set Converter Format 0x2)
+    pub fn send_verb16(&mut self, codec: u8, nid: u8, verb4: u8, payload16: u16) -> u64 {
+        let cmd = ((codec as u32) << 28)
+            | ((nid as u32) << 20)
+            | (((verb4 & 0x0F) as u32) << 16)
+            | (payload16 as u32);
+        self.send_verb_raw(cmd)
+    }
+
     pub fn set_volume(&mut self, vol: u8) {
         let clamped = vol.min(100);
         self.volume = clamped;
-        // Dispatch amplifier verb to Output Converter Node (NID 2, Set Amp Gain = 0x3A0)
         let gain = (clamped as u16 * 127) / 100;
-        self.send_verb(0, 2, 0x3A0, gain as u8);
+        // Dispatch amplifier verbs to DAC (Node 2) and Pin (Node 3)
+        self.send_verb(0, 2, 0x3B0, gain as u8);
+        self.send_verb(0, 3, 0x3B0, gain as u8);
+    }
+
+    pub fn start_stream(&mut self) {
+        if self.stream_base == 0 {
+            return;
+        }
+        unsafe {
+            let ctl_ptr = (self.stream_base + HDA_SD_CTL) as *mut u32;
+            let cur = core::ptr::read_volatile(ctl_ptr) & 0x00FFFFFF;
+            // Bits 23:20 = Stream Tag 1, Bit 2 = IOCE, Bit 1 = RUN
+            core::ptr::write_volatile(ctl_ptr, (cur & !(0x0F << 20)) | (1 << 20) | 0x06);
+        }
+        self.is_streaming = true;
+    }
+
+    pub fn stop_stream(&mut self) {
+        if self.stream_base == 0 {
+            return;
+        }
+        unsafe {
+            let ctl_ptr = (self.stream_base + HDA_SD_CTL) as *mut u32;
+            let cur = core::ptr::read_volatile(ctl_ptr) & 0x00FFFFFF;
+            core::ptr::write_volatile(ctl_ptr, cur & !0x02);
+        }
+        self.is_streaming = false;
+        self.write_pos = 0;
+    }
+
+    pub fn submit_pcm(&mut self, data: &[u8]) -> usize {
+        if !self.is_ready || self.audio_buf.is_null() {
+            return 0;
+        }
+        let len = data.len();
+        if len == 0 {
+            return 0;
+        }
+        let copy_len = len.min(HDA_DMA_BUFFER_SIZE);
+        let start_pos = self.write_pos;
+        if start_pos + copy_len <= HDA_DMA_BUFFER_SIZE {
+            unsafe {
+                core::ptr::copy_nonoverlapping(data.as_ptr(), self.audio_buf.add(start_pos), copy_len);
+            }
+        } else {
+            let first = HDA_DMA_BUFFER_SIZE - start_pos;
+            let second = copy_len - first;
+            unsafe {
+                core::ptr::copy_nonoverlapping(data.as_ptr(), self.audio_buf.add(start_pos), first);
+                core::ptr::copy_nonoverlapping(data.as_ptr().add(first), self.audio_buf, second);
+            }
+        }
+        self.write_pos = (self.write_pos + copy_len) % HDA_DMA_BUFFER_SIZE;
+
+        if !self.is_streaming {
+            self.start_stream();
+        }
+
+        copy_len
     }
 }
 
@@ -363,6 +478,8 @@ pub fn init() {
     });
 
     if let Some(pci_dev) = dev {
+        // Enable PCI Bus Mastering and Memory Space
+        crate::drivers::pci::enable_bus_mastering(pci_dev.bus, pci_dev.slot, pci_dev.func);
         let bar0 = (pci_dev.bar0 & !0xF) as u64;
         let _ = crate::mm::vmm::map_mmio_range(bar0, 16384);
         let mut hda = HDA.lock();
@@ -392,23 +509,27 @@ pub fn is_available() -> bool {
     HDA.lock().is_ready
 }
 
+pub fn is_streaming() -> bool {
+    HDA.lock().is_streaming
+}
+
+pub fn start_stream() {
+    HDA.lock().start_stream();
+}
+
+pub fn stop_stream() {
+    HDA.lock().stop_stream();
+}
+
 pub fn submit_pcm(data: &[u8]) -> usize {
-    let hda = HDA.lock();
-    if !hda.is_ready || hda.audio_buf.is_null() {
-        return 0;
-    }
-    let copy_len = data.len().min(HDA_DMA_BUFFER_SIZE);
-    unsafe {
-        core::ptr::copy_nonoverlapping(data.as_ptr(), hda.audio_buf, copy_len);
-    }
-    copy_len
+    HDA.lock().submit_pcm(data)
 }
 
 pub fn get_stream_position() -> u32 {
     let hda = HDA.lock();
-    if !hda.is_ready || hda.mmio_base == 0 {
+    if !hda.is_ready || hda.stream_base == 0 {
         return 0;
     }
-    let lpib_ptr = (hda.mmio_base + HDA_SD0_OFFSET + HDA_SD_LPIB) as *const u32;
+    let lpib_ptr = (hda.stream_base + HDA_SD_LPIB) as *const u32;
     unsafe { core::ptr::read_volatile(lpib_ptr) }
 }

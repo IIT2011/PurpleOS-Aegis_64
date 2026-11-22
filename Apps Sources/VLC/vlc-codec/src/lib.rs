@@ -5,8 +5,10 @@
 //! - Raw PCM / Float formats (`pcm`)
 
 pub mod pcm;
+pub mod hw_converter;
 
 pub use pcm::PcmDecoder;
+pub use hw_converter::{nv12_to_argb8888_hw, scale_bilinear_hw, yuv420p_to_argb8888_hw, yuv_to_argb};
 
 #[cfg(test)]
 mod tests {

@@ -4,7 +4,9 @@
 
 use std::sync::{Arc, Mutex};
 use vlccore::es::VideoFormat;
+use vlccore::hw_accel::HardwareAccelerator;
 use vlccore::vout::{VideoOutput, VideoPicture};
+use crate::accel::PurpleHardwareAccelerator;
 use crate::syscall::*;
 
 pub const PURPLE_GUI_WINDOW_NORMAL: u64 = 0;
@@ -120,15 +122,67 @@ impl PurpleWindow {
             inner.active = false;
         }
     }
+
+    pub fn hw_clear(&self, color: u32) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.frame_buffer.fill(color);
+        Ok(())
+    }
+
+    pub fn hw_fill_rect(&self, x: u32, y: u32, w: u32, h: u32, color: u32) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+        let width = inner.width;
+        let height = inner.height;
+        let x_end = (x + w).min(width);
+        let y_end = (y + h).min(height);
+        for cy in y..y_end {
+            let row = (cy * width) as usize;
+            for cx in x..x_end {
+                inner.frame_buffer[row + cx as usize] = color;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn hw_blit(&self, src: &[u32], src_pitch: u32, dst_x: u32, dst_y: u32, w: u32, h: u32) -> Result<usize, String> {
+        let mut inner = self.inner.lock().unwrap();
+        let width = inner.width as usize;
+        let height = inner.height as usize;
+        let copy_w = (w as usize).min(width.saturating_sub(dst_x as usize));
+        let copy_h = (h as usize).min(height.saturating_sub(dst_y as usize));
+        let src_stride = (src_pitch / 4) as usize;
+
+        for r in 0..copy_h {
+            let dst_row = (dst_y as usize + r) * width + (dst_x as usize);
+            let src_row = r * src_stride;
+            if src_row + copy_w <= src.len() && dst_row + copy_w <= inner.frame_buffer.len() {
+                inner.frame_buffer[dst_row..dst_row + copy_w]
+                    .copy_from_slice(&src[src_row..src_row + copy_w]);
+            }
+        }
+        Ok(copy_w * copy_h)
+    }
 }
 
 pub struct PurpleVideoOutput {
     window: PurpleWindow,
+    hw_accel: PurpleHardwareAccelerator,
 }
 
 impl PurpleVideoOutput {
     pub fn new(window: PurpleWindow) -> Self {
-        Self { window }
+        Self {
+            window,
+            hw_accel: PurpleHardwareAccelerator::probe(),
+        }
+    }
+
+    pub fn hw_accel(&self) -> &PurpleHardwareAccelerator {
+        &self.hw_accel
+    }
+
+    pub fn hw_accel_mut(&mut self) -> &mut PurpleHardwareAccelerator {
+        &mut self.hw_accel
     }
 }
 
@@ -136,6 +190,7 @@ impl VideoOutput for PurpleVideoOutput {
     fn open(&mut self, fmt: &VideoFormat) -> Result<(), String> {
         let _ = fmt;
         let _ = self.window.open()?;
+        self.hw_accel = PurpleHardwareAccelerator::probe();
         Ok(())
     }
 
@@ -144,8 +199,29 @@ impl VideoOutput for PurpleVideoOutput {
             let copy_w = self.window.width().min(pic.width) as usize;
             let copy_h = self.window.height().min(pic.height) as usize;
             let src_chunks = pic.data.chunks_exact(4);
-            for (dst, src) in buf.iter_mut().zip(src_chunks).take(copy_w * copy_h) {
-                *dst = u32::from_le_bytes([src[0], src[1], src[2], src[3]]);
+            let total_pixels = copy_w * copy_h;
+            let mut i = 0;
+            let mut src_iter = src_chunks;
+            while i + 4 <= total_pixels {
+                if let (Some(c0), Some(c1), Some(c2), Some(c3)) =
+                    (src_iter.next(), src_iter.next(), src_iter.next(), src_iter.next())
+                {
+                    buf[i] = u32::from_le_bytes([c0[0], c0[1], c0[2], c0[3]]);
+                    buf[i + 1] = u32::from_le_bytes([c1[0], c1[1], c1[2], c1[3]]);
+                    buf[i + 2] = u32::from_le_bytes([c2[0], c2[1], c2[2], c2[3]]);
+                    buf[i + 3] = u32::from_le_bytes([c3[0], c3[1], c3[2], c3[3]]);
+                    i += 4;
+                } else {
+                    break;
+                }
+            }
+            while i < total_pixels {
+                if let Some(c) = src_iter.next() {
+                    buf[i] = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                    i += 1;
+                } else {
+                    break;
+                }
             }
         });
         self.window.present()
@@ -157,5 +233,13 @@ impl VideoOutput for PurpleVideoOutput {
 
     fn close(&mut self) {
         self.window.close();
+    }
+
+    fn hw_accelerator(&self) -> Option<&dyn HardwareAccelerator> {
+        Some(&self.hw_accel)
+    }
+
+    fn hw_accelerator_mut(&mut self) -> Option<&mut dyn HardwareAccelerator> {
+        Some(&mut self.hw_accel)
     }
 }

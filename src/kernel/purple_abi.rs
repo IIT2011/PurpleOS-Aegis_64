@@ -803,22 +803,99 @@ pub fn dispatch_native_syscall(
             0
         }
 
-        SYS_PURPLE_GPU_SUBMIT_3D => -EOPNOTSUPP,
+        SYS_PURPLE_GPU_SUBMIT_3D => {
+            if !current_task_has_cap(PURPLE_CAP_DIRECT_GPU) {
+                return -EPERM;
+            }
+            let mut gpu_3d = crate::drivers::gpu_accel::GPU_3D.lock();
+            if !gpu_3d.is_ready {
+                return -ENODEV;
+            }
+            match a1 {
+                // Opcode 1: Intel draw triangles (a2 = vertex_count, a3 = start_vertex)
+                1 => match gpu_3d.intel_submit_draw_triangles(a2 as u32, a3 as u32) {
+                    Ok(()) => 0,
+                    Err(_) => -EINVAL,
+                },
+                // Opcode 2: AMD PM4 draw (a2 = index_count, a3 = is_32bit)
+                2 => match gpu_3d.amd_submit_pm4_draw(a2 as u32, a3 != 0) {
+                    Ok(()) => 0,
+                    Err(_) => -EINVAL,
+                },
+                // Opcode 3: NVIDIA Pushbuffer draw (a2 = vertex_count)
+                3 => match gpu_3d.nvgd_submit_pushbuffer_draw(a2 as u32) {
+                    Ok(()) => 0,
+                    Err(_) => -EINVAL,
+                },
+                // Opcode 4: Raw DWORD batch buffer stream (a2 = user_ptr, a3 = dword_count)
+                4 => {
+                    let count = a3 as usize;
+                    if count == 0 || count > 1024 {
+                        return -EINVAL;
+                    }
+                    let mut batch = [0u32; 256];
+                    let mut offset = 0usize;
+                    while offset < count {
+                        let chunk = (count - offset).min(batch.len());
+                        let user_src = match a2.checked_add((offset * 4) as u64) {
+                            Some(addr) => addr,
+                            None => return -EOVERFLOW,
+                        };
+                        let slice = unsafe {
+                            core::slice::from_raw_parts_mut(
+                                batch.as_mut_ptr() as *mut u8,
+                                chunk * 4,
+                            )
+                        };
+                        if let Err(e) = safe_copy_from_user(user_src, slice) {
+                            return e;
+                        }
+                        for i in 0..chunk {
+                            unsafe { gpu_3d.write_dword(batch[i]) };
+                        }
+                        offset += chunk;
+                    }
+                    gpu_3d.submitted_batches += 1;
+                    0
+                }
+                _ => -EINVAL,
+            }
+        }
 
         SYS_PURPLE_GPU_GET_CAPS => {
             let gpu = crate::drivers::gpu::GPU.lock();
-            let caps = PurpleGpuCaps {
-                vendor_id: gpu.vendor_id,
-                device_id: gpu.device_id,
-                flags: if gpu.is_ready { 0x01 } else { 0 }, // linear framebuffer only
-                max_texture_dim: 0,
-                vram_bytes: 0, // Total VRAM is not exposed by this driver.
-                name: [0; 32],
-            };
+            let gpu_3d = crate::drivers::gpu_accel::GPU_3D.lock();
+            let mut flags = if gpu.is_ready { 0x01 } else { 0 }; // 0x01: 2D linear framebuffer
+            let vendor_id;
+            let device_id;
+            let mut name = [0u8; 32];
+            if gpu_3d.is_ready {
+                flags |= 0x02; // 0x02: Hardware 3D Acceleration available
+                vendor_id = gpu_3d.vendor_id;
+                device_id = gpu_3d.device_id;
+                let drv_name: &[u8] = match gpu_3d.gpu_type {
+                    crate::drivers::gpu_accel::AccelGpuType::Igd => b"Intel igd 3D Accel",
+                    crate::drivers::gpu_accel::AccelGpuType::Radeongd => b"AMD radeongd 3D Accel",
+                    crate::drivers::gpu_accel::AccelGpuType::Nvgd => b"NVIDIA nvgd 3D Accel",
+                    _ => b"PurpleOS Hardware 3D",
+                };
+                name[..drv_name.len()].copy_from_slice(drv_name);
+            } else {
+                vendor_id = gpu.vendor_id;
+                device_id = gpu.device_id;
+                let dev_name = b"PurpleOS framebuffer";
+                name[..dev_name.len()].copy_from_slice(dev_name);
+            }
+            drop(gpu_3d);
             drop(gpu);
-            let mut caps = caps;
-            let dev_name = b"PurpleOS framebuffer";
-            caps.name[..dev_name.len()].copy_from_slice(dev_name);
+            let caps = PurpleGpuCaps {
+                vendor_id,
+                device_id,
+                flags,
+                max_texture_dim: 4096,
+                vram_bytes: 16 * 1024 * 1024,
+                name,
+            };
             let slice = unsafe {
                 core::slice::from_raw_parts(
                     &caps as *const PurpleGpuCaps as *const u8,
@@ -862,9 +939,28 @@ pub fn dispatch_native_syscall(
             }
         }
 
-        SYS_PURPLE_AUDIO_STREAM_START | SYS_PURPLE_AUDIO_STREAM_STOP => 0,
+        SYS_PURPLE_AUDIO_STREAM_START => {
+            if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
+                return -EPERM;
+            }
+            crate::drivers::serial::println("ABI: SYS_PURPLE_AUDIO_STREAM_START invoked");
+            crate::drivers::audio::start_stream();
+            0
+        }
+
+        SYS_PURPLE_AUDIO_STREAM_STOP => {
+            if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
+                return -EPERM;
+            }
+            crate::drivers::serial::println("ABI: SYS_PURPLE_AUDIO_STREAM_STOP invoked");
+            crate::drivers::audio::stop_stream();
+            0
+        }
 
         SYS_PURPLE_AUDIO_SUBMIT_PCM => {
+            if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {
+                return -EPERM;
+            }
             let buf_ptr = a1;
             let len = a2 as usize;
             if len == 0 {
@@ -876,7 +972,7 @@ pub fn dispatch_native_syscall(
             let chunk_len = len.min(crate::drivers::audio::HDA_DMA_BUFFER_SIZE);
             let user_slice = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, chunk_len) };
             crate::drivers::audio::submit_pcm(user_slice) as i64
-        },
+        }
 
         SYS_PURPLE_AUDIO_SET_VOLUME => {
             if !current_task_has_cap(PURPLE_CAP_DIRECT_AUDIO) {

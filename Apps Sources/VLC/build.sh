@@ -62,7 +62,9 @@ if [[ -f "$PACKER" && -f "$PUBLISHER_KEY" ]]; then
         --height 480 \
         --priority 2 \
         --key "$PUBLISHER_KEY"
+    cp -f "$OUT_DIR/vlc.apapplication" "$PURPLE_OS_ROOT/build/applications/vlc.apapplication"
     echo "==> Successfully built signed bundle: $OUT_DIR/vlc.apapplication"
+    echo "==> Staged to $PURPLE_OS_ROOT/build/applications/vlc.apapplication"
 else
     echo "Warning: Skipping .apapplication packaging (packer or key missing)." >&2
 fi

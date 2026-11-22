@@ -6,6 +6,7 @@
 
 use super::blend::{frost_backdrop, interpolate_color, scale_alpha};
 use super::cursor::Cursor;
+use super::icons::{shell_icon, ShellIcon};
 use super::surface::{Rect, Surface};
 use super::window::Window;
 use crate::drivers::font::{self, FontWeight, DESKTOP_HEIGHT};
@@ -24,38 +25,23 @@ pub const DOCK_ICON_SIZE: usize = 40;
 pub const DOCK_ICON_SPACING: usize = 12;
 pub const DOCK_PADDING_H: usize = 18;
 pub const DOCK_HEIGHT: usize = 62;
-pub const BAR_HEIGHT: usize = 38;
+pub const BAR_HEIGHT: usize = 28;
 pub const ANIMATION_HZ: u64 = 60;
 pub const DOCK_LIFT: u8 = 8;
 const EDGE_MARGIN: usize = 20;
-const BAR_REST_Y: i32 = 12;
 const BAR_ENTRANCE_TICKS: u64 = ANIMATION_HZ / 3;
-const LOGO_SIZE: usize = 28;
-const LOGO_INSET: i32 = 8;
-const TRAY_WIDTH: usize = 132;
+const LOGO_SIZE: usize = 20;
+const TRAY_WIDTH: usize = 240;
 const REFLECTION_HEIGHT: usize = 18;
 const DOCK_WIDTH: usize =
     DOCK_PADDING_H * 2 + DOCK_NUM_ICONS * DOCK_ICON_SIZE + (DOCK_NUM_ICONS - 1) * DOCK_ICON_SPACING;
 
-fn bar_rect(width: usize, tick: u64) -> Rect {
-    let margin = EDGE_MARGIN.min(width / 10);
-    let remaining = BAR_ENTRANCE_TICKS.saturating_sub(tick);
-    let offset = remaining.pow(2) * BAR_REST_Y as u64 / BAR_ENTRANCE_TICKS.pow(2);
-    Rect::new(
-        margin as i32,
-        BAR_REST_Y - offset as i32,
-        width - margin * 2,
-        BAR_HEIGHT,
-    )
+fn bar_rect(width: usize, _tick: u64) -> Rect {
+    Rect::new(0, 0, width, BAR_HEIGHT)
 }
 
-fn logo_rect(bar: Rect) -> Rect {
-    Rect::new(
-        bar.x + LOGO_INSET,
-        bar.y + (bar.h - LOGO_SIZE) as i32 / 2,
-        LOGO_SIZE,
-        LOGO_SIZE,
-    )
+fn logo_rect(_bar: Rect) -> Rect {
+    Rect::new(0, 0, 40, BAR_HEIGHT)
 }
 
 fn dock_rect(width: usize, height: usize) -> Option<Rect> {
@@ -85,8 +71,7 @@ fn dock_icon(dock: Rect, index: usize, lift: u8) -> Rect {
 
 /// Areas that can change when only desktop chrome is visible.
 pub fn animated_regions(width: usize, height: usize) -> [Rect; 2] {
-    let bar = bar_rect(width, 0);
-    let top = Rect::new(bar.x, 0, bar.w, BAR_HEIGHT + BAR_REST_Y as usize);
+    let top = Rect::new(0, 0, width, BAR_HEIGHT);
     let bottom = dock_rect(width, height).map_or(Rect::new(0, 0, 0, 0), |dock| {
         let margin = 2;
         let label_margin = 72;
@@ -217,155 +202,151 @@ fn render_dock_reflection(target: &mut Surface, dock_rect: Rect) {
     }
 }
 
-/// Render the refined Purple Bar across the top of the display with slick animations
-fn render_purple_bar(target: &mut Surface, anim_tick: u64) {
+/// Render the macOS-style Global Application Bar across the top of the display
+fn render_purple_bar(target: &mut Surface, anim_tick: u64, active_app: Option<&str>) {
     if !target.is_valid()
         || target.width < LOGO_SIZE + EDGE_MARGIN * 2
-        || target.height < BAR_HEIGHT + BAR_REST_Y as usize
+        || target.height < BAR_HEIGHT
     {
         return;
     }
 
     let bar = bar_rect(target.width, anim_tick);
-    let (bar_x, bar_y, bar_w, bar_h) = (bar.x, bar.y, bar.w, bar.h);
 
-    // 2. Frosted glass panel with specular top edge and subtle border
-    frost_backdrop(target, bar, 12);
-    render_rounded_glass_rect(
-        target,
-        bar_x,
-        bar_y,
-        bar_w,
-        bar_h,
-        12,
-        COLOR_GLASS_BASE,
-        COLOR_GLASS_BORDER,
-    );
+    // 1. Frosted acrylic glass panel spanning x = 0..target.width, y = 0..BAR_HEIGHT
+    frost_backdrop(target, bar, 8);
+    for py in 0..BAR_HEIGHT {
+        let y = py;
+        let border_tint = if y == 0 {
+            0x20FFFFFF // Subtle specular sheen line at top
+        } else if y == BAR_HEIGHT - 1 {
+            0x408C67C8 // Crisp bottom separator border
+        } else {
+            0x00000000
+        };
+        for px in 0..target.width {
+            target.blend_pixel(px, y, 0xDC120824); // Frosted dark amethyst/acrylic
+            if border_tint != 0 {
+                target.blend_pixel(px, y, border_tint);
+            }
+        }
+    }
 
-    let logo = logo_rect(bar);
-    render_rounded_glass_rect(
-        target, logo.x, logo.y, logo.w, logo.h, 7, 0xEE201132, 0x807C59AE,
-    );
-    let mark_inset = (logo.w as i32 - super::icons::PURPLE_MARK_SIZE as i32) / 2;
-    super::icons::render_purple_mark(target, logo.x + mark_inset, logo.y + mark_inset);
+    // 2. Purple OS mark (macOS Apple logo equivalent) at x = 10, y = 3
+    super::icons::render_purple_mark(target, 10, 3);
 
-    // 5. Center Region: Clean Centered Digital Clock Capsule (No green dot)
+    // 3. Active Application Title & Menus in System Font (Inter)
+    let app_name = match active_app {
+        Some(title) if title.contains("VLC") || title.contains("vlc") => "VLC",
+        Some(title) if title.contains("Terminal") => "Terminal",
+        Some(title) if title.contains("Files") => "Files",
+        Some(title) if title.contains("Monitor") || title.contains("Resources") => "Activity Monitor",
+        Some(title) if title.contains("Settings") => "Settings",
+        Some(title) if !title.is_empty() => title,
+        _ => "Finder",
+    };
+
+    let menus: &[&str] = match app_name {
+        "VLC" => &["Media", "Playback", "Audio", "Video", "Subtitle", "Tools", "View", "Help"],
+        "Terminal" => &["Shell", "Edit", "View", "Window", "Help"],
+        "Files" => &["File", "Edit", "View", "Go", "Window", "Help"],
+        "Activity Monitor" => &["File", "Edit", "View", "Window", "Help"],
+        _ => &["File", "Edit", "View", "Go", "Window", "Help"],
+    };
+
+    let text_y = (BAR_HEIGHT.saturating_sub(font::DESKTOP_HEIGHT)) / 2; // (28 - 20) / 2 = 4
+    let mut cur_x = 42;
+
+    // Draw Active App Name in BOLD Inter
+    target.draw_text_bold(cur_x, text_y, app_name, COLOR_TEXT_PRIMARY, 0, true);
+    cur_x += font::text_width(app_name, FontWeight::Bold) + 18;
+
+    // Draw Menu Items in REGULAR Inter
+    let max_menu_x = target.width.saturating_sub(240);
+    for &item in menus {
+        let item_w = font::text_width(item, FontWeight::Regular);
+        if cur_x + item_w > max_menu_x {
+            break;
+        }
+        target.draw_text(cur_x, text_y, item, 0xFFE2E8F0, 0, true);
+        cur_x += item_w + 16;
+    }
+
+    // 4. Right Side macOS Status Items (Clock, Control Center, Battery, Volume, WiFi)
+    let mut right_x = target.width as i32 - 12;
+
+    // 4a. Digital Clock: "Sat 21 Nov 13:10"
     let time = crate::drivers::rtc::get_time();
     let dow = day_of_week(time.year, time.month, time.day);
     let mon = month_name(time.month);
 
     let mut clock_buf = [0u8; 32];
     let mut len = 0;
-
-    for b in dow.bytes() {
-        clock_buf[len] = b;
-        len += 1;
-    }
-    clock_buf[len] = b' ';
-    len += 1;
-    for b in mon.bytes() {
-        clock_buf[len] = b;
-        len += 1;
-    }
-    clock_buf[len] = b' ';
-    len += 1;
-
-    if time.day >= 10 {
-        clock_buf[len] = b'0' + (time.day / 10);
-        len += 1;
-    }
-    clock_buf[len] = b'0' + (time.day % 10);
-    len += 1;
-    clock_buf[len] = b' ';
-    len += 1;
-    clock_buf[len] = b' ';
-    len += 1;
+    for b in dow.bytes() { clock_buf[len] = b; len += 1; }
+    clock_buf[len] = b' '; len += 1;
+    if time.day >= 10 { clock_buf[len] = b'0' + (time.day / 10); len += 1; }
+    clock_buf[len] = b'0' + (time.day % 10); len += 1;
+    clock_buf[len] = b' '; len += 1;
+    for b in mon.bytes() { clock_buf[len] = b; len += 1; }
+    clock_buf[len] = b' '; len += 1;
+    clock_buf[len] = b' '; len += 1;
 
     let colon_idx = len + 2;
-    clock_buf[len] = b'0' + (time.hour / 10) % 10;
-    len += 1;
-    clock_buf[len] = b'0' + (time.hour % 10);
-    len += 1;
-    clock_buf[len] = b':';
-    len += 1;
-    clock_buf[len] = b'0' + (time.minute / 10) % 10;
-    len += 1;
-    clock_buf[len] = b'0' + (time.minute % 10);
-    len += 1;
+    clock_buf[len] = b'0' + (time.hour / 10) % 10; len += 1;
+    clock_buf[len] = b'0' + (time.hour % 10); len += 1;
+    clock_buf[len] = b':'; len += 1;
+    clock_buf[len] = b'0' + (time.minute / 10) % 10; len += 1;
+    clock_buf[len] = b'0' + (time.minute % 10); len += 1;
 
     let full_text = core::str::from_utf8(&clock_buf[..len]).unwrap_or("");
-    let text_w = font::text_width(full_text, FontWeight::Bold);
-    let pill_pad = EDGE_MARGIN;
-    let pill_w = text_w + pill_pad * 2;
-    let pill_h = DESKTOP_HEIGHT + 10;
-    let pill_x = bar_x + (bar_w as i32 - pill_w as i32) / 2;
-    let pill_y = bar_y + (bar_h - pill_h) as i32 / 2;
-    let tray = tray_rect(bar);
-    let show_tray = tray.x >= logo.right() + LOGO_INSET;
+    let clock_w = font::text_width(full_text, FontWeight::Regular) as i32;
+    right_x -= clock_w;
+    let clock_x = right_x;
 
-    if pill_x >= logo.right() + LOGO_INSET
-        && (!show_tray || pill_x + pill_w as i32 + LOGO_INSET <= tray.x)
-    {
-        render_rounded_glass_rect(
-            target,
-            pill_x,
-            pill_y,
-            pill_w,
-            pill_h,
-            pill_h / 2,
-            0x90110722,
-            0x40A855F7,
-        );
-        let clock_text_x = pill_x as usize + pill_pad;
-        let clock_text_y = pill_y as usize + (pill_h - DESKTOP_HEIGHT) / 2;
-        let blink = (anim_tick / (ANIMATION_HZ / 2)) % 2 != 0;
-        if blink && !full_text.is_empty() {
-            let prefix = &full_text[..colon_idx];
-            let colon_end = font::text_width(&full_text[..colon_idx + 1], FontWeight::Bold);
-            target.draw_text_bold(
-                clock_text_x,
-                clock_text_y,
-                prefix,
-                COLOR_TEXT_PRIMARY,
-                0,
-                true,
-            );
-            target.draw_text_bold(
-                clock_text_x + colon_end,
-                clock_text_y,
-                &full_text[colon_idx + 1..],
-                COLOR_TEXT_PRIMARY,
-                0,
-                true,
-            );
-        } else {
-            target.draw_text_bold(
-                clock_text_x,
-                clock_text_y,
-                full_text,
-                COLOR_TEXT_PRIMARY,
-                0,
-                true,
-            );
-        }
+    let blink = (anim_tick / (ANIMATION_HZ / 2)) % 2 != 0;
+    if blink && !full_text.is_empty() && colon_idx < full_text.len() {
+        let prefix = &full_text[..colon_idx];
+        let colon_end = font::text_width(&full_text[..colon_idx + 1], FontWeight::Regular);
+        target.draw_text(clock_x as usize, text_y, prefix, COLOR_TEXT_PRIMARY, 0, true);
+        target.draw_text(clock_x as usize + colon_end, text_y, &full_text[colon_idx + 1..], COLOR_TEXT_PRIMARY, 0, true);
+    } else {
+        target.draw_text(clock_x as usize, text_y, full_text, COLOR_TEXT_PRIMARY, 0, true);
     }
 
-    if show_tray {
-        tile(target, tray, false, 0xB821162E);
-        let network = if network_ready() {
-            0xFF89BAFF
-        } else {
-            COLOR_TEXT_MUTED
-        };
-        for (icon, offset, color) in [
-            (ShellIcon::Wifi, 9, network),
-            (ShellIcon::Bluetooth, 39, COLOR_TEXT_MUTED),
-            (ShellIcon::Power, 69, COLOR_TEXT_PRIMARY),
-            (ShellIcon::Chevron, 101, COLOR_TEXT_MUTED),
-        ] {
-            shell_icon(target, icon, tray.x + offset, tray.y + 6, 18, color);
+    // 4b. Control Center Icon (Chevron)
+    right_x -= 22;
+    shell_icon(target, ShellIcon::Chevron, right_x, 5, 18, COLOR_TEXT_MUTED);
+
+    // 4c. Battery indicator (mini battery graphic at y = 9)
+    right_x -= 30;
+    let bat_y = (BAR_HEIGHT as i32 - 10) / 2;
+    for by in 0..10 {
+        let py = (bat_y + by) as usize;
+        for bx in 0..20 {
+            let px = (right_x + bx) as usize;
+            let is_border = by == 0 || by == 9 || bx == 0 || bx == 19;
+            let is_fill = bx >= 2 && bx <= 16 && by >= 2 && by <= 7;
+            if is_border {
+                target.blend_pixel(px, py, 0xA0E2E8F0);
+            } else if is_fill {
+                target.blend_pixel(px, py, 0xE034D399); // Crisp Emerald 100% battery
+            }
         }
     }
+    // Battery terminal nipple
+    for ny in 3..7 {
+        target.blend_pixel((right_x + 20) as usize, (bat_y + ny) as usize, 0xA0E2E8F0);
+    }
+
+    // 4d. Volume icon (16x16)
+    right_x -= 24;
+    let icon_y = (BAR_HEIGHT as i32 - 16) / 2;
+    super::icons::render_icon_mask(target, right_x, icon_y, &super::icons::ICON_VOLUME_FULL, COLOR_TEXT_PRIMARY);
+
+    // 4e. WiFi icon (16x16)
+    right_x -= 24;
+    let wifi_col = if network_ready() { 0xFF38BDF8 } else { COLOR_TEXT_MUTED };
+    super::icons::render_icon_mask(target, right_x, icon_y, &super::icons::ICON_WIFI_FULL, wifi_col);
 }
 
 /// Render the refined Purple Dock at the bottom of the screen
@@ -491,8 +472,9 @@ pub fn render_desktop_shell(
     lift: &[u8; DOCK_NUM_ICONS],
     open_apps: &[bool; DOCK_NUM_ICONS],
     cursor: &Cursor,
+    active_app: Option<&str>,
 ) {
-    render_purple_bar(target, tick);
+    render_purple_bar(target, tick, active_app);
     render_purple_dock(target, lift, open_apps, cursor);
 }
 
@@ -505,15 +487,11 @@ pub fn hit_test(
     tick: u64,
     lift: &[u8; DOCK_NUM_ICONS],
 ) -> DesktopAction {
-    if width >= LOGO_SIZE + EDGE_MARGIN * 2
-        && height >= BAR_HEIGHT + BAR_REST_Y as usize
-        && logo_rect(bar_rect(width, tick)).contains(x, y)
-    {
+    let bar = bar_rect(width, tick);
+    if logo_rect(bar).contains(x, y) {
         return DesktopAction::PurpleLogoClick;
     }
-    let bar = bar_rect(width, tick);
-    let tray = tray_rect(bar);
-    if tray.x >= logo_rect(bar).right() + LOGO_INSET && tray.contains(x, y) {
+    if tray_rect(bar).contains(x, y) {
         return DesktopAction::TrayClick;
     }
     if let Some(dock) = dock_rect(width, height) {
@@ -594,8 +572,6 @@ pub enum QuickItem {
     Resources,
 }
 
-use super::icons::{shell_icon, ShellIcon};
-
 const APPS: [(&str, ShellIcon, u32); DOCK_NUM_ICONS] = [
     ("Terminal", ShellIcon::Terminal, 0xFF63DFC9),
     ("Files", ShellIcon::Files, 0xFFFFC078),
@@ -648,16 +624,16 @@ fn network_ready() -> bool {
 
 fn tray_rect(bar: Rect) -> Rect {
     Rect::new(
-        bar.right() - TRAY_WIDTH as i32 - LOGO_INSET,
-        bar.y + 4,
+        bar.right() - TRAY_WIDTH as i32,
+        0,
         TRAY_WIDTH,
-        30,
+        BAR_HEIGHT,
     )
 }
 
 pub fn panel_region(width: usize, height: usize, panel: Panel) -> Rect {
     let bar = bar_rect(width, BAR_ENTRANCE_TICKS);
-    let y = bar.bottom() + 9;
+    let y = bar.bottom() + 4;
     let (w, h) = match panel {
         Panel::Closed => return Rect::new(0, 0, 0, 0),
         Panel::Applications(_) => (300, 314),
@@ -679,7 +655,7 @@ pub fn panel_region(width: usize, height: usize, panel: Panel) -> Rect {
         return Rect::new(0, 0, 0, 0);
     }
     match panel {
-        Panel::Applications(_) | Panel::AppError(_) => Rect::new(bar.x, y, w, h),
+        Panel::Applications(_) | Panel::AppError(_) => Rect::new(4, y, w, h),
         Panel::DockInfo(_) => {
             let bottom = DOCK_HEIGHT + REFLECTION_HEIGHT + h + 14;
             if height < y as usize + bottom {
@@ -687,7 +663,7 @@ pub fn panel_region(width: usize, height: usize, panel: Panel) -> Rect {
             }
             Rect::new(((width - w) / 2) as i32, (height - bottom) as i32, w, h)
         }
-        _ => Rect::new(bar.right() - w as i32, y, w, h),
+        _ => Rect::new(bar.right() - w as i32 - 4, y, w, h),
     }
 }
 

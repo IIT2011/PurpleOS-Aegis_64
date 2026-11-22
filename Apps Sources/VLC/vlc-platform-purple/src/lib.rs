@@ -4,6 +4,8 @@
 pub mod syscall;
 pub mod audio;
 pub mod video;
+pub mod accel;
 
 pub use audio::PurpleAudioOutput;
 pub use video::{GuiEvent, PurpleVideoOutput, PurpleWindow};
+pub use accel::PurpleHardwareAccelerator;

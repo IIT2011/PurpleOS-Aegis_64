@@ -33,6 +33,21 @@ pub trait VideoOutput: Send {
     fn display(&mut self, pic: &VideoPicture) -> Result<(), String>;
     fn set_fullscreen(&mut self, fs: bool) -> Result<(), String>;
     fn close(&mut self);
+
+    /// Optional reference to hardware accelerator
+    fn hw_accelerator(&self) -> Option<&dyn crate::hw_accel::HardwareAccelerator> {
+        None
+    }
+
+    /// Optional mutable reference to hardware accelerator
+    fn hw_accelerator_mut(&mut self) -> Option<&mut dyn crate::hw_accel::HardwareAccelerator> {
+        None
+    }
+
+    /// Check if video output is currently backed by hardware acceleration
+    fn is_hw_accelerated(&self) -> bool {
+        self.hw_accelerator().map(|a| a.is_active()).unwrap_or(false)
+    }
 }
 
 pub struct DummyVideoOutput {

@@ -9,6 +9,15 @@ pub const SYS_PURPLE_AUDIO_STREAM_STOP: u64  = 0x1022;
 pub const SYS_PURPLE_AUDIO_SUBMIT_PCM: u64   = 0x1023;
 pub const SYS_PURPLE_AUDIO_SET_VOLUME: u64   = 0x1024;
 
+pub const SYS_PURPLE_FB_GET_INFO: u64        = 0x1000;
+pub const SYS_PURPLE_GPU_PAGE_FLIP: u64      = 0x1003;
+pub const SYS_PURPLE_GPU_CLEAR: u64          = 0x1004;
+pub const SYS_PURPLE_GPU_RECT_FILL: u64      = 0x1005;
+pub const SYS_PURPLE_GPU_BLIT: u64           = 0x1006;
+pub const SYS_PURPLE_GPU_DRAW_LINE: u64      = 0x1007;
+pub const SYS_PURPLE_GPU_SUBMIT_3D: u64      = 0x1008;
+pub const SYS_PURPLE_GPU_GET_CAPS: u64       = 0x1009;
+
 pub const SYS_GUI_GET_METRICS: u64    = 0x1100;
 pub const SYS_GUI_CREATE_WINDOW: u64  = 0x1101;
 pub const SYS_GUI_RESIZE_WINDOW: u64  = 0x1102;
@@ -133,6 +142,61 @@ pub unsafe fn syscall4(n: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> i64 {
     #[cfg(not(target_arch = "x86_64"))]
     {
         let _ = (n, a1, a2, a3, a4);
+        0
+    }
+}
+
+#[inline(always)]
+pub unsafe fn syscall5(n: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> i64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let ret: i64;
+        core::arch::asm!(
+            "syscall",
+            in("rax") n,
+            in("rdi") a1,
+            in("rsi") a2,
+            in("rdx") a3,
+            in("r10") a4,
+            in("r8") a5,
+            lateout("rax") ret,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack)
+        );
+        ret
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (n, a1, a2, a3, a4, a5);
+        0
+    }
+}
+
+#[inline(always)]
+pub unsafe fn syscall6(n: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64) -> i64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let ret: i64;
+        core::arch::asm!(
+            "syscall",
+            in("rax") n,
+            in("rdi") a1,
+            in("rsi") a2,
+            in("rdx") a3,
+            in("r10") a4,
+            in("r8") a5,
+            in("r9") a6,
+            lateout("rax") ret,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack)
+        );
+        ret
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (n, a1, a2, a3, a4, a5, a6);
         0
     }
 }

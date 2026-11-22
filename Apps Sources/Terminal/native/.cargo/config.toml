@@ -1,0 +1,14 @@
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+rustflags = [
+    "-C", "link-arg=-T/data/data/com.termux/files/home/OS Development/OS/sdk/gui/purple_gui.ld",
+    "-C", "link-arg=-z", "-C", "link-arg=max-page-size=4096",
+    "-C", "relocation-model=static",
+    "-C", "code-model=large",
+]
+
+[unstable]
+build-std = ["core", "alloc", "compiler_builtins"]
+build-std-features = ["compiler-builtins-mem"]

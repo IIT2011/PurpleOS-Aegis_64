@@ -382,12 +382,12 @@ impl CompositorEngine {
     }
 
     fn work_area(&self) -> (i32, i32, usize, usize) {
-        let y = (desktop::BAR_HEIGHT + 12) as i32;
-        let bottom = (desktop::DOCK_HEIGHT + 30).min(self.height);
+        let y = desktop::BAR_HEIGHT as i32;
+        let bottom = (desktop::DOCK_HEIGHT + 24).min(self.height);
         (
-            8,
+            0,
             y,
-            self.width.saturating_sub(16),
+            self.width,
             self.height
                 .saturating_sub(y as usize)
                 .saturating_sub(bottom),
@@ -529,90 +529,98 @@ impl CompositorEngine {
             }
         }
 
-        if left_released {
+        if (buttons & 0x01) == 0 {
             self.dragging_window_id = None;
             self.resize_gesture = None;
         }
 
         if let Some(g) = self.resize_gesture {
-            let dx = x - g.x;
-            let dy = y - g.y;
-            let (mut nx, mut ny, mut nw, mut nh) = (g.wx, g.wy, g.ww as i32, g.wh as i32);
-            match g.edge {
-                ResizeEdge::North | ResizeEdge::NorthWest | ResizeEdge::NorthEast => {
-                    ny += dy;
-                    nh -= dy
+            if (buttons & 0x01) == 0 || !self.windows.iter().flatten().any(|w| w.id == g.id) {
+                self.resize_gesture = None;
+            } else {
+                let dx = x - g.x;
+                let dy = y - g.y;
+                let (mut nx, mut ny, mut nw, mut nh) = (g.wx, g.wy, g.ww as i32, g.wh as i32);
+                match g.edge {
+                    ResizeEdge::North | ResizeEdge::NorthWest | ResizeEdge::NorthEast => {
+                        ny += dy;
+                        nh -= dy
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-            match g.edge {
-                ResizeEdge::South | ResizeEdge::SouthWest | ResizeEdge::SouthEast => nh += dy,
-                _ => {}
-            }
-            match g.edge {
-                ResizeEdge::West | ResizeEdge::NorthWest | ResizeEdge::SouthWest => {
-                    nx += dx;
-                    nw -= dx
+                match g.edge {
+                    ResizeEdge::South | ResizeEdge::SouthWest | ResizeEdge::SouthEast => nh += dy,
+                    _ => {}
                 }
-                _ => {}
-            }
-            match g.edge {
-                ResizeEdge::East | ResizeEdge::NorthEast | ResizeEdge::SouthEast => nw += dx,
-                _ => {}
-            }
-            let (minw, minh) = (
-                window::MIN_CLIENT_WIDTH as i32,
-                window::MIN_CLIENT_HEIGHT as i32,
-            );
-            if nw < minw {
-                if nx != g.wx {
-                    nx = g.wx + g.ww as i32 - minw
+                match g.edge {
+                    ResizeEdge::West | ResizeEdge::NorthWest | ResizeEdge::SouthWest => {
+                        nx += dx;
+                        nw -= dx
+                    }
+                    _ => {}
                 }
-                nw = minw
-            }
-            if nh < minh {
-                if ny != g.wy {
-                    ny = g.wy + g.wh as i32 - minh
+                match g.edge {
+                    ResizeEdge::East | ResizeEdge::NorthEast | ResizeEdge::SouthEast => nw += dx,
+                    _ => {}
                 }
-                nh = minh
-            }
-            nx = nx.clamp(0, (self.width as i32 - nw - 2).max(0));
-            ny = ny.clamp(
-                0,
-                (self.height as i32 - nh - window::TITLEBAR_HEIGHT as i32 - 2).max(0),
-            );
-            if let Some(w) = self.get_window_mut(g.id) {
-                if w.resize_surface(nw as usize, nh as usize) {
-                    w.x = nx;
-                    w.y = ny;
-                    w.is_maximized = false;
-                    if w.owner.is_some() {
-                        w.client_event([client::EVENT_RESIZE, nw as u32, nh as u32, 0]);
+                let (minw, minh) = (
+                    window::MIN_CLIENT_WIDTH as i32,
+                    window::MIN_CLIENT_HEIGHT as i32,
+                );
+                if nw < minw {
+                    if nx != g.wx {
+                        nx = g.wx + g.ww as i32 - minw
+                    }
+                    nw = minw
+                }
+                if nh < minh {
+                    if ny != g.wy {
+                        ny = g.wy + g.wh as i32 - minh
+                    }
+                    nh = minh
+                }
+                nx = nx.clamp(0, (self.width as i32 - nw - 2).max(0));
+                ny = ny.clamp(
+                    0,
+                    (self.height as i32 - nh - window::TITLEBAR_HEIGHT as i32 - 2).max(0),
+                );
+                if let Some(w) = self.get_window_mut(g.id) {
+                    if w.resize_surface(nw as usize, nh as usize) {
+                        w.x = nx;
+                        w.y = ny;
+                        w.is_maximized = false;
+                        if w.owner.is_some() {
+                            w.client_event([client::EVENT_RESIZE, nw as u32, nh as u32, 0]);
+                        }
                     }
                 }
+                self.render_frame();
+                return;
             }
-            self.render_frame();
-            return;
         }
 
         // Handle window dragging in motion
         if let Some(drag_id) = self.dragging_window_id {
-            let new_x = x - self.drag_offset_x;
-            let new_y = y - self.drag_offset_y;
-            let (ax, ay, aw, ah) = self.work_area();
-            for win in self.windows.iter_mut().flatten() {
-                if win.id == drag_id {
-                    let maxx = (ax + aw as i32 - win.total_w() as i32).max(ax);
-                    let maxy = (ay + ah as i32 - win.total_h() as i32).max(ay);
-                    win.x = new_x.clamp(ax, maxx);
-                    win.y = new_y.clamp(ay, maxy);
-                    break;
+            if (buttons & 0x01) == 0 || !self.windows.iter().flatten().any(|w| w.id == drag_id) {
+                self.dragging_window_id = None;
+            } else {
+                let new_x = x - self.drag_offset_x;
+                let new_y = y - self.drag_offset_y;
+                let (ax, ay, aw, ah) = self.work_area();
+                for win in self.windows.iter_mut().flatten() {
+                    if win.id == drag_id {
+                        let maxx = (ax + aw as i32 - win.total_w() as i32).max(ax);
+                        let maxy = (ay + ah as i32 - win.total_h() as i32).max(ay);
+                        win.x = new_x.clamp(ax, maxx);
+                        win.y = new_y.clamp(ay, maxy);
+                        break;
+                    }
                 }
+                if self.running {
+                    self.render_frame();
+                }
+                return;
             }
-            if self.running {
-                self.render_frame();
-            }
-            return;
         }
 
         // Handle left click hit-testing
@@ -693,11 +701,16 @@ impl CompositorEngine {
 
                 match hit_area {
                     WindowHitArea::CloseButton => {
-                        if let Some(win) = self
-                            .get_window_mut(win_id)
-                            .filter(|win| win.owner.is_some())
-                        {
-                            win.client_event([client::EVENT_CLOSE, 0, 0, 0]);
+                        self.dragging_window_id = None;
+                        self.resize_gesture = None;
+                        if let Some(owner_id) = self.get_window_mut(win_id).and_then(|w| w.owner) {
+                            if crate::kernel::task::native_alive(owner_id) {
+                                if let Some(win) = self.get_window_mut(win_id) {
+                                    win.client_event([client::EVENT_CLOSE, 0, 0, 0]);
+                                }
+                            } else {
+                                self.close_window(win_id);
+                            }
                         } else {
                             self.close_window(win_id);
                         }
@@ -777,12 +790,19 @@ impl CompositorEngine {
             self.cursor.restore(&mut self.back_buffer);
             Wallpaper::restore_regions(&mut self.back_buffer, &[bar, dock, old_panel, panel]);
             let open_apps = desktop::dock_open_state(&self.windows);
+            let active_title = self
+                .windows
+                .iter()
+                .flatten()
+                .find(|w| w.is_focused && w.is_visible && !w.is_minimized)
+                .map(|w| w.title_str());
             desktop::render_desktop_shell(
                 &mut self.back_buffer,
                 tick,
                 &self.dock_lift,
                 &open_apps,
                 &self.cursor,
+                active_title,
             );
             desktop::render_panel(&mut self.back_buffer, self.panel, &self.cursor);
             self.cursor.draw(&mut self.back_buffer);
@@ -999,8 +1019,10 @@ pub fn service() {
         return;
     }
     let mut compositor = COMPOSITOR.lock();
+    let has_pointer = POINTER_EVENTS.lock().1 > 0;
     if !compositor.running
-        || (!compositor.client_frame_pending
+        || (!has_pointer
+            && !compositor.client_frame_pending
             && compositor.animation_tick() == compositor.rendered_tick)
     {
         return;
@@ -1011,6 +1033,7 @@ pub fn service() {
         queue.1 = 0;
         snapshot
     };
+    compositor.reap_client_windows();
     for &(x, y, buttons) in &events[..count] {
         compositor.handle_mouse_event(x, y, buttons);
     }

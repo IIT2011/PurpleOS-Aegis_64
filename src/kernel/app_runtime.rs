@@ -317,7 +317,22 @@ pub fn dispatch(
         return -posix::EPERM;
     }
     let result = match number {
-        crate::kernel::syscall::SYS_EXIT | crate::kernel::syscall::SYS_EXIT_GROUP => task::exit(),
+        crate::kernel::syscall::SYS_EXIT | crate::kernel::syscall::SYS_EXIT_GROUP => {
+            let mut engine = COMPOSITOR.lock();
+            let mut to_close = [0; crate::compositor::MAX_WINDOWS];
+            let mut count = 0;
+            for win in engine.windows.iter().flatten() {
+                if win.owner == Some(owner) {
+                    to_close[count] = win.id;
+                    count += 1;
+                }
+            }
+            for &id in &to_close[..count] {
+                engine.close_window(id);
+            }
+            drop(engine);
+            task::exit()
+        }
         crate::kernel::syscall::SYS_SCHED_YIELD => {
             task::yield_now();
             Ok(0)

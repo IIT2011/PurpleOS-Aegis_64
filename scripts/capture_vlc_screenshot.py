@@ -65,10 +65,17 @@ def main():
     print("  PURPLE OS / AEGIS64 — VLC MEDIA PLAYER SCREENSHOT CAPTURE      ")
     print("=================================================================")
 
+    os.chdir(os.path.join(os.path.dirname(__file__), ".."))
     disk_path = "build/purple_gpt.img"
-    if not os.path.exists(disk_path):
-        print(f"Creating disk at {disk_path}...")
-        subprocess.check_call([sys.executable, "build/mkpfs2_disk", disk_path])
+    wav_path = "build/purple_audio.wav"
+
+    print(f"Ensuring disk at {disk_path} with applications...")
+    subprocess.check_call([
+        sys.executable,
+        "build/mkpfs2_disk",
+        disk_path,
+        "--applications-dir", "build/applications"
+    ])
 
     qmp_port = 4488
     cmd = [
@@ -79,7 +86,11 @@ def main():
         "-m", "256M",
         "-smp", "4",
         "-drive", f"file={disk_path},format=raw,index=0,media=disk",
+        "-device", "intel-hda,id=hda0",
+        "-device", "hda-output,id=hda0.0,audiodev=snd0",
+        "-audiodev", f"wav,id=snd0,path={wav_path}",
         "-qmp", f"tcp:127.0.0.1:{qmp_port},server,nowait",
+        "-display", "none",
         "-no-reboot"
     ]
 
@@ -93,11 +104,14 @@ def main():
     )
 
     import threading
-    captured = []
+    captured_chunks = []
     def read_stdout():
-        for line in iter(proc.stdout.readline, ''):
-            captured.append(line)
-            sys.stdout.write(line)
+        while True:
+            ch = proc.stdout.read(1)
+            if not ch:
+                break
+            captured_chunks.append(ch)
+            sys.stdout.write(ch)
             sys.stdout.flush()
     t = threading.Thread(target=read_stdout, daemon=True)
     t.start()
@@ -123,44 +137,74 @@ def main():
     f.flush()
     f.readline()
 
-    print("QMP Connected. Waiting for kernel boot & shell prompt (12s)...")
-    for _ in range(30):
-        if any("aegis64@purple:~$" in l for l in captured):
+    print("QMP Connected. Waiting for kernel boot & shell prompt...")
+    start_wait = time.time()
+    shell_ready = False
+    while time.time() - start_wait < 25:
+        text = "".join(captured_chunks)
+        if "aegis64@purple:~$" in text or "Type 'help' for commands" in text:
+            shell_ready = True
             break
-        time.sleep(0.5)
+        time.sleep(0.2)
+
+    if not shell_ready:
+        print("[ERROR] AegisShell did not become ready.")
+        proc.kill()
+        sys.exit(1)
 
     temp_dir = tempfile.gettempdir()
+    ppm_boot = os.path.join(temp_dir, "qemu_screen_boot.ppm")
     ppm_vlc = os.path.join(temp_dir, "qemu_screen_vlc.ppm")
+
+    time.sleep(1.0)
+    # Refresh compositor frame
+    proc.stdin.write("\ncompositor render\n")
+    proc.stdin.flush()
+    time.sleep(0.5)
+
+    # Capture 1: Boot Desktop
+    print("Capturing 1: Native Desktop on Boot...")
+    f.write(json.dumps({"execute": "screendump", "arguments": {"filename": ppm_boot}}) + "\r\n")
+    f.flush()
+    resp1 = f.readline()
+    print("QMP Response 1:", resp1.strip())
 
     # Send launch vlc command
     print("Launching native VLC media player ('launch vlc')...")
     proc.stdin.write("launch vlc\n")
     proc.stdin.flush()
-    time.sleep(2.5)
+    time.sleep(3.0)
 
     # Force compositor render pass
     proc.stdin.write("compositor render\n")
     proc.stdin.flush()
     time.sleep(0.5)
 
-    # Capture Screen
-    print("Capturing Live Desktop with VLC Media Player...")
+    # Capture 2: Live Desktop with VLC Media Player
+    print("Capturing 2: Live Desktop with VLC Media Player...")
     f.write(json.dumps({"execute": "screendump", "arguments": {"filename": ppm_vlc}}) + "\r\n")
     f.flush()
-    resp = f.readline()
-    print("QMP Response:", resp.strip())
+    resp2 = f.readline()
+    print("QMP Response 2:", resp2.strip())
 
     # Shutdown QEMU cleanly
     f.write(json.dumps({"execute": "quit"}) + "\r\n")
     f.flush()
     try:
-        proc.wait(timeout=3)
+        proc.wait(timeout=4)
     except Exception:
         proc.kill()
 
     out_dir = Path("build/screenshots")
     out_dir.mkdir(parents=True, exist_ok=True)
+    png_boot = out_dir / "purple_desktop.png"
     png_vlc = out_dir / "purple_vlc_player.png"
+
+    if os.path.exists(ppm_boot):
+        ppm_to_png(ppm_boot, str(png_boot))
+        try: os.remove(ppm_boot)
+        except: pass
+        print(f"[OK] Saved desktop screenshot: {png_boot}")
 
     if os.path.exists(ppm_vlc):
         ppm_to_png(ppm_vlc, str(png_vlc))

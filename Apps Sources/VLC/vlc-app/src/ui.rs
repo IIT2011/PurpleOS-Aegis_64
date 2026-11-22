@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! VLC Media Player UI Renderer in Pure Rust.
+//! VLC Media Player UI Renderer in Pure Rust with Hardware Acceleration Badge.
 
 pub struct VlcUi {
     pub width: u32,
@@ -18,6 +18,83 @@ impl VlcUi {
             let row = (cy * self.width) as usize;
             for cx in x..x_end {
                 buf[row + cx as usize] = color;
+            }
+        }
+    }
+
+    pub fn draw_char_3x5(&self, buf: &mut [u32], x: u32, y: u32, ch: char, color: u32) {
+        let rows: [u8; 5] = match ch.to_ascii_uppercase() {
+            'A' => [0b111, 0b101, 0b111, 0b101, 0b101],
+            'B' => [0b110, 0b101, 0b110, 0b101, 0b110],
+            'C' => [0b111, 0b100, 0b100, 0b100, 0b111],
+            'D' => [0b110, 0b101, 0b101, 0b101, 0b110],
+            'E' => [0b111, 0b100, 0b110, 0b100, 0b111],
+            'F' => [0b111, 0b100, 0b110, 0b100, 0b100],
+            'G' => [0b111, 0b100, 0b101, 0b101, 0b111],
+            'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
+            'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
+            'J' => [0b001, 0b001, 0b001, 0b101, 0b111],
+            'K' => [0b101, 0b110, 0b100, 0b110, 0b101],
+            'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
+            'M' => [0b101, 0b111, 0b101, 0b101, 0b101],
+            'N' => [0b110, 0b101, 0b101, 0b101, 0b101],
+            'O' => [0b111, 0b101, 0b101, 0b101, 0b111],
+            'P' => [0b111, 0b101, 0b111, 0b100, 0b100],
+            'Q' => [0b111, 0b101, 0b101, 0b111, 0b001],
+            'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
+            'S' => [0b111, 0b100, 0b111, 0b001, 0b111],
+            'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
+            'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
+            'V' => [0b101, 0b101, 0b101, 0b101, 0b010],
+            'W' => [0b101, 0b101, 0b101, 0b111, 0b101],
+            'X' => [0b101, 0b101, 0b010, 0b101, 0b101],
+            'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
+            'Z' => [0b111, 0b001, 0b010, 0b100, 0b111],
+            '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
+            '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
+            '2' => [0b111, 0b001, 0b111, 0b100, 0b111],
+            '3' => [0b111, 0b001, 0b111, 0b001, 0b111],
+            '4' => [0b101, 0b101, 0b111, 0b001, 0b001],
+            '5' => [0b111, 0b100, 0b111, 0b001, 0b111],
+            '6' => [0b111, 0b100, 0b111, 0b101, 0b111],
+            '7' => [0b111, 0b001, 0b010, 0b010, 0b010],
+            '8' => [0b111, 0b101, 0b111, 0b101, 0b111],
+            '9' => [0b111, 0b101, 0b111, 0b001, 0b111],
+            ':' => [0b000, 0b010, 0b000, 0b010, 0b000],
+            '-' => [0b000, 0b000, 0b111, 0b000, 0b000],
+            '[' => [0b110, 0b100, 0b100, 0b100, 0b110],
+            ']' => [0b011, 0b001, 0b001, 0b001, 0b011],
+            '/' => [0b001, 0b001, 0b010, 0b100, 0b100],
+            _ => [0b000, 0b000, 0b000, 0b000, 0b000],
+        };
+
+        for (ry, &row_bits) in rows.iter().enumerate() {
+            let py = y + ry as u32;
+            if py >= self.height {
+                continue;
+            }
+            for rx in 0..3 {
+                let px = x + rx as u32;
+                if px >= self.width {
+                    continue;
+                }
+                if (row_bits & (1 << (2 - rx))) != 0 {
+                    buf[(py * self.width + px) as usize] = color;
+                }
+            }
+        }
+    }
+
+    pub fn draw_text(&self, buf: &mut [u32], mut x: u32, y: u32, text: &str, color: u32) {
+        for ch in text.chars() {
+            if ch == ' ' {
+                x += 3;
+            } else {
+                self.draw_char_3x5(buf, x, y, ch, color);
+                x += 4;
+            }
+            if x >= self.width {
+                break;
             }
         }
     }
@@ -120,6 +197,8 @@ impl VlcUi {
         volume: f32,
         _time_ms: i64,
         pcm: &[i16],
+        is_hw: bool,
+        hw_desc: &str,
     ) {
         // Acrylic dark background
         buf.fill(0xFF14141Eu32);
@@ -129,6 +208,24 @@ impl VlcUi {
 
         // Mini cone in titlebar
         self.draw_cone(buf, 20, 18, 2);
+
+        // Title text
+        self.draw_text(buf, 38, 15, "VLC MEDIA PLAYER", 0xFFE0E0F0);
+
+        // Hardware Acceleration Status Badge in Titlebar
+        let badge_w = 175u32;
+        let badge_x = self.width.saturating_sub(badge_w + 12);
+        if is_hw {
+            // Neon cyan / teal hardware acceleration pill
+            self.draw_rect(buf, badge_x, 9, badge_w, 18, 0xFF0D3248u32);
+            self.draw_rect(buf, badge_x, 9, 3, 18, 0xFF00E5FFu32); // Glowing edge
+            self.draw_text(buf, badge_x + 8, 15, "HW ACCEL: ", 0xFF00E5FFu32);
+            self.draw_text(buf, badge_x + 60, 15, hw_desc, 0xFFFFFFFFu32);
+        } else {
+            // Subtle gray software fallback pill
+            self.draw_rect(buf, badge_x, 9, badge_w, 18, 0xFF282838u32);
+            self.draw_text(buf, badge_x + 8, 15, "HW ACCEL: OFF", 0xFF888899u32);
+        }
 
         // Control Toolbar
         let bar_y = self.height - 60;
@@ -162,6 +259,7 @@ impl VlcUi {
         self.draw_rect(buf, vol_x, vol_y, 100, 4, 0xFF2E2E3Eu32);
         let vol_fill = ((100.0 * (volume / 2.0).clamp(0.0, 1.0))) as u32;
         self.draw_rect(buf, vol_x, vol_y, vol_fill, 4, 0xFFF07000u32);
+        self.draw_text(buf, vol_x - 30, bar_y + 35, "VOL", 0xFF9999AA);
 
         // Big VLC Cone in center
         let center_x = (self.width / 2) as i32;

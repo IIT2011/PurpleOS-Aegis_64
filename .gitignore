@@ -49,3 +49,6 @@ checkpoints/**/*report*.md
 checkpoints/**/*PROGRESS*.md
 checkpoints/**/source-snapshot.tar.gz
 TESTING.md
+
+*.wav
+build/screenshots/tests/

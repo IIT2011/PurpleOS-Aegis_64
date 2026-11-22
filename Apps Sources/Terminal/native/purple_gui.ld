@@ -1,0 +1,1 @@
+../../../sdk/gui/purple_gui.ld

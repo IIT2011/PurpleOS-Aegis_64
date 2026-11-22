@@ -777,7 +777,14 @@ pub extern "C" fn purple_terminal_main() -> ! {
             y: 0,
             detail: 0,
         };
-        while syscall(0x1105, window, &mut event as *mut Event as u64, 0) == 1 {
+        loop {
+            let res = syscall(0x1105, window, &mut event as *mut Event as u64, 0);
+            if res < 0 {
+                exit(0);
+            }
+            if res == 0 {
+                break;
+            }
             match event.kind {
                 1 => {
                     let down = event.detail & 1 != 0;
@@ -931,7 +938,10 @@ pub extern "C" fn purple_terminal_main() -> ! {
                     pressed = false;
                     dirty = true;
                 }
-                4 => exit(0),
+                4 => {
+                    syscall(0x1103, window, 0, 0);
+                    exit(0);
+                }
                 5 | 6 => dirty = true,
                 _ => (),
             }

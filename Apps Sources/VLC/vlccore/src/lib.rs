@@ -21,6 +21,7 @@ pub mod stream;
 pub mod aout;
 pub mod vout;
 pub mod player;
+pub mod hw_accel;
 
 pub use tick::VlcTick;
 pub use fourcc::FourCC;
@@ -31,6 +32,7 @@ pub use stream::{MemoryStream, StreamError, VlcStream};
 pub use aout::AudioOutput;
 pub use vout::{VideoOutput, VideoPicture};
 pub use player::{PlayerState, VlcPlayer};
+pub use hw_accel::{HardwareAccelerator, HwAccelType, HwCapabilities, HwSurface};
 
 #[cfg(test)]
 mod tests {
